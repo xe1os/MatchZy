@@ -10,13 +10,20 @@ public static class GrenadeFunctions
 
     public static bool IsLinux => RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
 
+    public static MemoryFunctionWithReturn<IntPtr, IntPtr, IntPtr, IntPtr, IntPtr, int, int, CSmokeGrenadeProjectile>?
+        CSmokeGrenadeProjectile_CreateFunc = IsLinux
+            ? new(
+                "55 4C 89 C1 48 89 E5 41 57 49 89 FF 41 56 45 89 CE 41 55 4D 89 C5 41 54 53 48 83 EC 58 48 89 55 88 48 89 F2 48 89 FE 48 8D 3D ? ? ? ? E8 ? ? ? ? 48 89 C3 E8 ? ? ? ? 41 0F B7 F6"
+            )
+            : null;
+
     public static MemoryFunctionWithReturn<IntPtr, IntPtr, IntPtr, IntPtr, IntPtr, int, CHEGrenadeProjectile>
         CHEGrenadeProjectile_CreateFunc = new(
             IsLinux
-                ? "55 4C 89 C1 48 89 E5 41 57 49 89 D7"
+                ? "55 4C 89 C1 48 89 E5 41 57 49 89 FF 41 56 49 89 D6 48 89 F2 48 89 FE 41 55 48 8D 3D ? ? ? ? 4D 89 C5 41 54 45 89 CC 53 48 81 EC ? ? ? ? E8 ? ? ? ? F3 0F 10 05"
                 : "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 50 48 8B AC 24 80 00 00 00 49 8B F8"
         );
-    
+
     public static MemoryFunctionWithReturn<IntPtr, IntPtr, IntPtr, IntPtr, IntPtr, int, CMolotovProjectile>
         CMolotovProjectile_CreateFunc = new(
             IsLinux
@@ -27,7 +34,7 @@ public static class GrenadeFunctions
     public static MemoryFunctionWithReturn<IntPtr, IntPtr, IntPtr, IntPtr, IntPtr, int, CDecoyProjectile>
         CDecoyProjectile_CreateFunc = new(
             IsLinux
-                ? "55 4C 89 C1 48 89 E5 41 57 45 89 CF 41 56 49 89 D6 48 89 F2 48 89 FE 41 55 49 89 FD 41 54 48 8D 3D ?? ?? ?? ?? 4D 89 C4 53 48 83 EC ?? E8 ?? ?? ?? ?? 45 31 C0"
+                ? "55 4C 89 C1 48 89 E5 41 57 45 89 CF 41 56 49 89 FE 41 55 49 89 D5 48 89 F2 48 89 FE 41 54 48 8D 3D ? ? ? ? 4D 89 C4 53 48 83 EC ? E8 ? ? ? ? 45 31 C0"
                 : "48 8B C4 55 56 48 81 EC 68 01 00 00"
         );
 }

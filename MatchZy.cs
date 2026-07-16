@@ -181,6 +181,7 @@ namespace MatchZy
                 { ".throw", OnRethrowCommand },
                 { ".rethrow", OnRethrowCommand },
                 { ".rt", OnRethrowCommand },
+                { ".grt", OnGlobalRethrowCommand },
                 { ".throwsmoke", OnRethrowSmokeCommand },
                 { ".rethrowsmoke", OnRethrowSmokeCommand },
                 { ".thrownade", OnRethrowGrenadeCommand },

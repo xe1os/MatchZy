@@ -121,7 +121,8 @@ namespace MatchZy
         Dictionary<int, List<GrenadeThrownData>> lastGrenadesData = new();
         Dictionary<int, Dictionary<string, GrenadeThrownData>> nadeSpecificLastGrenadeData = new();
         Dictionary<int, DateTime> lastGrenadeThrownTime = new();
-        Dictionary<int, DateTime> lastNativeRethrowTime = new();
+        Dictionary<int, DateTime> lastRethrowCommandTime = new();
+        Dictionary<int, DateTime> lastGlobalRethrowCommandTime = new();
         Dictionary<int, PlayerPracticeTimer> playerTimers = new();
         Dictionary<int, PlayerLocationData> savedPlayerLocationData = new();
 
@@ -1333,7 +1334,13 @@ namespace MatchZy
                 return;
             }
             GrenadeThrownData grenadeThrown = nadeSpecificLastGrenadeData[userId][nadeType];
-            AddTimer(grenadeThrown.Delay, () => grenadeThrown.Throw(player));
+            AddTimer(grenadeThrown.Delay, () =>
+            {
+                if (IsPlayerValid(player) && player.UserId == userId)
+                {
+                    grenadeThrown.Throw(player);
+                }
+            });
         }
 
         public void HandleBackCommand(CCSPlayerController player, string number)
@@ -1390,7 +1397,13 @@ namespace MatchZy
                     {
                         positionNumber -= 1;
                         GrenadeThrownData grenadeThrown = lastGrenadesData[userId][positionNumber];
-                        AddTimer(grenadeThrown.Delay, () => grenadeThrown.Throw(player));
+                        AddTimer(grenadeThrown.Delay, () =>
+                        {
+                            if (IsPlayerValid(player) && player.UserId == userId)
+                            {
+                                grenadeThrown.Throw(player);
+                            }
+                        });
                         // PrintToPlayerChat(player, $"Throwing grenade of history position: {positionNumber+1}/{lastGrenadesData[userId].Count}");
                         PrintToPlayerChat(player, Localizer["matchzy.pm.throwgrenadehistory", $"{positionNumber + 1}/{lastGrenadesData[userId].Count}"]);
                     }
@@ -1455,13 +1468,42 @@ namespace MatchZy
             }
 
             DateTime now = DateTime.UtcNow;
-            if (lastNativeRethrowTime.TryGetValue(userId, out DateTime lastRethrow) &&
+            if (lastRethrowCommandTime.TryGetValue(userId, out DateTime lastRethrow) &&
                 now - lastRethrow < TimeSpan.FromMilliseconds(500))
             {
                 return;
             }
 
-            lastNativeRethrowTime[userId] = now;
+            GrenadeThrownData lastGrenade = lastGrenadesData[userId].Last();
+            CCSPlayerController validPlayer = player;
+
+            lastRethrowCommandTime[userId] = now;
+            AddTimer(lastGrenade.Delay, () =>
+            {
+                if (IsPlayerValid(validPlayer) && validPlayer.UserId == userId)
+                {
+                    lastGrenade.Throw(validPlayer);
+                }
+            });
+        }
+
+        [ConsoleCommand("css_grt", "Globally rethrows the last grenade thrown on the server")]
+        public void OnGlobalRethrowCommand(CCSPlayerController? player, CommandInfo? command)
+        {
+            if (!isPractice || !IsPlayerValid(player) || !player!.UserId.HasValue) return;
+
+            int userId = player.UserId.Value;
+            DateTime now = DateTime.UtcNow;
+            if (lastGlobalRethrowCommandTime.TryGetValue(userId, out DateTime lastRethrow) &&
+                now - lastRethrow < TimeSpan.FromMilliseconds(500))
+            {
+                return;
+            }
+
+            lastGlobalRethrowCommandTime[userId] = now;
+
+            // This is intentionally the fixed, server-global Valve command. Keep it
+            // separate from .rt/.rethrow, which use the requesting player's history.
             Server.ExecuteCommand("sv_rethrow_last_grenade");
         }
 

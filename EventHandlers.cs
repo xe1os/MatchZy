@@ -79,8 +79,10 @@ public partial class MatchZy
         {
             CCSPlayerController? player = @event.Userid;
 
-            if (!IsPlayerValid(player)) return HookResult.Continue;
-            if (!player!.UserId.HasValue) return HookResult.Continue;
+            // The controller can already be invalid by the time this event is handled.
+            // UserId is still the key for all session-scoped practice data, so clear it
+            // even when the pawn/controller can no longer be used.
+            if (player == null || !player.UserId.HasValue) return HookResult.Continue;
             int userId = player.UserId.Value;
 
             if (playerReadyStatus.ContainsKey(userId))
@@ -105,6 +107,8 @@ public partial class MatchZy
             noFlashList.Remove(userId);
             lastGrenadesData.Remove(userId);
             nadeSpecificLastGrenadeData.Remove(userId);
+            lastRethrowCommandTime.Remove(userId);
+            lastGlobalRethrowCommandTime.Remove(userId);
 
             return HookResult.Continue;
         }
@@ -235,6 +239,7 @@ public partial class MatchZy
                 Vector position = new(projectile.AbsOrigin!.X, projectile.AbsOrigin.Y, projectile.AbsOrigin.Z);
                 QAngle angle = new(projectile.AbsRotation!.X, projectile.AbsRotation.Y, projectile.AbsRotation.Z);
                 Vector velocity = new(projectile.AbsVelocity.X, projectile.AbsVelocity.Y, projectile.AbsVelocity.Z);
+                QAngle angularVelocity = new(projectile.AngVelocity.X, projectile.AngVelocity.Y, projectile.AngVelocity.Z);
                 string nadeType = Constants.ProjectileTypeMap[entity.Entity.DesignerName];
 
                 if (!lastGrenadesData.ContainsKey(client)) {
@@ -249,7 +254,8 @@ public partial class MatchZy
                 GrenadeThrownData lastGrenadeThrown = new(
                     position, 
                     angle, 
-                    velocity, 
+                    velocity,
+                    angularVelocity,
                     player.PlayerPawn.Value.CBodyComponent!.SceneNode!.AbsOrigin, 
                     player.PlayerPawn.Value.EyeAngles,
                     nadeType,
