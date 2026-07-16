@@ -11,12 +11,14 @@ adds the following focused features, fixes, and changes.
 
 - Added `.grt` as an explicit practice-mode command for CS2's server-global grenade rethrow.
 - Added `.slp` to save the player's current position and view direction, and `.tlp` to return that player to their last saved location.
+- Added interactive T and CT spawn beams in practice mode; stand at a green beam and press `E` to teleport to that exact spawn.
 
 ## BugFixes
 
 - `.rt`, `.rethrow`, and `.throw` now use the requesting player's own utility history during multiplayer practice sessions.
 - Smoke and HE grenade rethrows now recreate the correct projectile, follow the recorded trajectory, and detonate normally.
 - Player teleports no longer apply camera pitch or roll to the player model.
+- Nade deletion commands now resolve multi-word lineup queries consistently with `.loadnade`.
 
 ## Changes
 

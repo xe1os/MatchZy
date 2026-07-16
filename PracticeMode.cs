@@ -125,6 +125,14 @@ namespace MatchZy
         Dictionary<int, DateTime> lastGlobalRethrowCommandTime = new();
         Dictionary<int, PlayerPracticeTimer> playerTimers = new();
         Dictionary<int, PlayerLocationData> savedPlayerLocationData = new();
+        readonly List<CBeam> spawnMarkerBeams = new();
+
+        const float SpawnBeamInteractionHalfSize = 18.0f;
+        const float SpawnBeamHeight = 100.0f / 3.0f;
+        const float SpawnBeamWidth = 10.0f;
+        const float SpawnBeamVerticalTolerance = 36.0f;
+
+        bool spawnBeamsVisible;
 
         public Dictionary<byte, List<Position>> spawnsData = GetEmptySpawnsData();
 
@@ -176,8 +184,9 @@ namespace MatchZy
                 Server.ExecuteCommand("""mp_t_default_grenades "weapon_molotov weapon_hegrenade weapon_smokegrenade weapon_flashbang weapon_decoy"; mp_t_default_primary "weapon_ak47"; mp_warmup_online_enabled "true"; mp_warmup_pausetimer "1"; mp_warmup_start; bot_quota_mode fill; mp_solid_teammates 2; mp_autoteambalance false; mp_teammates_are_enemies false; buddha 1; buddha_ignore_bots 1; buddha_reset_hp 100;""");
             }
             GetSpawns();
+            ShowSpawnBeams();
             PrintToAllChat($"Practice mode loaded!");
-            Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawn, .ctspawn, .tspawn, .bestspawn, .worstspawn");
+            Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawn, .ctspawn, .tspawn, .bestspawn, .worstspawn, .showspawns, .hidespawns");
             Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.bot, .nobots, .crouchbot, .boost, .crouchboost");
             Server.PrintToChatAll($" {ChatColors.Green}Nades: {ChatColors.Default}.loadnade, .savenade, .importnade, .listnades");
             Server.PrintToChatAll($" {ChatColors.Green}Nade Throw: {ChatColors.Default}.rethrow, .throwindex <index>, .lastindex, .delay <number>");
@@ -400,16 +409,23 @@ namespace MatchZy
                     var savedNadesDict = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, Dictionary<string, string>>>>(existingJson)
                                         ?? new Dictionary<string, Dictionary<string, Dictionary<string, string>>>();
 
-                    // Check if the lineup exists for the given SteamID and name
-                    if (savedNadesDict.ContainsKey(playerSteamID) && savedNadesDict[playerSteamID].ContainsKey(saveNadeName))
-                    {
-                        var lineupInfo = savedNadesDict[playerSteamID][saveNadeName];
+                    string lineupQuery = saveNadeName.Trim();
 
-                        // Check if the lineup is for the current maps
-                        if (lineupInfo.ContainsKey("Map") && lineupInfo["Map"] == Server.MapName)
+                    if (savedNadesDict.TryGetValue(playerSteamID, out Dictionary<string, Dictionary<string, string>>? savedPlayerNades))
+                    {
+                        List<string> nadeNamesOnCurrentMap = savedPlayerNades
+                            .Where(n => n.Value.ContainsKey("Map") && n.Value["Map"] == Server.MapName)
+                            .Select(n => n.Key)
+                            .ToList();
+
+                        // Resolve the name exactly as .loadnade does, so a full
+                        // multi-word query selects the same saved lineup.
+                        string nearestName = StringSimilarity.FindNearestName(lineupQuery, nadeNamesOnCurrentMap);
+
+                        if (nadeNamesOnCurrentMap.Contains(nearestName) && savedPlayerNades.ContainsKey(nearestName))
                         {
                             // Remove the specified lineup
-                            savedNadesDict[playerSteamID].Remove(saveNadeName);
+                            savedPlayerNades.Remove(nearestName);
 
                             // Serialize the updated dictionary back to JSON
                             string updatedJson = JsonSerializer.Serialize(savedNadesDict, new JsonSerializerOptions { WriteIndented = true });
@@ -417,20 +433,14 @@ namespace MatchZy
                             // Write the updated JSON content back to the file
                             File.WriteAllText(savednadesPath, updatedJson);
 
-                            // ReplyToUserCommand(player, $"Lineup '{saveNadeName}' deleted successfully.");
-                            ReplyToUserCommand(player, Localizer["matchzy.pm.lineupdeletesuccess", saveNadeName]);
-                        }
-                        else
-                        {
-                            // ReplyToUserCommand(player, $"Lineup '{saveNadeName}' not found on the current map!");
-                            ReplyToUserCommand(player, Localizer["matchzy.pm.nadenotfoundonmap", saveNadeName]);
+                            // ReplyToUserCommand(player, $"Lineup '{nearestName}' deleted successfully.");
+                            ReplyToUserCommand(player, Localizer["matchzy.pm.lineupdeletesuccess", nearestName]);
+                            return;
                         }
                     }
-                    else
-                    {
-                        // ReplyToUserCommand(player, $"Lineup '{saveNadeName}' not found!");
-                        ReplyToUserCommand(player, Localizer["matchzy.pm.lineupnotfound", saveNadeName]);
-                    }
+
+                    // ReplyToUserCommand(player, $"Lineup '{lineupQuery}' not found!");
+                    ReplyToUserCommand(player, Localizer["matchzy.pm.lineupnotfound", lineupQuery]);
                 }
                 catch (JsonException ex)
                 {
@@ -718,35 +728,99 @@ namespace MatchZy
             }
         }
 
-        public void ShowSpawnBeam(Position spawn, Color color)
+        public void ShowSpawnBeam(Position spawn)
         {
             CBeam? beam = Utilities.CreateEntityByName<CBeam>("beam");
             if (beam == null)
             {
-                Log($"Failed to create beam for the spawn");
+                Log("Failed to create a spawn beam");
                 return;
             }
 
+            // Preserve MatchZy's proven vertical-beam setup. Horizontal beam
+            // segments are not reliably rendered by CS2 as spawn markers.
             beam.LifeState = 1;
-            beam.Width = 5;
-            beam.Render = color;
+            beam.Width = SpawnBeamWidth;
+            beam.Render = Color.Lime;
 
             beam.EndPos.X = spawn.PlayerPosition.X;
             beam.EndPos.Y = spawn.PlayerPosition.Y;
-            beam.EndPos.Z = spawn.PlayerPosition.Z + 100.0f;
+            beam.EndPos.Z = spawn.PlayerPosition.Z + SpawnBeamHeight;
 
             beam.Teleport(spawn.PlayerPosition, new QAngle(0, 0, 0), new Vector(0, 0, 0));
 
             beam.DispatchSpawn();
+            spawnMarkerBeams.Add(beam);
+        }
+
+        private void ShowSpawnBeams()
+        {
+            RemoveSpawnBeams();
+            if (spawnsData.Values.Any(list => list.Count == 0)) GetSpawns();
+
+            foreach (Position spawn in spawnsData[(byte)CsTeam.CounterTerrorist])
+            {
+                ShowSpawnBeam(spawn);
+            }
+
+            foreach (Position spawn in spawnsData[(byte)CsTeam.Terrorist])
+            {
+                ShowSpawnBeam(spawn);
+            }
+
+            spawnBeamsVisible = true;
         }
 
         public void RemoveSpawnBeams()
         {
-            var beams = Utilities.FindAllEntitiesByDesignerName<CEntityInstance>("beam");
-            foreach (var beam in beams)
+            foreach (CBeam beam in spawnMarkerBeams)
             {
-                if (beam == null) continue;
-                beam.Remove();
+                if (beam.IsValid) beam.Remove();
+            }
+
+            spawnMarkerBeams.Clear();
+            spawnBeamsVisible = false;
+        }
+
+        public void OnPlayerButtonsChanged(CCSPlayerController player, PlayerButtons pressed, PlayerButtons released)
+        {
+            if (!isPractice || !spawnBeamsVisible || !IsPlayerValid(player)) return;
+            if ((pressed & PlayerButtons.Use) == 0) return;
+
+            CCSPlayerPawn? pawn = player.PlayerPawn.Value;
+            Vector? playerPosition = pawn?.CBodyComponent?.SceneNode?.AbsOrigin;
+            if (playerPosition == null) return;
+
+            Position? selectedSpawn = null;
+            float selectedDistanceSquared = float.MaxValue;
+
+            foreach (List<Position> teamSpawns in spawnsData.Values)
+            {
+                foreach (Position spawn in teamSpawns)
+                {
+                    float deltaX = playerPosition.X - spawn.PlayerPosition.X;
+                    float deltaY = playerPosition.Y - spawn.PlayerPosition.Y;
+                    float deltaZ = playerPosition.Z - spawn.PlayerPosition.Z;
+
+                    if (MathF.Abs(deltaX) > SpawnBeamInteractionHalfSize ||
+                        MathF.Abs(deltaY) > SpawnBeamInteractionHalfSize ||
+                        MathF.Abs(deltaZ) > SpawnBeamVerticalTolerance)
+                    {
+                        continue;
+                    }
+
+                    float distanceSquared = deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
+                    if (distanceSquared < selectedDistanceSquared)
+                    {
+                        selectedDistanceSquared = distanceSquared;
+                        selectedSpawn = spawn;
+                    }
+                }
+            }
+
+            if (selectedSpawn != null)
+            {
+                selectedSpawn.Teleport(player);
             }
         }
 
@@ -1816,16 +1890,8 @@ namespace MatchZy
         public void OnShowSpawnsCommand(CCSPlayerController? player, CommandInfo? command)
         {
             if (!isPractice || !IsPlayerValid(player)) return;
-            RemoveSpawnBeams();
-            if (spawnsData.Values.Any(list => list.Count == 0)) GetSpawns();
-            foreach (Position spawn in spawnsData[(byte)CsTeam.CounterTerrorist])
-            {
-                ShowSpawnBeam(spawn, Color.Blue);
-            }
-            foreach (Position spawn in spawnsData[(byte)CsTeam.Terrorist])
-            {
-                ShowSpawnBeam(spawn, Color.Orange);
-            }
+            ShowSpawnBeams();
+            ReplyToUserCommand(player, "Spawn beams shown. Stand at a green beam and press E to teleport to that spawn.");
         }
 
         [ConsoleCommand("css_hidespawns", "Hides the highlighted spawns")]
