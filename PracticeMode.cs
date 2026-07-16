@@ -131,6 +131,7 @@ namespace MatchZy
         const float SpawnBeamHeight = 100.0f / 3.0f;
         const float SpawnBeamWidth = 10.0f;
         const float SpawnBeamVerticalTolerance = 36.0f;
+        const int MinimumCompetitiveSpawnCount = 5;
 
         bool spawnBeamsVisible;
 
@@ -147,6 +148,7 @@ namespace MatchZy
         private CounterStrikeSharp.API.Modules.Timers.Timer? collisionGroupTimer;
 
         public bool isSpawningBot;
+        private int botPresetLoadGeneration;
 
         public bool isDryRun = false;
 
@@ -187,7 +189,7 @@ namespace MatchZy
             ShowSpawnBeams();
             PrintToAllChat($"Practice mode loaded!");
             Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawn, .ctspawn, .tspawn, .bestspawn, .worstspawn, .showspawns, .hidespawns");
-            Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.bot, .nobots, .crouchbot, .boost, .crouchboost");
+            Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.bot, .nobots, .crouchbot, .boost, .crouchboost, .sbp <name>, .lbp <name>, .dbp <name>");
             Server.PrintToChatAll($" {ChatColors.Green}Nades: {ChatColors.Default}.loadnade, .savenade, .importnade, .listnades");
             Server.PrintToChatAll($" {ChatColors.Green}Nade Throw: {ChatColors.Default}.rethrow, .throwindex <index>, .lastindex, .delay <number>");
             Server.PrintToChatAll($" {ChatColors.Green}Utility & Toggles: {ChatColors.Default}.clear, .fastforward, .last, .back, .solid, .impacts, .traj");
@@ -201,35 +203,54 @@ namespace MatchZy
             // Resetting spawn data to avoid any glitches
             spawnsData = GetEmptySpawnsData();
 
-            int minPriority = 1;
+            AddCompetitiveTeamSpawns("info_player_counterterrorist", (byte)CsTeam.CounterTerrorist);
+            AddCompetitiveTeamSpawns("info_player_terrorist", (byte)CsTeam.Terrorist);
 
-            var spawnsct = Utilities.FindAllEntitiesByDesignerName<SpawnPoint>("info_player_counterterrorist");
-            foreach (var spawn in spawnsct)
-            {
-                if (spawn.IsValid && spawn.Enabled && spawn.Priority < minPriority)
-                {
-                    minPriority = spawn.Priority;
-                }
-            }
-
-            foreach (var spawn in spawnsct)
-            {
-                if (spawn.IsValid && spawn.Enabled && spawn.Priority == minPriority)
-                {
-                    spawnsData[(byte)CsTeam.CounterTerrorist].Add(new Position(spawn.CBodyComponent?.SceneNode?.AbsOrigin!, spawn.CBodyComponent?.SceneNode?.AbsRotation!));
-                }
-            }
-
-            var spawnst = Utilities.FindAllEntitiesByDesignerName<SpawnPoint>("info_player_terrorist");
-            foreach (var spawn in spawnst)
-            {
-                if (spawn.IsValid && spawn.Enabled && spawn.Priority == minPriority)
-                {
-                    spawnsData[(byte)CsTeam.Terrorist].Add(new Position(spawn.CBodyComponent?.SceneNode?.AbsOrigin!, spawn.CBodyComponent?.SceneNode?.AbsRotation!));
-                }
-            }
+            Log($"[GetSpawns] Found {spawnsData[(byte)CsTeam.CounterTerrorist].Count} CT and {spawnsData[(byte)CsTeam.Terrorist].Count} T spawn positions on {Server.MapName}");
 
             GetCoachSpawns();
+        }
+
+        private void AddCompetitiveTeamSpawns(string designerName, byte teamNum)
+        {
+            List<(int Priority, Position Position)> availableSpawns = new();
+
+            foreach (SpawnPoint spawn in Utilities.FindAllEntitiesByDesignerName<SpawnPoint>(designerName))
+            {
+                if (!spawn.IsValid || !spawn.Enabled) continue;
+
+                var sceneNode = spawn.CBodyComponent?.SceneNode;
+                Vector? origin = sceneNode?.AbsOrigin;
+                QAngle? rotation = sceneNode?.AbsRotation;
+                if (origin == null || rotation == null) continue;
+
+                availableSpawns.Add((
+                    spawn.Priority,
+                    new Position(
+                        new Vector(origin.X, origin.Y, origin.Z),
+                        new QAngle(rotation.X, rotation.Y, rotation.Z))));
+            }
+
+            if (availableSpawns.Count == 0) return;
+
+            availableSpawns = availableSpawns.OrderBy(spawn => spawn.Priority).ToList();
+            int primaryPriority = availableSpawns[0].Priority;
+
+            // The map's lowest-priority group is its primary competitive set.
+            // Preserve that complete group even when it contains more than five
+            // spawns, then use higher-priority fallbacks only to reach 5v5.
+            spawnsData[teamNum].AddRange(availableSpawns
+                .Where(spawn => spawn.Priority == primaryPriority)
+                .Select(spawn => spawn.Position));
+
+            int missingSpawns = MinimumCompetitiveSpawnCount - spawnsData[teamNum].Count;
+            if (missingSpawns > 0)
+            {
+                spawnsData[teamNum].AddRange(availableSpawns
+                    .Where(spawn => spawn.Priority > primaryPriority)
+                    .Take(missingSpawns)
+                    .Select(spawn => spawn.Position));
+            }
         }
 
         private void HandleSpawnCommand(CCSPlayerController? player, string commandArg, byte teamNum, string command)
@@ -1219,8 +1240,347 @@ namespace MatchZy
         public void OnNoBotsCommand(CCSPlayerController? player, CommandInfo? command)
         {
             if (!isPractice || player == null) return;
+            RemoveAllPracticeBots();
+        }
+
+        [ConsoleCommand("css_sbp", "Saves all bot positions under the provided name")]
+        public void OnSaveBotPositionsCommand(CCSPlayerController? player, CommandInfo command)
+        {
+            HandleSaveBotPositionsCommand(player, command.ArgString);
+        }
+
+        [ConsoleCommand("css_lbp", "Loads all bot positions saved under the provided name")]
+        public void OnLoadBotPositionsCommand(CCSPlayerController? player, CommandInfo command)
+        {
+            HandleLoadBotPositionsCommand(player, command.ArgString);
+        }
+
+        [ConsoleCommand("css_dbp", "Deletes the bot positions saved under the provided name")]
+        public void OnDeleteBotPositionsCommand(CCSPlayerController? player, CommandInfo command)
+        {
+            HandleDeleteBotPositionsCommand(player, command.ArgString);
+        }
+
+        private void HandleSaveBotPositionsCommand(CCSPlayerController? player, string rawPresetName)
+        {
+            if (!isPractice || !IsPlayerValid(player)) return;
+
+            string presetName = NormalizeBotPresetName(rawPresetName);
+            if (string.IsNullOrWhiteSpace(presetName))
+            {
+                ReplyToUserCommand(player, "Usage: .sbp <name>");
+                return;
+            }
+
+            List<SavedBotPosition> savedBots = new();
+            foreach (CCSPlayerController bot in Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller"))
+            {
+                if (!IsPlayerValid(bot) || !bot.IsBot || bot.IsHLTV || bot.PlayerPawn.Value == null) continue;
+                if (bot.TeamNum != (byte)CsTeam.Terrorist && bot.TeamNum != (byte)CsTeam.CounterTerrorist) continue;
+
+                CCSPlayerPawn pawn = bot.PlayerPawn.Value;
+                Vector? origin = pawn.CBodyComponent?.SceneNode?.AbsOrigin;
+                if (origin == null) continue;
+
+                QAngle viewAngle = pawn.EyeAngles;
+                bool crouched = (pawn.Flags & (uint)PlayerFlags.FL_DUCKING) != 0;
+                if (pawn.MovementServices != null)
+                {
+                    CCSPlayer_MovementServices movementServices = new(pawn.MovementServices.Handle);
+                    crouched = crouched || movementServices.DuckAmount > 0.5f;
+                }
+
+                savedBots.Add(new SavedBotPosition
+                {
+                    TeamNum = bot.TeamNum,
+                    PositionX = origin.X,
+                    PositionY = origin.Y,
+                    PositionZ = origin.Z,
+                    ViewPitch = viewAngle.X,
+                    ViewYaw = viewAngle.Y,
+                    ViewRoll = viewAngle.Z,
+                    Crouched = crouched
+                });
+            }
+
+            if (savedBots.Count == 0)
+            {
+                ReplyToUserCommand(player, "No bots are available to save.");
+                return;
+            }
+
+            try
+            {
+                string presetsPath = GetSavedBotPositionsPath();
+                Directory.CreateDirectory(Path.GetDirectoryName(presetsPath)!);
+                Dictionary<string, Dictionary<string, SavedBotPositionPreset>> presets = ReadSavedBotPositionPresets(presetsPath);
+                string playerSteamId = player!.SteamID.ToString();
+
+                if (!presets.ContainsKey(playerSteamId))
+                {
+                    presets[playerSteamId] = new Dictionary<string, SavedBotPositionPreset>();
+                }
+
+                presets[playerSteamId][presetName] = new SavedBotPositionPreset
+                {
+                    Map = Server.MapName,
+                    Bots = savedBots
+                };
+
+                File.WriteAllText(presetsPath, JsonSerializer.Serialize(presets, new JsonSerializerOptions { WriteIndented = true }));
+                ReplyToUserCommand(player, $"Saved {savedBots.Count} bot position(s) as '{presetName}'.");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                Log($"[SaveBotPositions] Failed: {ex.Message}");
+                ReplyToUserCommand(player, "Unable to save the bot positions.");
+            }
+        }
+
+        private void HandleLoadBotPositionsCommand(CCSPlayerController? player, string rawPresetName)
+        {
+            if (!isPractice || !IsPlayerValid(player)) return;
+
+            string presetQuery = NormalizeBotPresetName(rawPresetName);
+            if (string.IsNullOrWhiteSpace(presetQuery))
+            {
+                ReplyToUserCommand(player, "Usage: .lbp <name>");
+                return;
+            }
+
+            try
+            {
+                string presetsPath = GetSavedBotPositionsPath();
+                Dictionary<string, Dictionary<string, SavedBotPositionPreset>> presets = ReadSavedBotPositionPresets(presetsPath);
+                string playerSteamId = player!.SteamID.ToString();
+
+                if (!presets.TryGetValue(playerSteamId, out Dictionary<string, SavedBotPositionPreset>? playerPresets))
+                {
+                    ReplyToUserCommand(player, $"Bot-position preset '{presetQuery}' was not found.");
+                    return;
+                }
+
+                List<string> presetsOnCurrentMap = playerPresets
+                    .Where(preset => preset.Value.Map == Server.MapName)
+                    .Select(preset => preset.Key)
+                    .ToList();
+                string resolvedPresetName = StringSimilarity.FindNearestName(presetQuery, presetsOnCurrentMap);
+
+                if (!presetsOnCurrentMap.Contains(resolvedPresetName) ||
+                    !playerPresets.TryGetValue(resolvedPresetName, out SavedBotPositionPreset? preset) ||
+                    preset.Bots.Count == 0)
+                {
+                    ReplyToUserCommand(player, $"Bot-position preset '{presetQuery}' was not found on {Server.MapName}.");
+                    return;
+                }
+
+                List<SavedBotPosition> botsToRestore = preset.Bots
+                    .Where(bot => bot.TeamNum == (byte)CsTeam.Terrorist || bot.TeamNum == (byte)CsTeam.CounterTerrorist)
+                    .ToList();
+                if (botsToRestore.Count == 0)
+                {
+                    ReplyToUserCommand(player, $"Bot-position preset '{resolvedPresetName}' contains no valid bots.");
+                    return;
+                }
+
+                int loadGeneration = BeginBotPresetLoad();
+                ReplyToUserCommand(player, $"Loading {botsToRestore.Count} bot position(s) from '{resolvedPresetName}'.");
+                AddTimer(0.3f, () => RestoreNextSavedBot(player, resolvedPresetName, botsToRestore, 0, loadGeneration));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                Log($"[LoadBotPositions] Failed: {ex.Message}");
+                ReplyToUserCommand(player, "Unable to load the bot positions.");
+            }
+        }
+
+        private void HandleDeleteBotPositionsCommand(CCSPlayerController? player, string rawPresetName)
+        {
+            if (!isPractice || !IsPlayerValid(player)) return;
+
+            string presetQuery = NormalizeBotPresetName(rawPresetName);
+            if (string.IsNullOrWhiteSpace(presetQuery))
+            {
+                ReplyToUserCommand(player, "Usage: .dbp <name>");
+                return;
+            }
+
+            try
+            {
+                string presetsPath = GetSavedBotPositionsPath();
+                Dictionary<string, Dictionary<string, SavedBotPositionPreset>> presets = ReadSavedBotPositionPresets(presetsPath);
+                string playerSteamId = player!.SteamID.ToString();
+
+                if (!presets.TryGetValue(playerSteamId, out Dictionary<string, SavedBotPositionPreset>? playerPresets))
+                {
+                    ReplyToUserCommand(player, $"Bot-position preset '{presetQuery}' was not found.");
+                    return;
+                }
+
+                List<string> presetsOnCurrentMap = playerPresets
+                    .Where(preset => preset.Value.Map == Server.MapName)
+                    .Select(preset => preset.Key)
+                    .ToList();
+                string resolvedPresetName = StringSimilarity.FindNearestName(presetQuery, presetsOnCurrentMap);
+
+                if (!presetsOnCurrentMap.Contains(resolvedPresetName) || !playerPresets.Remove(resolvedPresetName))
+                {
+                    ReplyToUserCommand(player, $"Bot-position preset '{presetQuery}' was not found on {Server.MapName}.");
+                    return;
+                }
+
+                if (playerPresets.Count == 0)
+                {
+                    presets.Remove(playerSteamId);
+                }
+
+                File.WriteAllText(presetsPath, JsonSerializer.Serialize(presets, new JsonSerializerOptions { WriteIndented = true }));
+                ReplyToUserCommand(player, $"Deleted bot-position preset '{resolvedPresetName}'.");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                Log($"[DeleteBotPositions] Failed: {ex.Message}");
+                ReplyToUserCommand(player, "Unable to delete the bot-position preset.");
+            }
+        }
+
+        private int BeginBotPresetLoad()
+        {
+            int loadGeneration = ++botPresetLoadGeneration;
+            Server.ExecuteCommand("bot_kick");
+            Server.ExecuteCommand("bot_quota 0");
+            Server.ExecuteCommand("bot_stop 1");
+            Server.ExecuteCommand("bot_freeze 1");
+            Server.ExecuteCommand("bot_zombie 1");
+            pracUsedBots = new Dictionary<int, Dictionary<string, object>>();
+            isSpawningBot = true;
+            return loadGeneration;
+        }
+
+        private void RestoreNextSavedBot(CCSPlayerController owner, string presetName, List<SavedBotPosition> savedBots, int index, int loadGeneration)
+        {
+            if (loadGeneration != botPresetLoadGeneration) return;
+            if (!IsPlayerValid(owner))
+            {
+                isSpawningBot = false;
+                return;
+            }
+
+            if (index >= savedBots.Count)
+            {
+                isSpawningBot = false;
+                ReplyToUserCommand(owner, $"Loaded {savedBots.Count} bot position(s) from '{presetName}'.");
+                return;
+            }
+
+            SavedBotPosition savedBot = savedBots[index];
+            HashSet<int> existingBotUserIds = Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
+                .Where(bot => bot.IsValid && bot.IsBot && bot.UserId.HasValue)
+                .Select(bot => bot.UserId!.Value)
+                .ToHashSet();
+
+            string teamName = savedBot.TeamNum == (byte)CsTeam.Terrorist ? "T" : "CT";
+            Server.ExecuteCommand($"bot_join_team {teamName}");
+            Server.ExecuteCommand(savedBot.TeamNum == (byte)CsTeam.Terrorist ? "bot_add_t" : "bot_add_ct");
+
+            AddTimer(0.25f, () => TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, existingBotUserIds, 0));
+        }
+
+        private void TryPlaceRestoredBot(
+            CCSPlayerController owner,
+            string presetName,
+            List<SavedBotPosition> savedBots,
+            int index,
+            int loadGeneration,
+            HashSet<int> existingBotUserIds,
+            int attempt)
+        {
+            if (loadGeneration != botPresetLoadGeneration) return;
+
+            SavedBotPosition savedBot = savedBots[index];
+            List<CCSPlayerController> newBots = Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
+                .Where(bot => IsPlayerValid(bot) && bot.IsBot && !bot.IsHLTV && bot.UserId.HasValue && !existingBotUserIds.Contains(bot.UserId.Value))
+                .ToList();
+            CCSPlayerController? restoredBot = newBots.FirstOrDefault(bot => bot.TeamNum == savedBot.TeamNum);
+
+            if (restoredBot == null)
+            {
+                if (attempt < 12)
+                {
+                    AddTimer(0.1f, () => TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, existingBotUserIds, attempt + 1));
+                    return;
+                }
+
+                isSpawningBot = false;
+                ReplyToUserCommand(owner, $"Unable to create bot {index + 1}/{savedBots.Count} from '{presetName}'.");
+                return;
+            }
+
+            foreach (CCSPlayerController extraBot in newBots)
+            {
+                if (extraBot.UserId != restoredBot.UserId)
+                {
+                    Server.ExecuteCommand($"kickid {extraBot.UserId!.Value}");
+                }
+            }
+
+            int restoredBotUserId = restoredBot.UserId!.Value;
+            Position restoredPosition = savedBot.ToPosition();
+            pracUsedBots[restoredBotUserId] = new Dictionary<string, object>
+            {
+                { "controller", restoredBot },
+                { "position", restoredPosition },
+                { "owner", owner },
+                { "crouchstate", savedBot.Crouched }
+            };
+
+            CCSPlayerPawn? pawn = restoredBot.PlayerPawn.Value;
+            if (pawn != null && pawn.IsValid)
+            {
+                pawn.Teleport(restoredPosition.PlayerPosition, restoredPosition.PlayerAngle, new Vector(0, 0, 0));
+                if (savedBot.Crouched)
+                {
+                    pawn.Flags |= (uint)PlayerFlags.FL_DUCKING;
+                    if (pawn.MovementServices != null)
+                    {
+                        CCSPlayer_MovementServices movementServices = new(pawn.MovementServices.Handle);
+                        AddTimer(0.1f, () => movementServices.DuckAmount = 1);
+                    }
+                    if (pawn.Bot != null)
+                    {
+                        AddTimer(0.2f, () => pawn.Bot.IsCrouching = true);
+                    }
+                }
+            }
+
+            AddTimer(0.2f, () => RestoreNextSavedBot(owner, presetName, savedBots, index + 1, loadGeneration));
+        }
+
+        private void RemoveAllPracticeBots()
+        {
+            botPresetLoadGeneration++;
+            isSpawningBot = false;
             Server.ExecuteCommand("bot_kick");
             pracUsedBots = new Dictionary<int, Dictionary<string, object>>();
+        }
+
+        private static string NormalizeBotPresetName(string rawPresetName)
+        {
+            return string.Join(" ", rawPresetName.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim().Trim('"');
+        }
+
+        private static Dictionary<string, Dictionary<string, SavedBotPositionPreset>> ReadSavedBotPositionPresets(string presetsPath)
+        {
+            if (!File.Exists(presetsPath)) return new Dictionary<string, Dictionary<string, SavedBotPositionPreset>>();
+
+            string json = File.ReadAllText(presetsPath);
+            return JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, SavedBotPositionPreset>>>(json)
+                ?? new Dictionary<string, Dictionary<string, SavedBotPositionPreset>>();
+        }
+
+        private static string GetSavedBotPositionsPath()
+        {
+            return Path.Join(Server.GameDirectory, "csgo/cfg/MatchZy/savedbotpositions.json");
         }
 
         [ConsoleCommand("css_ff", "Fast forwards the timescale to 20 seconds")]
@@ -1891,7 +2251,7 @@ namespace MatchZy
         {
             if (!isPractice || !IsPlayerValid(player)) return;
             ShowSpawnBeams();
-            ReplyToUserCommand(player, "Spawn beams shown. Stand at a green beam and press E to teleport to that spawn.");
+            ReplyToUserCommand(player, $"Spawn beams shown: {spawnsData[(byte)CsTeam.CounterTerrorist].Count} CT and {spawnsData[(byte)CsTeam.Terrorist].Count} T. Stand at a green beam and press E to teleport.");
         }
 
         [ConsoleCommand("css_hidespawns", "Hides the highlighted spawns")]

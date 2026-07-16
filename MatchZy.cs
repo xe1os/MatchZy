@@ -14,7 +14,7 @@ namespace MatchZy
 
         public override string ModuleName => "MatchZy";
 
-        public override string ModuleVersion => "0.8.15-refined.1.0.2";
+        public override string ModuleVersion => "0.8.15-refined.1.0.3";
 
         public override string ModuleAuthor => "WD- (https://github.com/shobhit-pathak/)";
 
@@ -453,6 +453,18 @@ namespace MatchZy
                 if (message.StartsWith(".loadnade") || message.StartsWith(".ln"))
                 {
                     HandleLoadNadeCommand(player, messageCommandArg);
+                }
+                if (messageCommand.Equals(".sbp", StringComparison.OrdinalIgnoreCase))
+                {
+                    HandleSaveBotPositionsCommand(player, messageCommandArg);
+                }
+                if (messageCommand.Equals(".lbp", StringComparison.OrdinalIgnoreCase))
+                {
+                    HandleLoadBotPositionsCommand(player, messageCommandArg);
+                }
+                if (messageCommand.Equals(".dbp", StringComparison.OrdinalIgnoreCase))
+                {
+                    HandleDeleteBotPositionsCommand(player, messageCommandArg);
                 }
                 if (message.StartsWith(".spawn"))
                 {
