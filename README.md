@@ -12,9 +12,6 @@ be documented here later.
 
 Details will be added later.
 
-For the current fork base, implemented fixes, build instructions, and
-installation notes, see [FORK_RELEASE_NOTES.md](FORK_RELEASE_NOTES.md).
-
 ## Upstream project
 
 The original project and its history are available at
