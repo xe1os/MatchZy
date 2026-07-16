@@ -8,13 +8,13 @@ using CounterStrikeSharp.API.Modules.Events;
 
 namespace MatchZy
 {
-    [MinimumApiVersion(227)]
+    [MinimumApiVersion(371)]
     public partial class MatchZy : BasePlugin
     {
 
         public override string ModuleName => "MatchZy";
 
-        public override string ModuleVersion => "0.8.15";
+        public override string ModuleVersion => "0.8.15-refined.1.0.0";
 
         public override string ModuleAuthor => "WD- (https://github.com/shobhit-pathak/)";
 

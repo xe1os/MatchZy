@@ -38,8 +38,7 @@ public class GrenadeThrownData
 
     public void LoadPosition(CCSPlayerController player)
     {
-        if (player == null || player.PlayerPawn.Value == null) return;
-        player.PlayerPawn.Value.Teleport(PlayerPosition, PlayerAngle, new Vector(0, 0, 0));
+        PlayerTeleport.TeleportSafely(player, PlayerPosition, PlayerAngle);
     }
 
     public void Throw(CCSPlayerController player)
@@ -49,14 +48,9 @@ public class GrenadeThrownData
 		{
 			case "smoke":
 			{
-				grenadeEntity = GrenadeFunctions.CSmokeGrenadeProjectile_CreateFunc.Invoke(
-					Position.Handle,
-					Angle.Handle,
-					Velocity.Handle,
-					Velocity.Handle,
-					IntPtr.Zero,
-					ItemIndex,
-					(int)player.Team);
+				grenadeEntity = Utilities.CreateEntityByName<CSmokeGrenadeProjectile>("smokegrenade_projectile");
+				if (grenadeEntity == null) return;
+				grenadeEntity.DispatchSpawn();
 				break;
 			}
 			case "molotov":
@@ -104,7 +98,7 @@ public class GrenadeThrownData
 				break;
 		}
 
-		if (grenadeEntity != null && grenadeEntity.DesignerName != "smokegrenade_projectile")
+		if (grenadeEntity != null)
 		{
 			grenadeEntity.InitialPosition.X = Position.X;
 			grenadeEntity.InitialPosition.Y = Position.Y;

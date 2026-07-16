@@ -34,7 +34,7 @@ namespace MatchZy
 
         public void Teleport(CCSPlayerController player)
         {
-            player!.PlayerPawn.Value!.Teleport(PlayerPosition, PlayerAngle, new Vector(0, 0, 0));
+            PlayerTeleport.TeleportSafely(player, PlayerPosition, PlayerAngle);
         }
 
         public override bool Equals(object? obj)
@@ -121,6 +121,7 @@ namespace MatchZy
         Dictionary<int, List<GrenadeThrownData>> lastGrenadesData = new();
         Dictionary<int, Dictionary<string, GrenadeThrownData>> nadeSpecificLastGrenadeData = new();
         Dictionary<int, DateTime> lastGrenadeThrownTime = new();
+        Dictionary<int, DateTime> lastNativeRethrowTime = new();
         Dictionary<int, PlayerPracticeTimer> playerTimers = new();
         Dictionary<int, PlayerLocationData> savedPlayerLocationData = new();
 
@@ -232,7 +233,7 @@ namespace MatchZy
                     // Adjusting the spawnNumber according to the array index.
                     spawnNumber -= 1;
                     if (spawnsData.ContainsKey(teamNum) && spawnsData[teamNum].Count <= spawnNumber) return;
-                    player!.PlayerPawn.Value!.Teleport(spawnsData[teamNum][spawnNumber].PlayerPosition, spawnsData[teamNum][spawnNumber].PlayerAngle, new Vector(0, 0, 0));
+                    PlayerTeleport.TeleportSafely(player, spawnsData[teamNum][spawnNumber].PlayerPosition, spawnsData[teamNum][spawnNumber].PlayerAngle);
                     // ReplyToUserCommand(player, $"Moved to spawn: {spawnNumber+1}/{spawnsData[teamNum].Count}");
                     ReplyToUserCommand(player, Localizer["matchzy.pm.movedtospawn", $"{spawnNumber + 1}/{spawnsData[teamNum].Count}"]);
                 }
@@ -645,7 +646,7 @@ namespace MatchZy
                                     QAngle loadedPlayerAngle = new QAngle(float.Parse(angArray[0]), float.Parse(angArray[1]), float.Parse(angArray[2]));
 
                                     // Teleport player
-                                    player!.PlayerPawn!.Value!.Teleport(loadedPlayerPos, loadedPlayerAngle, new Vector(0, 0, 0));
+                                    PlayerTeleport.TeleportSafely(player, loadedPlayerPos, loadedPlayerAngle);
 
                                     // Change player inv slot
                                     switch (lineupInfo["Type"])
@@ -1065,7 +1066,13 @@ namespace MatchZy
         private static void ElevatePlayer(CCSPlayerController? player)
         {
             if (player == null || !player.IsValid || !player.PlayerPawn.IsValid || player.PlayerPawn.Value == null) return;
-            player.PlayerPawn.Value.Teleport(new Vector(player.PlayerPawn.Value.CBodyComponent!.SceneNode!.AbsOrigin.X, player.PlayerPawn.Value.CBodyComponent!.SceneNode!.AbsOrigin.Y, player.PlayerPawn.Value.CBodyComponent!.SceneNode!.AbsOrigin.Z + 80.0f), player.PlayerPawn.Value.EyeAngles, new Vector(0, 0, 0));
+            PlayerTeleport.TeleportSafely(
+                player,
+                new Vector(
+                    player.PlayerPawn.Value.CBodyComponent!.SceneNode!.AbsOrigin.X,
+                    player.PlayerPawn.Value.CBodyComponent.SceneNode.AbsOrigin.Y,
+                    player.PlayerPawn.Value.CBodyComponent.SceneNode.AbsOrigin.Z + 80.0f),
+                player.PlayerPawn.Value.EyeAngles);
         }
 
         [GameEventHandler]
@@ -1438,7 +1445,7 @@ namespace MatchZy
         public void OnRethrowCommand(CCSPlayerController? player, CommandInfo? command)
         {
 
-            if (!isPractice || player == null || !player.UserId.HasValue) return;
+            if (!isPractice || !IsPlayerValid(player) || !player!.UserId.HasValue) return;
             int userId = player.UserId.Value;
             if (!lastGrenadesData.ContainsKey(userId) || lastGrenadesData[userId].Count <= 0)
             {
@@ -1446,8 +1453,16 @@ namespace MatchZy
                 PrintToPlayerChat(player, Localizer["matchzy.pm.notthrownnade"]);
                 return;
             }
-            GrenadeThrownData lastGrenade = lastGrenadesData[userId].Last();
-            AddTimer(lastGrenade.Delay, () => lastGrenade.Throw(player));
+
+            DateTime now = DateTime.UtcNow;
+            if (lastNativeRethrowTime.TryGetValue(userId, out DateTime lastRethrow) &&
+                now - lastRethrow < TimeSpan.FromMilliseconds(500))
+            {
+                return;
+            }
+
+            lastNativeRethrowTime[userId] = now;
+            Server.ExecuteCommand("sv_rethrow_last_grenade");
         }
 
         [ConsoleCommand("css_savepos", "Saves the player location")]
@@ -1793,7 +1808,7 @@ namespace MatchZy
                     closestIndex = index;
                 }
             }
-            player!.PlayerPawn.Value!.Teleport(teamSpawns[closestIndex].PlayerPosition, teamSpawns[closestIndex].PlayerAngle, new Vector(0, 0, 0));
+            PlayerTeleport.TeleportSafely(player, teamSpawns[closestIndex].PlayerPosition, teamSpawns[closestIndex].PlayerAngle);
         }
 
         public void TeleportPlayerToWorstSpawn(CCSPlayerController player, byte teamNum)
@@ -1813,7 +1828,7 @@ namespace MatchZy
                     farthestIndex = index;
                 }
             }
-            player!.PlayerPawn.Value!.Teleport(teamSpawns[farthestIndex].PlayerPosition, teamSpawns[farthestIndex].PlayerAngle, new Vector(0, 0, 0));
+            PlayerTeleport.TeleportSafely(player, teamSpawns[farthestIndex].PlayerPosition, teamSpawns[farthestIndex].PlayerAngle);
         }
 
         // Todo: Implement timer2 when we have OnPlayerRunCmd in CS#. Using OnTick would be its alternative, but it would be very expensive and not worth it.

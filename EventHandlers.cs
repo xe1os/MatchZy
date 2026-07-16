@@ -170,10 +170,16 @@ public partial class MatchZy
                 if (coach.PlayerPawn.Value?.LifeState != (byte)LifeState_t.LIFE_ALIVE) continue;
 
                 Position coachPosition = new(coach.PlayerPawn.Value!.CBodyComponent!.SceneNode!.AbsOrigin, coach.PlayerPawn.Value!.CBodyComponent!.SceneNode!.AbsRotation);
-                coach!.PlayerPawn.Value!.Teleport(new Vector(coachPosition.PlayerPosition.X, coachPosition.PlayerPosition.Y, coachPosition.PlayerPosition.Z + 20.0f), coachPosition.PlayerAngle, new Vector(0, 0, 0));
+                PlayerTeleport.TeleportSafely(
+                    coach,
+                    new Vector(coachPosition.PlayerPosition.X, coachPosition.PlayerPosition.Y, coachPosition.PlayerPosition.Z + 20.0f),
+                    coachPosition.PlayerAngle);
                 AddTimer(1.5f, () =>
                 {
-                    coach!.PlayerPawn.Value!.Teleport(new Vector(coachPosition.PlayerPosition.X, coachPosition.PlayerPosition.Y, coachPosition.PlayerPosition.Z + 20.0f), coachPosition.PlayerAngle, new Vector(0, 0, 0));
+                    PlayerTeleport.TeleportSafely(
+                        coach,
+                        new Vector(coachPosition.PlayerPosition.X, coachPosition.PlayerPosition.Y, coachPosition.PlayerPosition.Z + 20.0f),
+                        coachPosition.PlayerAngle);
                     CsTeam oldTeam = GetCoachTeam(coach);
                     coach.ChangeTeam(CsTeam.Spectator);
                     AddTimer(0.01f, () => coach.ChangeTeam(oldTeam));
