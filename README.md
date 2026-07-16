@@ -5,12 +5,21 @@ MatchZy-Refined is a fork of
 the original project.
 
 This fork includes all functionality available in the forked repository and
-adds further features, refinements, and fixes. The fork-specific additions will
-be documented here later.
+adds the following focused features, fixes, and changes.
 
-## Additional features and fixes
+## Features
 
-Details will be added later.
+- Added `.grt` as an explicit practice-mode command for CS2's server-global grenade rethrow.
+
+## BugFixes
+
+- `.rt`, `.rethrow`, and `.throw` now use the requesting player's own utility history during multiplayer practice sessions.
+- Smoke and HE grenade rethrows now recreate the correct projectile, follow the recorded trajectory, and detonate normally.
+- Player teleports no longer apply camera pitch or roll to the player model.
+
+## Changes
+
+- Rethrow commands use per-player cooldowns and clear the corresponding state when a player disconnects.
 
 ## Upstream project
 
