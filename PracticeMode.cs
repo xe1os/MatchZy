@@ -183,7 +183,7 @@ namespace MatchZy
             Server.PrintToChatAll($" {ChatColors.Green}Nade Throw: {ChatColors.Default}.rethrow, .throwindex <index>, .lastindex, .delay <number>");
             Server.PrintToChatAll($" {ChatColors.Green}Utility & Toggles: {ChatColors.Default}.clear, .fastforward, .last, .back, .solid, .impacts, .traj");
             // On new line to prevent text cutting off
-            Server.PrintToChatAll($" {ChatColors.Green}Utility & Toggles: {ChatColors.Default}.savepos, .loadpos");
+            Server.PrintToChatAll($" {ChatColors.Green}Locations: {ChatColors.Default}.slp, .tlp, .savepos, .loadpos");
             Server.PrintToChatAll($" {ChatColors.Green}Sides & Others: {ChatColors.Default}.ct, .t, .spec, .fas, .god, .dryrun, .break, .exitprac");
         }
 
@@ -1507,6 +1507,7 @@ namespace MatchZy
             Server.ExecuteCommand("sv_rethrow_last_grenade");
         }
 
+        [ConsoleCommand("css_slp", "Saves the player's current location and view direction")]
         [ConsoleCommand("css_savepos", "Saves the player location")]
         public void OnSavePosCommand(CCSPlayerController? player, CommandInfo? command)
         {
@@ -1522,6 +1523,7 @@ namespace MatchZy
             PrintToPlayerChat(player, Localizer["matchzy.pm.savepos"]);
         }
 
+        [ConsoleCommand("css_tlp", "Teleports the player to their last saved location")]
         [ConsoleCommand("css_loadpos", "Loads the last saved player location")]
         public void OnLoadPosCommand(CCSPlayerController? player, CommandInfo? command)
         {

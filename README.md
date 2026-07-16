@@ -10,6 +10,7 @@ adds the following focused features, fixes, and changes.
 ## Features
 
 - Added `.grt` as an explicit practice-mode command for CS2's server-global grenade rethrow.
+- Added `.slp` to save the player's current position and view direction, and `.tlp` to return that player to their last saved location.
 
 ## BugFixes
 

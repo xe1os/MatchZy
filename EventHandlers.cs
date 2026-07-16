@@ -107,6 +107,7 @@ public partial class MatchZy
             noFlashList.Remove(userId);
             lastGrenadesData.Remove(userId);
             nadeSpecificLastGrenadeData.Remove(userId);
+            savedPlayerLocationData.Remove(userId);
             lastRethrowCommandTime.Remove(userId);
             lastGlobalRethrowCommandTime.Remove(userId);
 

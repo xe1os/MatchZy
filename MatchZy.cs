@@ -14,7 +14,7 @@ namespace MatchZy
 
         public override string ModuleName => "MatchZy";
 
-        public override string ModuleVersion => "0.8.15-refined.1.0.0";
+        public override string ModuleVersion => "0.8.15-refined.1.0.1";
 
         public override string ModuleAuthor => "WD- (https://github.com/shobhit-pathak/)";
 
@@ -202,6 +202,8 @@ namespace MatchZy
                 { ".worstctspawn", OnWorstCTSpawnCommand },
                 { ".besttspawn", OnBestTSpawnCommand },
                 { ".worsttspawn", OnWorstTSpawnCommand },
+                { ".slp", OnSavePosCommand },
+                { ".tlp", OnLoadPosCommand },
                 { ".savepos", OnSavePosCommand},
                 { ".loadpos", OnLoadPosCommand}
             };
