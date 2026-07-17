@@ -91,6 +91,8 @@ public partial class MatchZy
             if (player == null || !player.UserId.HasValue) return HookResult.Continue;
             int userId = player.UserId.Value;
 
+            CloseConfigurationMenu(userId, clearDisplay: false);
+
             if (playerReadyStatus.ContainsKey(userId))
             {
                 playerReadyStatus.Remove(userId);

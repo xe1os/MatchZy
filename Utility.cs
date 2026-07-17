@@ -1399,7 +1399,8 @@ namespace MatchZy
 
             if (isPractice)
             {
-                player!.PrintToChat($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawn, .ctspawn, .tspawn, .bestspawn, .worstspawn");
+                player!.PrintToChat($" {ChatColors.Green}Configuration: {ChatColors.Default}.menu");
+                player.PrintToChat($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawn, .ctspawn, .tspawn, .bestspawn, .worstspawn");
                 player.PrintToChat($" {ChatColors.Green}Spawns: {ChatColors.Default}.showspawns, .hidespawns");
                 player.PrintToChat($" {ChatColors.Green}Bots: {ChatColors.Default}.bot, .nobots, .botshoot <true/false>, .botreactiontime <0-1000>, .botrespawn <true/false>, .botlifereg <true/false>, .crouchbot, .boost, .crouchboost");
                 player.PrintToChat($" {ChatColors.Green}Nades: {ChatColors.Default}.loadnade, .savenade, .importnade, .listnades");

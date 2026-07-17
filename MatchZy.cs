@@ -14,7 +14,7 @@ namespace MatchZy
 
         public override string ModuleName => "MatchZy";
 
-        public override string ModuleVersion => "0.8.15-refined.1.0.8";
+        public override string ModuleVersion => "0.8.15-refined.1.0.9";
 
         public override string ModuleAuthor => "WD- (https://github.com/shobhit-pathak/)";
 
@@ -146,6 +146,7 @@ namespace MatchZy
                 { ".reload_admins", OnReloadAdmins },
                 { ".tactics", OnPracCommand },
                 { ".prac", OnPracCommand },
+                { ".menu", OnConfigurationMenuCommand },
                 { ".showspawns", OnShowSpawnsCommand },
                 { ".hidespawns", OnHideSpawnsCommand },
                 { ".dryrun", OnDryRunCommand },
@@ -225,8 +226,10 @@ namespace MatchZy
             RegisterListener<Listeners.OnEntitySpawned>(OnEntitySpawnedHandler);
             RegisterListener<Listeners.OnPlayerButtonsChanged>(OnPlayerButtonsChanged);
             RegisterListener<Listeners.OnTick>(LockShootingBotsInPlace);
+            RegisterListener<Listeners.OnTick>(DisplayConfigurationMenus);
             RegisterEventHandler<EventPlayerTeam>((@event, info) => {
                 CCSPlayerController? player = @event.Userid;
+                CloseConfigurationMenu(player);
                 if (!IsPlayerValid(player)) return HookResult.Continue;
 
                 if (matchzyTeam1.coach.Contains(player!) || matchzyTeam2.coach.Contains(player!)) {
@@ -328,6 +331,7 @@ namespace MatchZy
             // });
 
             RegisterListener<Listeners.OnMapStart>(mapName => { 
+                CloseAllConfigurationMenus();
                 AddTimer(1.0f, () => {
                     if (!isMatchSetup)
                     {
@@ -339,12 +343,15 @@ namespace MatchZy
                 });
             });
 
+            RegisterListener<Listeners.OnMapEnd>(() => CloseAllConfigurationMenus());
+
             // RegisterListener<Listeners.OnMapEnd>(() => {
             //     Log($"[Listeners.OnMapEnd] Resetting match!");
             //     ResetMatch();
             // });
 
             RegisterEventHandler<EventPlayerDeath>((@event, info) => {
+                CloseConfigurationMenu(@event.Userid);
                 // Setting money back to 16000 when a player dies in warmup
                 var player = @event.Userid;
                 if (!isWarmup) return HookResult.Continue;
@@ -598,6 +605,12 @@ namespace MatchZy
             RegisterEventHandler<EventDecoyStarted>(EventDecoyDetonateHandler);
 
             Console.WriteLine($"[{ModuleName} {ModuleVersion} LOADED] MatchZy by WD- (https://github.com/shobhit-pathak/)");
+        }
+
+        public override void Unload(bool hotReload)
+        {
+            CloseAllConfigurationMenus();
+            RemoveSpawnMarkers();
         }
     }
 }

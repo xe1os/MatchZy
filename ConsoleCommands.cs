@@ -169,7 +169,7 @@ namespace MatchZy
             }
 
             if (!isPractice) return;
-            SideSwitchCommand(player, CsTeam.Terrorist);
+            SwitchPracticePlayerSide(player, CsTeam.Terrorist);
         }
 
         [ConsoleCommand("css_ct", "Switches team to Counter-Terrorist")]
@@ -191,7 +191,7 @@ namespace MatchZy
             }
 
             if (!isPractice) return;
-            SideSwitchCommand(player, CsTeam.CounterTerrorist);
+            SwitchPracticePlayerSide(player, CsTeam.CounterTerrorist);
         }
 
         [ConsoleCommand("css_tech", "Pause the match")]
