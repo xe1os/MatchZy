@@ -22,6 +22,7 @@ public partial class MatchZy
     private enum ConfigurationMenuScreen
     {
         Root,
+        BotPlacement,
         BotConfiguration,
         PlayerConfiguration,
         Spawns,
@@ -30,6 +31,7 @@ public partial class MatchZy
 
     private enum ConfigurationMenuRowId
     {
+        BotPlacement,
         BotConfiguration,
         PlayerConfiguration,
         Spawns,
@@ -37,6 +39,11 @@ public partial class MatchZy
         StartPractice,
         Close,
         Back,
+        PlaceBot,
+        PlaceCrouchBot,
+        BoostBot,
+        CrouchBoostBot,
+        ClearAllBots,
         BotShooting,
         BotReactionTime,
         BotRespawn,
@@ -279,6 +286,15 @@ public partial class MatchZy
         return session.Screen switch
         {
             ConfigurationMenuScreen.Root => BuildRootConfigurationRows(),
+            ConfigurationMenuScreen.BotPlacement =>
+            [
+                new(ConfigurationMenuRowId.Back, MenuText("matchzy.menu.back")),
+                new(ConfigurationMenuRowId.PlaceBot, MenuText("matchzy.menu.place_bot")),
+                new(ConfigurationMenuRowId.PlaceCrouchBot, MenuText("matchzy.menu.place_crouch_bot")),
+                new(ConfigurationMenuRowId.BoostBot, MenuText("matchzy.menu.boost_bot")),
+                new(ConfigurationMenuRowId.CrouchBoostBot, MenuText("matchzy.menu.crouch_boost_bot")),
+                new(ConfigurationMenuRowId.ClearAllBots, MenuText("matchzy.menu.clear_all_bots"))
+            ],
             ConfigurationMenuScreen.BotConfiguration =>
             [
                 new(ConfigurationMenuRowId.Back, MenuText("matchzy.menu.back")),
@@ -303,6 +319,7 @@ public partial class MatchZy
 
         if (isPractice)
         {
+            rows.Add(new(ConfigurationMenuRowId.BotPlacement, MenuText("matchzy.menu.bot_placement")));
             rows.Add(new(ConfigurationMenuRowId.BotConfiguration, MenuText("matchzy.menu.bot_configuration")));
             rows.Add(new(ConfigurationMenuRowId.PlayerConfiguration, MenuText("matchzy.menu.player_configuration")));
             rows.Add(new(ConfigurationMenuRowId.Spawns, MenuText("matchzy.menu.spawns")));
@@ -428,6 +445,11 @@ public partial class MatchZy
             ConfigurationMenuRowId.HumanLifeRegeneration => SetPracticeHumanLifeRegeneration(player, right),
             ConfigurationMenuRowId.GodMode => ConfigurePracticeHumanGodMode(player, right),
             ConfigurationMenuRowId.FlashProtection => SetPracticeFlashProtection(player, right),
+            ConfigurationMenuRowId.PlaceBot => ExecuteConfigurationMenuAction(() => OnBotCommand(player, null)),
+            ConfigurationMenuRowId.PlaceCrouchBot => ExecuteConfigurationMenuAction(() => OnCrouchBotCommand(player, null)),
+            ConfigurationMenuRowId.BoostBot => ExecuteConfigurationMenuAction(() => OnBoostBotCommand(player, null)),
+            ConfigurationMenuRowId.CrouchBoostBot => ExecuteConfigurationMenuAction(() => OnCrouchBoostBotCommand(player, null)),
+            ConfigurationMenuRowId.ClearAllBots => ExecuteConfigurationMenuAction(() => OnNoBotsCommand(player, null)),
             ConfigurationMenuRowId.StorePosition => SavePracticePlayerPosition(player),
             ConfigurationMenuRowId.TeleportPosition => LoadPracticePlayerPosition(player),
             ConfigurationMenuRowId.DeletePosition => DeletePracticePlayerPosition(player),
@@ -444,6 +466,7 @@ public partial class MatchZy
             ConfigurationMenuRowId.GlobalRethrow => RethrowGlobalLastUtility(player),
             ConfigurationMenuRowId.StartPractice => StartPracticeFromConfigurationMenu(player),
             ConfigurationMenuRowId.Back => ChangeConfigurationMenuScreen(session, ConfigurationMenuScreen.Root),
+            ConfigurationMenuRowId.BotPlacement => ChangeConfigurationMenuScreen(session, ConfigurationMenuScreen.BotPlacement),
             ConfigurationMenuRowId.BotConfiguration => ChangeConfigurationMenuScreen(session, ConfigurationMenuScreen.BotConfiguration),
             ConfigurationMenuRowId.PlayerConfiguration => ChangeConfigurationMenuScreen(session, ConfigurationMenuScreen.PlayerConfiguration),
             ConfigurationMenuRowId.Spawns => ChangeConfigurationMenuScreen(session, ConfigurationMenuScreen.Spawns),
@@ -459,6 +482,7 @@ public partial class MatchZy
         }
 
         if (changed && row.Id is not ConfigurationMenuRowId.Back and
+            not ConfigurationMenuRowId.BotPlacement and
             not ConfigurationMenuRowId.BotConfiguration and
             not ConfigurationMenuRowId.PlayerConfiguration and
             not ConfigurationMenuRowId.Spawns and
@@ -484,6 +508,12 @@ public partial class MatchZy
         // feedback, and practice-start side effects remain authoritative.
         OnPracCommand(player, null);
         return isPractice;
+    }
+
+    private static bool ExecuteConfigurationMenuAction(Action action)
+    {
+        action();
+        return true;
     }
 
     private bool CloseConfigurationMenuAndReport(ConfigurationMenuSession session)
@@ -621,6 +651,7 @@ public partial class MatchZy
         return session.Screen switch
         {
             ConfigurationMenuScreen.Root => MenuText("matchzy.menu.subtitle_root"),
+            ConfigurationMenuScreen.BotPlacement => MenuText("matchzy.menu.subtitle_bot_placement"),
             ConfigurationMenuScreen.BotConfiguration => MenuText("matchzy.menu.subtitle_bot"),
             ConfigurationMenuScreen.PlayerConfiguration => MenuText("matchzy.menu.subtitle_player"),
             ConfigurationMenuScreen.Spawns => string.Format(

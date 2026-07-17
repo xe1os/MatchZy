@@ -9,7 +9,7 @@ adds the following focused features, fixes, and changes.
 
 ## Features
 
-- Added `.menu` for a per-player center-screen configuration menu covering practice startup, bot settings, player settings and saved positions, spawn controls, and utility actions. Use `W`/`S` to navigate and `A`/`D` to change values or select actions.
+- Added `.menu` for a per-player center-screen configuration menu covering practice startup, bot placement and removal, bot settings, player settings and saved positions, spawn controls, and utility actions. Use `W`/`S` to navigate and `A`/`D` to change values or select actions.
 - Added `.grt` as an explicit practice-mode command for CS2's server-global grenade rethrow.
 - Added `.slp` to save the player's current position and view direction, `.tlp` to return to it, and `.dlp` to delete it.
 - Added interactive T and CT spawn outlines in practice mode; stand inside a flat gold square and press `E` to teleport to that exact spawn. The outlines remain visible above shallow water, and `.showspawns` and `.hidespawns` control their visibility.
