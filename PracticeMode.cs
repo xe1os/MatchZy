@@ -128,13 +128,13 @@ namespace MatchZy
         Dictionary<int, PlayerLocationData> savedPlayerLocationData = new();
         readonly List<CBeam> spawnMarkerBeams = new();
 
-        const float SpawnBeamInteractionHalfSize = 18.0f;
-        const float SpawnBeamHeight = 100.0f / 3.0f;
-        const float SpawnBeamWidth = 10.0f;
-        const float SpawnBeamVerticalTolerance = 36.0f;
+        const float SpawnMarkerHalfSize = 18.0f;
+        const float SpawnMarkerHeightOffset = 8.0f;
+        const float SpawnMarkerWidth = 3.0f;
+        const float SpawnMarkerVerticalTolerance = 36.0f;
         const int MinimumCompetitiveSpawnCount = 5;
 
-        bool spawnBeamsVisible;
+        bool spawnMarkersVisible;
 
         public Dictionary<byte, List<Position>> spawnsData = GetEmptySpawnsData();
 
@@ -226,9 +226,10 @@ namespace MatchZy
             // elimination wins. The normal round timeout is enforced by the plugin.
             Server.ExecuteCommand("mp_ignore_round_win_conditions 1");
             GetSpawns();
-            ShowSpawnBeams();
+            ShowSpawnMarkers();
             PrintToAllChat($"Practice mode loaded!");
-            Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawn, .ctspawn, .tspawn, .bestspawn, .worstspawn, .showspawns, .hidespawns");
+            Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawn, .ctspawn, .tspawn, .bestspawn, .worstspawn");
+            Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.showspawns, .hidespawns");
             Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.bot, .nobots, .botshoot <true/false>, .botreactiontime <0-1000>, .botrespawn <true/false>, .botlifereg <true/false>, .crouchbot, .boost, .crouchboost");
             Server.PrintToChatAll($" {ChatColors.Green}Nades: {ChatColors.Default}.loadnade, .savenade, .importnade, .listnades");
             Server.PrintToChatAll($" {ChatColors.Green}Nade Throw: {ChatColors.Default}.rethrow, .throwindex <index>, .lastindex, .delay <number>");
@@ -790,50 +791,65 @@ namespace MatchZy
             }
         }
 
-        public void ShowSpawnBeam(Position spawn)
+        private void CreateSpawnMarkerEdge(Vector start, Vector end)
         {
             CBeam? beam = Utilities.CreateEntityByName<CBeam>("beam");
             if (beam == null)
             {
-                Log("Failed to create a spawn beam");
+                Log("Failed to create a spawn marker edge");
                 return;
             }
 
-            // Preserve MatchZy's proven vertical-beam setup. Horizontal beam
-            // segments are not reliably rendered by CS2 as spawn markers.
             beam.LifeState = 1;
-            beam.Width = SpawnBeamWidth;
-            beam.Render = Color.Lime;
+            beam.Width = SpawnMarkerWidth;
+            beam.Render = Color.Gold;
 
-            beam.EndPos.X = spawn.PlayerPosition.X;
-            beam.EndPos.Y = spawn.PlayerPosition.Y;
-            beam.EndPos.Z = spawn.PlayerPosition.Z + SpawnBeamHeight;
+            beam.EndPos.X = end.X;
+            beam.EndPos.Y = end.Y;
+            beam.EndPos.Z = end.Z;
 
-            beam.Teleport(spawn.PlayerPosition, new QAngle(0, 0, 0), new Vector(0, 0, 0));
+            beam.Teleport(start, new QAngle(0, 0, 0), new Vector(0, 0, 0));
 
             beam.DispatchSpawn();
             spawnMarkerBeams.Add(beam);
         }
 
-        private void ShowSpawnBeams()
+        public void ShowSpawnMarker(Position spawn)
         {
-            RemoveSpawnBeams();
+            float centerX = spawn.PlayerPosition.X;
+            float centerY = spawn.PlayerPosition.Y;
+            float markerZ = spawn.PlayerPosition.Z + SpawnMarkerHeightOffset;
+
+            Vector northWest = new(centerX - SpawnMarkerHalfSize, centerY + SpawnMarkerHalfSize, markerZ);
+            Vector northEast = new(centerX + SpawnMarkerHalfSize, centerY + SpawnMarkerHalfSize, markerZ);
+            Vector southEast = new(centerX + SpawnMarkerHalfSize, centerY - SpawnMarkerHalfSize, markerZ);
+            Vector southWest = new(centerX - SpawnMarkerHalfSize, centerY - SpawnMarkerHalfSize, markerZ);
+
+            CreateSpawnMarkerEdge(northWest, northEast);
+            CreateSpawnMarkerEdge(northEast, southEast);
+            CreateSpawnMarkerEdge(southEast, southWest);
+            CreateSpawnMarkerEdge(southWest, northWest);
+        }
+
+        private void ShowSpawnMarkers()
+        {
+            RemoveSpawnMarkers();
             if (spawnsData.Values.Any(list => list.Count == 0)) GetSpawns();
 
             foreach (Position spawn in spawnsData[(byte)CsTeam.CounterTerrorist])
             {
-                ShowSpawnBeam(spawn);
+                ShowSpawnMarker(spawn);
             }
 
             foreach (Position spawn in spawnsData[(byte)CsTeam.Terrorist])
             {
-                ShowSpawnBeam(spawn);
+                ShowSpawnMarker(spawn);
             }
 
-            spawnBeamsVisible = true;
+            spawnMarkersVisible = true;
         }
 
-        public void RemoveSpawnBeams()
+        public void RemoveSpawnMarkers()
         {
             foreach (CBeam beam in spawnMarkerBeams)
             {
@@ -841,12 +857,12 @@ namespace MatchZy
             }
 
             spawnMarkerBeams.Clear();
-            spawnBeamsVisible = false;
+            spawnMarkersVisible = false;
         }
 
         public void OnPlayerButtonsChanged(CCSPlayerController player, PlayerButtons pressed, PlayerButtons released)
         {
-            if (!isPractice || !spawnBeamsVisible || !IsPlayerValid(player)) return;
+            if (!isPractice || !spawnMarkersVisible || !IsPlayerValid(player)) return;
             if ((pressed & PlayerButtons.Use) == 0) return;
 
             CCSPlayerPawn? pawn = player.PlayerPawn.Value;
@@ -864,9 +880,9 @@ namespace MatchZy
                     float deltaY = playerPosition.Y - spawn.PlayerPosition.Y;
                     float deltaZ = playerPosition.Z - spawn.PlayerPosition.Z;
 
-                    if (MathF.Abs(deltaX) > SpawnBeamInteractionHalfSize ||
-                        MathF.Abs(deltaY) > SpawnBeamInteractionHalfSize ||
-                        MathF.Abs(deltaZ) > SpawnBeamVerticalTolerance)
+                    if (MathF.Abs(deltaX) > SpawnMarkerHalfSize ||
+                        MathF.Abs(deltaY) > SpawnMarkerHalfSize ||
+                        MathF.Abs(deltaZ) > SpawnMarkerVerticalTolerance)
                     {
                         continue;
                     }
@@ -3213,15 +3229,15 @@ namespace MatchZy
         public void OnShowSpawnsCommand(CCSPlayerController? player, CommandInfo? command)
         {
             if (!isPractice || !IsPlayerValid(player)) return;
-            ShowSpawnBeams();
-            ReplyToUserCommand(player, $"Spawn beams shown: {spawnsData[(byte)CsTeam.CounterTerrorist].Count} CT and {spawnsData[(byte)CsTeam.Terrorist].Count} T. Stand at a green beam and press E to teleport.");
+            ShowSpawnMarkers();
+            ReplyToUserCommand(player, $"Spawn outlines shown: {spawnsData[(byte)CsTeam.CounterTerrorist].Count} CT and {spawnsData[(byte)CsTeam.Terrorist].Count} T. Stand inside an outline and press E to teleport.");
         }
 
         [ConsoleCommand("css_hidespawns", "Hides the highlighted spawns")]
         public void OnHideSpawnsCommand(CCSPlayerController? player, CommandInfo? command)
         {
             if (!isPractice || !IsPlayerValid(player)) return;
-            RemoveSpawnBeams();
+            RemoveSpawnMarkers();
         }
 
         public void TeleportPlayerToBestSpawn(CCSPlayerController player, byte teamNum)
