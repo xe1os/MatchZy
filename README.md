@@ -21,6 +21,7 @@ adds the following focused features, fixes, and changes.
 
 ## BugFixes
 
+- Disconnecting during practice no longer leaves behind a respawned, attackable player pawn or persistent corpse; dropped C4 and equipment remain in the world.
 - `.rt`, `.rethrow`, and `.throw` now use the requesting player's own utility history during multiplayer practice sessions.
 - Smoke and HE grenade rethrows now recreate the correct projectile, follow the recorded trajectory, and detonate normally.
 - Player teleports no longer apply camera pitch or roll to the player model.
@@ -29,6 +30,8 @@ adds the following focused features, fixes, and changes.
 
 ## Changes
 
+- Practice mode allows unrestricted teammate damage without warnings, punishment, or automatic kicks.
+- Human and bot practice death respawns now use a 500 ms delay; humans use the same delay after joining a team.
 - Configuration-menu navigation uses CS2 movement actions, so the keys also move the player. Arrow keys work only when the player has bound them to the corresponding movement actions.
 - The configuration menu omits actions that cannot currently be used and keeps its five-row viewport compact so available options remain visible.
 - The configuration menu suppresses CS2's periodic white center-HUD fade while open and uses compact saved-position labels without redundant state suffixes.

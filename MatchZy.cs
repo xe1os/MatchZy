@@ -14,7 +14,7 @@ namespace MatchZy
 
         public override string ModuleName => "MatchZy";
 
-        public override string ModuleVersion => "0.8.15-refined.1.1.0";
+        public override string ModuleVersion => "0.8.15-refined.1.1.1";
 
         public override string ModuleAuthor => "WD- (https://github.com/shobhit-pathak/)";
 
@@ -218,11 +218,8 @@ namespace MatchZy
             RegisterEventHandler<EventRoundFreezeEnd>(EventRoundFreezeEndHandler);
             RegisterEventHandler<EventPlayerGivenC4>(EventPlayerGivenC4);
             RegisterEventHandler<EventPlayerDeath>(EventPlayerDeathPreHandler, hookMode: HookMode.Pre);
-            RegisterListener<Listeners.OnClientDisconnectPost>(playerSlot => { 
-               // May not be required, but just to be on safe side so that player data is properly updated in dictionaries
-               // Update: Commenting the below function as it was being called multiple times on map change.
-                // UpdatePlayersMap();
-            });
+            RegisterListener<Listeners.OnClientDisconnect>(CaptureDisconnectingPracticeHumanPawn);
+            RegisterListener<Listeners.OnClientDisconnectPost>(RemoveDisconnectedPracticeHumanPawn);
             RegisterListener<Listeners.OnEntitySpawned>(OnEntitySpawnedHandler);
             RegisterListener<Listeners.OnPlayerButtonsChanged>(OnPlayerButtonsChanged);
             RegisterListener<Listeners.OnTick>(LockShootingBotsInPlace);
@@ -243,7 +240,7 @@ namespace MatchZy
             {
                 if (isPractice && (@event.Team == (int)CsTeam.Terrorist || @event.Team == (int)CsTeam.CounterTerrorist))
                 {
-                    SchedulePracticeHumanRespawn(@event.Userid, 0.1f);
+                    SchedulePracticeHumanRespawn(@event.Userid, PracticeRespawnDelaySeconds);
                 }
                 return HookResult.Continue;
             }, HookMode.Post);

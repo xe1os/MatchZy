@@ -162,9 +162,11 @@ namespace MatchZy
         private readonly Dictionary<int, float> humanNextRegenerationTimes = new();
         private readonly Dictionary<int, (uint TargetHandle, float VisibleSince)> botReactionStates = new();
         private readonly HashSet<int> turretBotsAttacking = new();
+        private readonly Dictionary<int, uint> disconnectingPracticeHumanPawnHandles = new();
 
         private const int DefaultBotReactionTimeMs = 500;
         private const int GodModeHealth = int.MaxValue / 2;
+        private const float PracticeRespawnDelaySeconds = 0.5f;
         private const float PracticeLifeRegenerationIntervalSeconds = 0.1f;
 
         public bool isDryRun = false;
@@ -203,6 +205,8 @@ namespace MatchZy
                 Server.ExecuteCommand("""mp_weapons_allow_typecount "-1"; mp_death_drop_breachcharge "false"; mp_death_drop_defuser "false"; mp_death_drop_taser "false"; mp_drop_knife_enable "true"; mp_death_drop_grenade "0"; ammo_grenade_limit_total "5"; mp_defuser_allocation "2"; mp_free_armor "2"; mp_ct_default_grenades "weapon_incgrenade weapon_hegrenade weapon_smokegrenade weapon_flashbang weapon_decoy"; mp_ct_default_primary "weapon_m4a1";""");
                 Server.ExecuteCommand("""mp_t_default_grenades "weapon_molotov weapon_hegrenade weapon_smokegrenade weapon_flashbang weapon_decoy"; mp_t_default_primary "weapon_ak47"; mp_warmup_online_enabled "true"; mp_warmup_pausetimer "1"; mp_warmup_start; bot_quota_mode fill; mp_solid_teammates 2; mp_autoteambalance false; mp_teammates_are_enemies false;""");
             }
+            DisablePracticeTeamDamagePenalties();
+            Server.NextFrame(DisablePracticeTeamDamagePenalties);
             botRespawnEnabled = true;
             botLifeRegenerationEnabled = false;
             ResetPracticeHumanGodModes();
@@ -240,6 +244,15 @@ namespace MatchZy
             Server.PrintToChatAll($" {ChatColors.Green}Locations: {ChatColors.Default}.slp, .tlp, .dlp, .savepos, .loadpos");
             Server.PrintToChatAll($" {ChatColors.Green}Health: {ChatColors.Default}.liferegon <true/false>");
             Server.PrintToChatAll($" {ChatColors.Green}Sides & Others: {ChatColors.Default}.ct, .t, .spec, .fas, .god, .dryrun, .break, .exitprac");
+        }
+
+        private void DisablePracticeTeamDamagePenalties()
+        {
+            if (!isPractice) return;
+
+            Server.ExecuteCommand(
+                "mp_autokick 0; mp_friendlyfire 1; mp_spawnprotectiontime 0; mp_td_dmgtokick 0; " +
+                "mp_td_dmgtowarn 0; mp_td_spawndmgthreshold 0; mp_tkpunish 0");
         }
 
         public void GetSpawns()
@@ -1286,6 +1299,7 @@ namespace MatchZy
         private void RespawnPracticePlayerIfDead(CCSPlayerController player, bool requireBotRespawnEnabled)
         {
             if (!isPractice || !IsPlayerValid(player) || player.PawnIsAlive) return;
+            if (!player.IsBot && !IsConnectedPracticeHuman(player)) return;
             if (player.Team != CsTeam.Terrorist && player.Team != CsTeam.CounterTerrorist) return;
 
             if (requireBotRespawnEnabled &&
@@ -1299,7 +1313,7 @@ namespace MatchZy
 
         private void SchedulePracticeHumanRespawn(CCSPlayerController? player, float delaySeconds)
         {
-            if (!isPractice || player == null || !player.IsValid || player.IsBot || player.IsHLTV) return;
+            if (!isPractice || player == null || player.IsBot || player.IsHLTV || !IsConnectedPracticeHuman(player)) return;
 
             AddTimer(
                 delaySeconds,
@@ -1309,7 +1323,7 @@ namespace MatchZy
 
         private void TryRespawnJoinedPracticeHuman(CCSPlayerController player, int attemptsRemaining)
         {
-            if (!isPractice || !player.IsValid || player.IsBot || player.IsHLTV || player.PawnIsAlive) return;
+            if (!isPractice || player.IsBot || player.IsHLTV || !IsConnectedPracticeHuman(player) || player.PawnIsAlive) return;
             if (player.Team != CsTeam.Terrorist && player.Team != CsTeam.CounterTerrorist) return;
 
             if (IsPlayerValid(player))
@@ -1323,6 +1337,50 @@ namespace MatchZy
                 0.2f,
                 () => TryRespawnJoinedPracticeHuman(player, attemptsRemaining - 1),
                 TimerFlags.STOP_ON_MAPCHANGE);
+        }
+
+        private bool IsConnectedPracticeHuman(CCSPlayerController player)
+        {
+            if (!player.IsValid ||
+                player.Connected != PlayerConnectedState.Connected ||
+                !player.UserId.HasValue)
+            {
+                return false;
+            }
+
+            return playerData.TryGetValue(player.UserId.Value, out CCSPlayerController? connectedPlayer) &&
+                connectedPlayer.Handle == player.Handle;
+        }
+
+        private void CaptureDisconnectingPracticeHumanPawn(int playerSlot)
+        {
+            if (!isPractice) return;
+
+            CCSPlayerController? player = Utilities.GetPlayerFromSlot(playerSlot);
+            if (player == null || !player.IsValid || player.IsBot || player.IsHLTV || !player.PlayerPawn.IsValid) return;
+
+            CCSPlayerPawn? pawn = player.PlayerPawn.Value;
+            if (pawn == null || !pawn.IsValid) return;
+
+            disconnectingPracticeHumanPawnHandles[playerSlot] = pawn.EntityHandle.Raw;
+        }
+
+        private void RemoveDisconnectedPracticeHumanPawn(int playerSlot)
+        {
+            if (!disconnectingPracticeHumanPawnHandles.Remove(playerSlot, out uint pawnHandleRaw)) return;
+
+            // Wait until CS2 has completed its normal disconnect processing so C4,
+            // weapons, and other carried items can be dropped before the pawn goes away.
+            Server.NextFrame(() =>
+            {
+                CEntityHandle pawnHandle = new(pawnHandleRaw);
+                if (!pawnHandle.IsValid) return;
+
+                CEntityInstance? pawnEntity = pawnHandle.Value;
+                if (pawnEntity == null || !pawnEntity.IsValid || pawnEntity.EntityHandle.Raw != pawnHandleRaw) return;
+
+                pawnEntity.Remove();
+            });
         }
 
         private void LockShootingBotsInPlace()
@@ -1793,6 +1851,7 @@ namespace MatchZy
             practiceRoundTimeoutEnding = false;
             if (isPractice)
             {
+                DisablePracticeTeamDamagePenalties();
                 Server.ExecuteCommand("mp_ignore_round_win_conditions 1");
             }
         }
@@ -2097,7 +2156,7 @@ namespace MatchZy
             if (!player.IsBot || (isTrackedPracticeBot && botRespawnEnabled))
             {
                 AddTimer(
-                    0.1f,
+                    PracticeRespawnDelaySeconds,
                     () => RespawnPracticePlayerIfDead(player, requireBotRespawnEnabled),
                     TimerFlags.STOP_ON_MAPCHANGE);
             }

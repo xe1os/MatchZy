@@ -54,7 +54,7 @@ public partial class MatchZy
             // be controlled independently. A newly connected human therefore needs the same
             // explicit respawn path used for human deaths.
             EnableDefaultHumanLifeRegeneration(player);
-            SchedulePracticeHumanRespawn(player, 0.5f);
+            SchedulePracticeHumanRespawn(player, PracticeRespawnDelaySeconds);
             // May not be required, but just to be on safe side so that player data is properly updated in dictionaries
             // Update: Commenting the below function as it was being called multiple times on map change.
             // UpdatePlayersMap();
