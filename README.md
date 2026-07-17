@@ -10,12 +10,13 @@ adds the following focused features, fixes, and changes.
 ## Features
 
 - Added `.grt` as an explicit practice-mode command for CS2's server-global grenade rethrow.
-- Added `.slp` to save the player's current position and view direction, and `.tlp` to return that player to their last saved location.
+- Added `.slp` to save the player's current position and view direction, `.tlp` to return to it, and `.dlp` to delete it.
 - Added interactive T and CT spawn beams in practice mode; stand at a green beam and press `E` to teleport to that exact spawn.
 - Added `.sbp <name>`, `.lbp <name>`, and `.dbp <name>` for saving, restoring, and deleting named, multi-word bot-position setups with their teams, aim directions, and crouch states.
 - Added `.changemap <map-name>` so any player can switch to a validated map, with or without the `de_` prefix.
 - Added `.botshoot <true/false>` and `.botreactiontime <0-1000>` to turn practice bots into stationary, visibility-aware opponents and configure their firing delay.
 - Added `.botrespawn <true/false>` and `.botlifereg <true/false>` to control practice-bot respawning and health regeneration independently of human players.
+- Added per-player `.liferegon <true/false>` health regeneration for human players in practice mode, enabled by default and individually opt-out.
 
 ## BugFixes
 
@@ -32,6 +33,10 @@ adds the following focused features, fixes, and changes.
 - `.clear` also removes dropped weapons, grenades, and defuse kits while preserving the C4 and player-held equipment.
 - Human players retain full Kevlar during practice mode without preventing health damage.
 - Bot-position presets load more reliably when replacing existing bots and remain usable while bot respawning is disabled.
+- `.bot` always gives a newly added practice bot its initial live spawn; `.botrespawn` controls only subsequent death respawns.
+- Human practice deaths respawn at the player's `.slp` location, or at a random competitive spawn for the player's current side when no location is saved.
+- `.god` now uses real per-player damage immunity and a safe `int.MaxValue / 2` health target; `.liferegon` preserves that target while God mode is enabled.
+- Enabled `.liferegon` and `.botlifereg` restore injured players and bots on a fixed 100 ms cadence, including during continuous damage, while skipping entities already at maximum health.
 
 ## Upstream project
 

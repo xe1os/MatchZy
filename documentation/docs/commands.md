@@ -28,11 +28,12 @@ Most of the commands can also be used using ! prefix instead of . (like !ready)
 - `.worsttspawn` Teleports you to T team's furthest spawn from your current position
 - `.showspawns` Highlights all the competitive spawns
 - `.hidespawns` Hides the highlighted spawns
-- `.bot` Adds a bot on user's current position
+- `.bot` Adds and initially spawns a living bot at the user's current position. The initial spawn is independent of `.botrespawn`; that toggle controls later deaths.
 - `.botshoot <true/false>` Controls whether practice bots act as stationary turrets: they track visible enemies, shoot, and use the highest bot difficulty, but cannot move.
 - `.botreactiontime <0-1000>` Sets how many milliseconds a turret bot must continuously see its current enemy before firing. The default is `500`; `0` disables the delay.
 - `.botrespawn <true/false>` Controls whether practice bots respawn after death. Enabling it immediately respawns all currently dead practice bots. Disabling it leaves them dead without ending the round before its timer expires.
-- `.botlifereg <true/false>` Controls bot-only health regeneration. When enabled, a living practice bot returns to 100 HP after one second without taking further damage. When disabled, global regeneration settings such as `sv_regeneration_force_on 1` are ignored for practice bots. The default is `false`.
+- `.botlifereg <true/false>` Controls bot-only health regeneration. When enabled, every living injured practice bot returns to 100 HP on a fixed 100 ms cadence, including while taking continuous damage. Bots already at 100 HP are ignored. When disabled, global regeneration settings such as `sv_regeneration_force_on 1` are ignored for practice bots. The default is `false`.
+- `.liferegon <true/false>` Controls health regeneration only for the requesting human player. It defaults to `true` when practice starts and for humans joining active practice. When enabled, an injured living player returns to maximum health on a fixed 100 ms cadence, including while taking continuous damage. Players already at the applicable maximum are ignored. With `.god` enabled, the applicable maximum is the God-mode health target instead of 100 HP. Setting it to `false` disables automatic regeneration for that player until they disconnect or practice restarts, allowing normal deaths unless separately protected by `.god`.
 - `.crouchbot` Adds a crouched bot on user's current position (Alias: `.cbot`)
 - `.boost` Adds a bot on current position and boosts player on it
 - `.crouchboost` Adds a crouched bot on current position and boosts player on it
@@ -43,7 +44,7 @@ Most of the commands can also be used using ! prefix instead of . (like !ready)
 - `.fastforward` Fastforwards the server time to 20 seconds (Alias: `.ff`)
 - `.noflash` Toggles immunity for flashbang (it will still blind others with noflash disabled. Alias: `.noblind`)
 - `.dryrun` Turns on dry-run mode (Alias: `.dry`)
-- `.god` Turns on god mode
+- `.god` Toggles damage immunity for the requesting human player. While enabled, the displayed health target is `int.MaxValue / 2` (`1,073,741,823`), avoiding damage-overflow deaths. If `.liferegon` is also enabled, it restores this God-mode target instead of 100 HP.
 - `.savenade <name> <optional description>` Saves a lineup (Alias: `.sn`)
 - `.loadnade <name>` Loads a lineup (Alias: `.sn`)
 - `.deletenade <name>` Deletes a lineup from file (Alias: `.dn`)
@@ -53,6 +54,9 @@ Most of the commands can also be used using ! prefix instead of . (like !ready)
 - `.rethrow` Rethrows your last thrown grenade (Alias: `.rt`)
 - `.timer` Starts a timer immediately and stops it when you type .timer again, telling you the duration of time
 - `.last` Teleports you back to where you threw your last grenade from
+- `.slp` Saves your current position and view direction. After death, you respawn at this location.
+- `.tlp` Teleports you to your last `.slp` location.
+- `.dlp` Deletes your last `.slp` location. Without one, deaths respawn you at a random competitive spawn for your current side.
 - `.back <number>` Teleports you back to the provided position in your grenade history
 - `.delay <delay_in_seconds>` Sets a delay on your last grenade. This is only used when using .rethrow or .throwindex
 - `.throwindex <index> <optional index> <optional index>` Throws grenade of provided position(s) from your grenade thrown history. Example: `.throwindex 1 2` will throw your 1st and 2nd grenade. `.throwindex 4 5 8 9` will throw your 4th, 5th, 8th and 9th grenade (If you've added delay in grenades, they'll be thrown with their specific delay).

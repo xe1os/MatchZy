@@ -53,6 +53,7 @@ public partial class MatchZy
             // Practice disables the engine's team-wide respawn cvars so bot respawning can
             // be controlled independently. A newly connected human therefore needs the same
             // explicit respawn path used for human deaths.
+            EnableDefaultHumanLifeRegeneration(player);
             SchedulePracticeHumanRespawn(player, 0.5f);
             // May not be required, but just to be on safe side so that player data is properly updated in dictionaries
             // Update: Commenting the below function as it was being called multiple times on map change.
@@ -113,6 +114,9 @@ public partial class MatchZy
             lastGrenadesData.Remove(userId);
             nadeSpecificLastGrenadeData.Remove(userId);
             savedPlayerLocationData.Remove(userId);
+            humanGodModeEnabled.Remove(userId);
+            humanLifeRegenerationEnabled.Remove(userId);
+            humanNextRegenerationTimes.Remove(userId);
             lastRethrowCommandTime.Remove(userId);
             lastGlobalRethrowCommandTime.Remove(userId);
 

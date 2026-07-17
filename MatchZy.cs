@@ -14,7 +14,7 @@ namespace MatchZy
 
         public override string ModuleName => "MatchZy";
 
-        public override string ModuleVersion => "0.8.15-refined.1.0.6";
+        public override string ModuleVersion => "0.8.15-refined.1.0.7";
 
         public override string ModuleAuthor => "WD- (https://github.com/shobhit-pathak/)";
 
@@ -204,6 +204,7 @@ namespace MatchZy
                 { ".worsttspawn", OnWorstTSpawnCommand },
                 { ".slp", OnSavePosCommand },
                 { ".tlp", OnLoadPosCommand },
+                { ".dlp", OnDeletePosCommand },
                 { ".savepos", OnSavePosCommand},
                 { ".loadpos", OnLoadPosCommand}
             };
@@ -361,7 +362,6 @@ namespace MatchZy
                 {
                     RecordPracticeBotDamage(victim, @event.Health);
                 }
-
                 if (!IsPlayerValid(attacker) || !IsPlayerValid(victim)) return HookResult.Continue;
 
                 if (isPractice && victim!.IsBot)
@@ -496,6 +496,10 @@ namespace MatchZy
                 if (messageCommand.Equals(".botlifereg", StringComparison.OrdinalIgnoreCase))
                 {
                     HandleBotLifeRegenerationCommand(player, messageCommandArg);
+                }
+                if (messageCommand.Equals(".liferegon", StringComparison.OrdinalIgnoreCase))
+                {
+                    HandleHumanLifeRegenerationCommand(player, messageCommandArg);
                 }
                 if (messageCommand.Equals(".botreactiontime", StringComparison.OrdinalIgnoreCase))
                 {

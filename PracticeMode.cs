@@ -153,15 +153,19 @@ namespace MatchZy
         private bool botShootingEnabled;
         private bool botRespawnEnabled = true;
         private bool botLifeRegenerationEnabled;
+        private readonly HashSet<int> humanGodModeEnabled = new();
+        private readonly HashSet<int> humanLifeRegenerationEnabled = new();
         private int botReactionTimeMs = DefaultBotReactionTimeMs;
         private bool practiceRoundTimeoutEnding;
-        private readonly Dictionary<int, float> botLastDamageTimes = new();
         private readonly Dictionary<int, int> botHealthCeilings = new();
+        private float botNextRegenerationTime;
+        private readonly Dictionary<int, float> humanNextRegenerationTimes = new();
         private readonly Dictionary<int, (uint TargetHandle, float VisibleSince)> botReactionStates = new();
         private readonly HashSet<int> turretBotsAttacking = new();
 
         private const int DefaultBotReactionTimeMs = 500;
-        private const float BotLifeRegenerationDelaySeconds = 1.0f;
+        private const int GodModeHealth = int.MaxValue / 2;
+        private const float PracticeLifeRegenerationIntervalSeconds = 0.1f;
 
         public bool isDryRun = false;
 
@@ -196,17 +200,28 @@ namespace MatchZy
                 Log($"[StartWarmup] Starting Practice Mode! Practice CFG not found in {absolutePath}, using default CFG!");
                 Server.ExecuteCommand("""sv_cheats "true"; mp_force_pick_time "0"; bot_quota "0"; sv_showimpacts "1"; mp_limitteams "0"; sv_deadtalk "true"; sv_full_alltalk "true"; sv_ignoregrenaderadio "false"; mp_forcecamera "0"; sv_grenade_trajectory_prac_pipreview "true"; sv_grenade_trajectory_prac_trailtime "3"; sv_infinite_ammo "1"; weapon_auto_cleanup_time "15"; weapon_max_before_cleanup "30"; mp_buy_anywhere "1"; mp_maxmoney "9999999"; mp_startmoney "9999999";""");
                 Server.ExecuteCommand("""mp_weapons_allow_typecount "-1"; mp_death_drop_breachcharge "false"; mp_death_drop_defuser "false"; mp_death_drop_taser "false"; mp_drop_knife_enable "true"; mp_death_drop_grenade "0"; ammo_grenade_limit_total "5"; mp_defuser_allocation "2"; mp_free_armor "2"; mp_ct_default_grenades "weapon_incgrenade weapon_hegrenade weapon_smokegrenade weapon_flashbang weapon_decoy"; mp_ct_default_primary "weapon_m4a1";""");
-                Server.ExecuteCommand("""mp_t_default_grenades "weapon_molotov weapon_hegrenade weapon_smokegrenade weapon_flashbang weapon_decoy"; mp_t_default_primary "weapon_ak47"; mp_warmup_online_enabled "true"; mp_warmup_pausetimer "1"; mp_warmup_start; bot_quota_mode fill; mp_solid_teammates 2; mp_autoteambalance false; mp_teammates_are_enemies false; buddha 1; buddha_ignore_bots 1; buddha_reset_hp 100;""");
+                Server.ExecuteCommand("""mp_t_default_grenades "weapon_molotov weapon_hegrenade weapon_smokegrenade weapon_flashbang weapon_decoy"; mp_t_default_primary "weapon_ak47"; mp_warmup_online_enabled "true"; mp_warmup_pausetimer "1"; mp_warmup_start; bot_quota_mode fill; mp_solid_teammates 2; mp_autoteambalance false; mp_teammates_are_enemies false;""");
             }
             botRespawnEnabled = true;
             botLifeRegenerationEnabled = false;
+            ResetPracticeHumanGodModes();
+            humanLifeRegenerationEnabled.Clear();
             botReactionTimeMs = DefaultBotReactionTimeMs;
-            botLastDamageTimes.Clear();
             botHealthCeilings.Clear();
+            botNextRegenerationTime = 0.0f;
+            humanNextRegenerationTimes.Clear();
             ResetTurretCombatState();
             practiceRoundTimeoutEnding = false;
             // Respawns are handled per player so bot respawns can be toggled without affecting humans.
             Server.ExecuteCommand("mp_respawn_on_death_ct 0; mp_respawn_on_death_t 0");
+            // Human regeneration is managed per player by .liferegon. Disable the
+            // server-wide mechanisms so players can take lethal damage normally.
+            DisableEngineHumanHealthProtection();
+            Server.NextFrame(DisableEngineHumanHealthProtection);
+            foreach (CCSPlayerController player in Utilities.GetPlayers())
+            {
+                EnableDefaultHumanLifeRegeneration(player);
+            }
             // Bot respawning is asynchronous, so practice mode must always suppress
             // elimination wins. The normal round timeout is enforced by the plugin.
             Server.ExecuteCommand("mp_ignore_round_win_conditions 1");
@@ -219,7 +234,8 @@ namespace MatchZy
             Server.PrintToChatAll($" {ChatColors.Green}Nade Throw: {ChatColors.Default}.rethrow, .throwindex <index>, .lastindex, .delay <number>");
             Server.PrintToChatAll($" {ChatColors.Green}Utility & Toggles: {ChatColors.Default}.clear, .fastforward, .last, .back, .solid, .impacts, .traj");
             // On new line to prevent text cutting off
-            Server.PrintToChatAll($" {ChatColors.Green}Locations: {ChatColors.Default}.slp, .tlp, .savepos, .loadpos");
+            Server.PrintToChatAll($" {ChatColors.Green}Locations: {ChatColors.Default}.slp, .tlp, .dlp, .savepos, .loadpos");
+            Server.PrintToChatAll($" {ChatColors.Green}Health: {ChatColors.Default}.liferegon <true/false>");
             Server.PrintToChatAll($" {ChatColors.Green}Sides & Others: {ChatColors.Default}.ct, .t, .spec, .fas, .god, .dryrun, .break, .exitprac");
         }
 
@@ -870,27 +886,24 @@ namespace MatchZy
             }
         }
 
-        [ConsoleCommand("css_god", "Sets Infinite health for player")]
+        [ConsoleCommand("css_god", "Toggles damage immunity for the requesting human player")]
         public void OnGodCommand(CCSPlayerController? player, CommandInfo? command)
         {
-            if (!isPractice || player == null || !IsPlayerValid(player)) return;
-	    
-			int currentHP = player!.PlayerPawn!.Value!.Health;
-			
-			if(currentHP > 100)
-			{
-				player.PlayerPawn.Value.Health = 100;
-				// ReplyToUserCommand(player, $"God mode disabled!");
-                		ReplyToUserCommand(player, "God is " + Localizer["matchzy.cc.disabled"]);
-				return;
-			}
-			else
-			{
-				player.PlayerPawn.Value.Health = 2147483647; // max 32bit int
-				// ReplyToUserCommand(player, $"God mode enabled!");
-                		ReplyToUserCommand(player, "God is " + Localizer["matchzy.cc.enabled"]);
-				return;
-			}
+            if (!isPractice || !IsPlayerValid(player) || player!.IsBot || player.IsHLTV || !player.UserId.HasValue) return;
+
+            int userId = player.UserId.Value;
+            bool enabled = !humanGodModeEnabled.Contains(userId);
+            if (enabled)
+            {
+                humanGodModeEnabled.Add(userId);
+            }
+            else
+            {
+                humanGodModeEnabled.Remove(userId);
+            }
+
+            SetPracticeHumanGodMode(player, enabled, restoreHealthTarget: true);
+            ReplyToUserCommand(player, "God is " + Localizer[enabled ? "matchzy.cc.enabled" : "matchzy.cc.disabled"]);
         }
 
         [ConsoleCommand("css_prac", "Starts practice mode")]
@@ -1137,8 +1150,10 @@ namespace MatchZy
             }
 
             botLifeRegenerationEnabled = enabled;
-            botLastDamageTimes.Clear();
             botHealthCeilings.Clear();
+            botNextRegenerationTime = enabled
+                ? Server.CurrentTime + PracticeLifeRegenerationIntervalSeconds
+                : 0.0f;
 
             if (enabled)
             {
@@ -1147,6 +1162,51 @@ namespace MatchZy
 
             string status = enabled ? Localizer["matchzy.cc.enabled"] : Localizer["matchzy.cc.disabled"];
             ReplyToUserCommand(player, $"Bot health regeneration is {status}.");
+        }
+
+        [ConsoleCommand("css_liferegon", "Controls automatic health regeneration for the requesting human player")]
+        public void OnHumanLifeRegenerationCommand(CCSPlayerController? player, CommandInfo command)
+        {
+            HandleHumanLifeRegenerationCommand(player, command.ArgByIndex(1));
+        }
+
+        private void HandleHumanLifeRegenerationCommand(CCSPlayerController? player, string commandArg)
+        {
+            if (!isPractice || !IsPlayerValid(player) || player!.IsBot || player.IsHLTV || !player.UserId.HasValue) return;
+
+            if (!bool.TryParse(commandArg.Trim(), out bool enabled))
+            {
+                ReplyToUserCommand(player, Localizer["matchzy.cc.usage", ".liferegon <true/false>"]);
+                return;
+            }
+
+            int userId = player.UserId.Value;
+            humanNextRegenerationTimes.Remove(userId);
+            DisableEngineHumanHealthProtection();
+
+            if (enabled)
+            {
+                humanLifeRegenerationEnabled.Add(userId);
+                HealPracticeHuman(player);
+                humanNextRegenerationTimes[userId] = Server.CurrentTime + PracticeLifeRegenerationIntervalSeconds;
+            }
+            else
+            {
+                humanLifeRegenerationEnabled.Remove(userId);
+            }
+
+            string status = enabled ? Localizer["matchzy.cc.enabled"] : Localizer["matchzy.cc.disabled"];
+            ReplyToUserCommand(player, $"Your health regeneration is {status}.");
+        }
+
+        private void EnableDefaultHumanLifeRegeneration(CCSPlayerController? player)
+        {
+            if (!isPractice || !IsPlayerValid(player) || player!.IsBot || player.IsHLTV || !player.UserId.HasValue) return;
+
+            int userId = player.UserId.Value;
+            humanLifeRegenerationEnabled.Add(userId);
+            HealPracticeHuman(player);
+            humanNextRegenerationTimes[userId] = Server.CurrentTime + PracticeLifeRegenerationIntervalSeconds;
         }
 
         private void RespawnDeadPracticeBots()
@@ -1209,6 +1269,8 @@ namespace MatchZy
         {
             MaintainPracticeRoundTimeout();
             MaintainBotLifeRegeneration();
+            MaintainPracticeHumanGodModes();
+            MaintainHumanLifeRegeneration();
             MaintainHumanPracticeArmor();
 
             if (!isPractice || !botShootingEnabled || pracUsedBots.Count == 0) return;
@@ -1396,7 +1458,6 @@ namespace MatchZy
             int userId = bot.UserId.Value;
             if (botLifeRegenerationEnabled)
             {
-                botLastDamageTimes[userId] = Server.CurrentTime;
                 botHealthCeilings.Remove(userId);
             }
             else
@@ -1415,24 +1476,104 @@ namespace MatchZy
                 SuppressPracticeBotHealthRegeneration();
                 return;
             }
-            if (botLastDamageTimes.Count == 0) return;
+            if (Server.CurrentTime < botNextRegenerationTime) return;
 
-            foreach (KeyValuePair<int, float> damageState in botLastDamageTimes.ToList())
+            botNextRegenerationTime = Server.CurrentTime + PracticeLifeRegenerationIntervalSeconds;
+            HealAllLivingPracticeBots();
+        }
+
+        private void MaintainHumanLifeRegeneration()
+        {
+            if (!isPractice) return;
+
+            foreach (int userId in humanLifeRegenerationEnabled.ToList())
             {
-                if (Server.CurrentTime - damageState.Value < BotLifeRegenerationDelaySeconds) continue;
+                if (!humanNextRegenerationTimes.TryGetValue(userId, out float nextRegenerationTime))
+                {
+                    humanNextRegenerationTimes[userId] = Server.CurrentTime + PracticeLifeRegenerationIntervalSeconds;
+                    continue;
+                }
+                if (Server.CurrentTime < nextRegenerationTime) continue;
 
-                botLastDamageTimes.Remove(damageState.Key);
-                if (!pracUsedBots.TryGetValue(damageState.Key, out Dictionary<string, object>? botData) ||
-                    !botData.TryGetValue("controller", out object? controllerValue) ||
-                    controllerValue is not CCSPlayerController bot ||
-                    !IsPlayerValid(bot) ||
-                    !bot.PawnIsAlive)
+                humanNextRegenerationTimes[userId] = Server.CurrentTime + PracticeLifeRegenerationIntervalSeconds;
+                CCSPlayerController? player = Utilities.GetPlayers()
+                    .FirstOrDefault(candidate => candidate.UserId == userId);
+                if (!IsPlayerValid(player) || player!.IsBot || player.IsHLTV || !player.PawnIsAlive)
                 {
                     continue;
                 }
 
-                HealPracticeBot(bot);
+                HealPracticeHuman(player);
             }
+        }
+
+        private static void DisableEngineHumanHealthProtection()
+        {
+            ConVar.Find("buddha")?.SetValue(false);
+            ConVar.Find("sv_regeneration_force_on")?.SetValue(false);
+        }
+
+        private void MaintainPracticeHumanGodModes()
+        {
+            if (!isPractice || humanGodModeEnabled.Count == 0) return;
+
+            foreach (int userId in humanGodModeEnabled.ToList())
+            {
+                CCSPlayerController? player = Utilities.GetPlayers()
+                    .FirstOrDefault(candidate => candidate.UserId == userId);
+                if (!IsPlayerValid(player) || player!.IsBot || player.IsHLTV || !player.PawnIsAlive) continue;
+
+                SetPracticeHumanGodMode(player, enabled: true, restoreHealthTarget: false);
+            }
+        }
+
+        private static void SetPracticeHumanGodMode(
+            CCSPlayerController player,
+            bool enabled,
+            bool restoreHealthTarget)
+        {
+            CCSPlayerPawn? pawn = player.PlayerPawn.Value;
+            if (pawn == null || !pawn.IsValid) return;
+
+            bool takesDamage = !enabled;
+            if (pawn.TakesDamage != takesDamage)
+            {
+                pawn.TakesDamage = takesDamage;
+                Utilities.SetStateChanged(pawn, "CBaseEntity", "m_bTakesDamage");
+            }
+
+            if (restoreHealthTarget && pawn.Health > 0)
+            {
+                int healthTarget = enabled ? GodModeHealth : GetNormalPracticeHumanHealthTarget(pawn);
+                SetPracticePlayerHealth(pawn, healthTarget);
+            }
+        }
+
+        private void ResetPracticeHumanGodModes()
+        {
+            foreach (CCSPlayerController player in Utilities.GetPlayers())
+            {
+                if (!IsPlayerValid(player) || player.IsBot || player.IsHLTV) continue;
+                SetPracticeHumanGodMode(player, enabled: false, restoreHealthTarget: true);
+            }
+            humanGodModeEnabled.Clear();
+        }
+
+        private static int GetNormalPracticeHumanHealthTarget(CCSPlayerPawn pawn)
+        {
+            return Math.Max(pawn.MaxHealth, 100);
+        }
+
+        private void HealPracticeHuman(CCSPlayerController player)
+        {
+            CCSPlayerPawn? pawn = player.PlayerPawn.Value;
+            if (pawn == null || !pawn.IsValid || pawn.Health <= 0) return;
+
+            bool godModeEnabled = player.UserId.HasValue && humanGodModeEnabled.Contains(player.UserId.Value);
+            int healthTarget = godModeEnabled ? GodModeHealth : GetNormalPracticeHumanHealthTarget(pawn);
+            if (pawn.Health >= healthTarget) return;
+
+            SetPracticePlayerHealth(pawn, healthTarget);
         }
 
         private void SuppressPracticeBotHealthRegeneration()
@@ -1463,7 +1604,7 @@ namespace MatchZy
                 }
                 else if (currentHealth > healthCeiling)
                 {
-                    SetPracticeBotHealth(pawn, healthCeiling);
+                    SetPracticePlayerHealth(pawn, healthCeiling);
                 }
             }
         }
@@ -1487,10 +1628,10 @@ namespace MatchZy
             CCSPlayerPawn? pawn = bot.PlayerPawn.Value;
             if (pawn == null || !pawn.IsValid || pawn.Health <= 0 || pawn.Health >= 100) return;
 
-            SetPracticeBotHealth(pawn, 100);
+            SetPracticePlayerHealth(pawn, 100);
         }
 
-        private static void SetPracticeBotHealth(CCSPlayerPawn pawn, int health)
+        private static void SetPracticePlayerHealth(CCSPlayerPawn pawn, int health)
         {
             pawn.Health = health;
             Utilities.SetStateChanged(pawn, "CBaseEntity", "m_iHealth");
@@ -1681,6 +1822,14 @@ namespace MatchZy
                         pracUsedBots[tempPlayer.UserId.Value]["owner"] = botOwner;
                         pracUsedBots[tempPlayer.UserId.Value]["crouchstate"] = crouch;
 
+                        // Newly added bot controllers can join dead because practice mode
+                        // disables the engine's team-wide respawn cvars. Give every new bot
+                        // one initial spawn regardless of whether later death respawns are enabled.
+                        if (!tempPlayer.PawnIsAlive)
+                        {
+                            tempPlayer.Respawn();
+                        }
+
                         if (crouch)
                         {
                             CCSPlayer_MovementServices movementService = new(tempPlayer.PlayerPawn.Value!.MovementServices!.Handle);
@@ -1829,6 +1978,30 @@ namespace MatchZy
                     });
                 }
             }
+            else if (isPractice && !player.IsBot && !player.IsHLTV && player.UserId.HasValue &&
+                (player.Team == CsTeam.Terrorist || player.Team == CsTeam.CounterTerrorist))
+            {
+                int userId = player.UserId.Value;
+                humanNextRegenerationTimes.Remove(userId);
+                if (humanLifeRegenerationEnabled.Contains(userId))
+                {
+                    humanNextRegenerationTimes[userId] = Server.CurrentTime + PracticeLifeRegenerationIntervalSeconds;
+                }
+                bool godModeEnabled = humanGodModeEnabled.Contains(userId);
+                SetPracticeHumanGodMode(
+                    player,
+                    godModeEnabled,
+                    restoreHealthTarget: godModeEnabled);
+
+                if (savedPlayerLocationData.TryGetValue(userId, out PlayerLocationData? savedLocation))
+                {
+                    savedLocation.LoadPosition(player);
+                }
+                else if (spawnsData.TryGetValue(player.TeamNum, out List<Position>? teamSpawns) && teamSpawns.Count > 0)
+                {
+                    teamSpawns[Random.Shared.Next(teamSpawns.Count)].Teleport(player);
+                }
+            }
 
             return HookResult.Continue;
         }
@@ -1849,8 +2022,8 @@ namespace MatchZy
             if (player.UserId.HasValue)
             {
                 int userId = player.UserId.Value;
-                botLastDamageTimes.Remove(userId);
                 botHealthCeilings.Remove(userId);
+                humanNextRegenerationTimes.Remove(userId);
                 botReactionStates.Remove(userId);
                 turretBotsAttacking.Remove(userId);
                 CCSBot? deadBotState = player.PlayerPawn.Value?.Bot;
@@ -2087,7 +2260,6 @@ namespace MatchZy
         {
             int loadGeneration = ++botPresetLoadGeneration;
             ResetTurretCombatState();
-            botLastDamageTimes.Clear();
             botHealthCeilings.Clear();
             ApplyBotShootingState();
             Server.ExecuteCommand("bot_kick");
@@ -2294,7 +2466,6 @@ namespace MatchZy
             botPresetLoadGeneration++;
             isSpawningBot = false;
             ResetTurretCombatState();
-            botLastDamageTimes.Clear();
             botHealthCeilings.Clear();
             Server.ExecuteCommand("bot_kick");
             pracUsedBots = new Dictionary<int, Dictionary<string, object>>();
@@ -2498,12 +2669,15 @@ namespace MatchZy
 
         public void ExecUnpracCommands() {
             ResetTurretCombatState();
+            ResetPracticeHumanGodModes();
             botShootingEnabled = false;
             botRespawnEnabled = true;
             botLifeRegenerationEnabled = false;
+            humanLifeRegenerationEnabled.Clear();
             botReactionTimeMs = DefaultBotReactionTimeMs;
-            botLastDamageTimes.Clear();
             botHealthCeilings.Clear();
+            botNextRegenerationTime = 0.0f;
+            humanNextRegenerationTimes.Clear();
             practiceRoundTimeoutEnding = false;
             Server.ExecuteCommand("bot_stop 0; bot_freeze 0; bot_zombie 0; bot_dont_shoot 0");
             Server.ExecuteCommand("mp_ignore_round_win_conditions 0");
@@ -2747,6 +2921,21 @@ namespace MatchZy
             Log($"[LoadPos] LoadPos position for UserID {userId}, Position: {playerLocationData.Position}, Angles: {playerLocationData.Angle}!");
             playerLocationData.LoadPosition(player);
             PrintToPlayerChat(player, Localizer["matchzy.pm.loadpos"]);
+        }
+
+        [ConsoleCommand("css_dlp", "Deletes the player's saved location")]
+        public void OnDeletePosCommand(CCSPlayerController? player, CommandInfo? command)
+        {
+            if (!isPractice || player == null || !player.UserId.HasValue) return;
+
+            if (savedPlayerLocationData.Remove(player.UserId.Value))
+            {
+                PrintToPlayerChat(player, "Saved position deleted.");
+            }
+            else
+            {
+                PrintToPlayerChat(player, Localizer["matchzy.pm.notsavedpos"]);
+            }
         }
 
         [ConsoleCommand("css_throwsmoke", "Throws the last thrown smoke")]
