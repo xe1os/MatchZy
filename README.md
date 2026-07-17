@@ -43,6 +43,11 @@ adds the following focused features, fixes, and changes.
 The original project and its history are available at
 [shobhit-pathak/MatchZy](https://github.com/shobhit-pathak/MatchZy).
 
+## Other CS2 project
+
+For another CS2-related project, check out
+[CliptionCode/CS2-Replay-Viewer](https://github.com/CliptionCode/CS2-Replay-Viewer).
+
 ## Donations
 
 If you would like to support the development of MatchZy-Refined, you can donate
