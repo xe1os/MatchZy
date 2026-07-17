@@ -648,6 +648,30 @@ namespace MatchZy
             }
         }
 
+        private void HandlePlayerMapChangeCommand(CCSPlayerController? player, string mapName)
+        {
+            mapName = mapName.Trim();
+
+            if (string.IsNullOrWhiteSpace(mapName))
+            {
+                ReplyToUserCommand(player, Localizer["matchzy.cc.usage", ".changemap <map-name>"]);
+                return;
+            }
+
+            if (!mapName.StartsWith("de_", StringComparison.OrdinalIgnoreCase))
+            {
+                mapName = "de_" + mapName;
+            }
+
+            if (!Server.IsMapValid(mapName))
+            {
+                ReplyToUserCommand(player, Localizer["matchzy.cc.invalidmap"]);
+                return;
+            }
+
+            Server.ExecuteCommand($"map \"{mapName}\"");
+        }
+
         private void HandleReadyRequiredCommand(CCSPlayerController? player, string commandArg)
         {
             if (!IsPlayerAdmin(player, "css_readyrequired", "@css/config"))
@@ -1376,7 +1400,7 @@ namespace MatchZy
             if (isPractice)
             {
                 player!.PrintToChat($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawn, .ctspawn, .tspawn, .bestspawn, .worstspawn");
-                player.PrintToChat($" {ChatColors.Green}Bots: {ChatColors.Default}.bot, .nobots, .crouchbot, .boost, .crouchboost, .sbp <name>, .lbp <name>, .dbp <name>");
+                player.PrintToChat($" {ChatColors.Green}Bots: {ChatColors.Default}.bot, .nobots, .botshoot <true/false>, .botreactiontime <0-1000>, .botrespawn <true/false>, .botlifereg <true/false>, .crouchbot, .boost, .crouchboost");
                 player.PrintToChat($" {ChatColors.Green}Nades: {ChatColors.Default}.loadnade, .savenade, .importnade, .listnades");
                 player.PrintToChat($" {ChatColors.Green}Nade Throw: {ChatColors.Default}.rethrow, .throwindex <index>, .lastindex, .delay <number>");
                 player.PrintToChat($" {ChatColors.Green}Utility & Toggles: {ChatColors.Default}.clear, .fastforward, .last, .back, .solid, .impacts, .traj");

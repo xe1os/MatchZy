@@ -13,6 +13,7 @@ Most of the commands can also be used using ! prefix instead of . (like !ready)
 - `.tac` Starts a tactical timeout
 - `.coach <side>` Starts coaching the specified side. Example: `.coach t` to start coaching terrorist side!
 - `.uncoach` Leaves coaching slot
+- `.changemap <map-name>` Changes the map. The `de_` prefix is optional (for example, `.changemap mirage` and `.changemap de_mirage` are equivalent).
 
 # Practice Mode Commands
 
@@ -28,13 +29,17 @@ Most of the commands can also be used using ! prefix instead of . (like !ready)
 - `.showspawns` Highlights all the competitive spawns
 - `.hidespawns` Hides the highlighted spawns
 - `.bot` Adds a bot on user's current position
+- `.botshoot <true/false>` Controls whether practice bots act as stationary turrets: they track visible enemies, shoot, and use the highest bot difficulty, but cannot move.
+- `.botreactiontime <0-1000>` Sets how many milliseconds a turret bot must continuously see its current enemy before firing. The default is `500`; `0` disables the delay.
+- `.botrespawn <true/false>` Controls whether practice bots respawn after death. Enabling it immediately respawns all currently dead practice bots. Disabling it leaves them dead without ending the round before its timer expires.
+- `.botlifereg <true/false>` Controls bot-only health regeneration. When enabled, a living practice bot returns to 100 HP after one second without taking further damage. When disabled, global regeneration settings such as `sv_regeneration_force_on 1` are ignored for practice bots. The default is `false`.
 - `.crouchbot` Adds a crouched bot on user's current position (Alias: `.cbot`)
 - `.boost` Adds a bot on current position and boosts player on it
 - `.crouchboost` Adds a crouched bot on current position and boosts player on it
 - `.ct`, `.t`, `.spec` Changes player team to the requested team
 - `.fas` / `.watchme` Forces all players into spectator except the player who called this command
 - `.nobots` Removes all the bots
-- `.clear` Clears all the active smokes, molotoves and incendiaries
+- `.clear` Clears active utility effects and all dropped weapons, grenades, and defuse kits from the ground. The C4/bomb and player-held equipment are preserved.
 - `.fastforward` Fastforwards the server time to 20 seconds (Alias: `.ff`)
 - `.noflash` Toggles immunity for flashbang (it will still blind others with noflash disabled. Alias: `.noblind`)
 - `.dryrun` Turns on dry-run mode (Alias: `.dry`)

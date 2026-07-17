@@ -14,7 +14,7 @@ namespace MatchZy
 
         public override string ModuleName => "MatchZy";
 
-        public override string ModuleVersion => "0.8.15-refined.1.0.3";
+        public override string ModuleVersion => "0.8.15-refined.1.0.6";
 
         public override string ModuleAuthor => "WD- (https://github.com/shobhit-pathak/)";
 
@@ -223,6 +223,7 @@ namespace MatchZy
             });
             RegisterListener<Listeners.OnEntitySpawned>(OnEntitySpawnedHandler);
             RegisterListener<Listeners.OnPlayerButtonsChanged>(OnPlayerButtonsChanged);
+            RegisterListener<Listeners.OnTick>(LockShootingBotsInPlace);
             RegisterEventHandler<EventPlayerTeam>((@event, info) => {
                 CCSPlayerController? player = @event.Userid;
                 if (!IsPlayerValid(player)) return HookResult.Continue;
@@ -233,6 +234,15 @@ namespace MatchZy
                 }
                 return HookResult.Continue;
             }, HookMode.Pre);
+
+            RegisterEventHandler<EventPlayerTeam>((@event, info) =>
+            {
+                if (isPractice && (@event.Team == (int)CsTeam.Terrorist || @event.Team == (int)CsTeam.CounterTerrorist))
+                {
+                    SchedulePracticeHumanRespawn(@event.Userid, 0.1f);
+                }
+                return HookResult.Continue;
+            }, HookMode.Post);
 
             RegisterEventHandler<EventPlayerTeam>((@event, info) =>
             {
@@ -347,6 +357,11 @@ namespace MatchZy
 				CCSPlayerController? attacker = @event.Attacker;
                 CCSPlayerController? victim = @event.Userid;
 
+                if (isPractice && IsPlayerValid(victim) && victim!.IsBot)
+                {
+                    RecordPracticeBotDamage(victim, @event.Health);
+                }
+
                 if (!IsPlayerValid(attacker) || !IsPlayerValid(victim)) return HookResult.Continue;
 
                 if (isPractice && victim!.IsBot)
@@ -401,6 +416,10 @@ namespace MatchZy
                 if (message.StartsWith(".map"))
                 {
                     HandleMapChangeCommand(player, messageCommandArg);
+                }
+                if (messageCommand.Equals(".changemap", StringComparison.OrdinalIgnoreCase))
+                {
+                    HandlePlayerMapChangeCommand(player, messageCommandArg);
                 }
                 if (message.StartsWith(".readyrequired"))
                 {
@@ -465,6 +484,22 @@ namespace MatchZy
                 if (messageCommand.Equals(".dbp", StringComparison.OrdinalIgnoreCase))
                 {
                     HandleDeleteBotPositionsCommand(player, messageCommandArg);
+                }
+                if (messageCommand.Equals(".botshoot", StringComparison.OrdinalIgnoreCase))
+                {
+                    HandleBotShootCommand(player, messageCommandArg);
+                }
+                if (messageCommand.Equals(".botrespawn", StringComparison.OrdinalIgnoreCase))
+                {
+                    HandleBotRespawnCommand(player, messageCommandArg);
+                }
+                if (messageCommand.Equals(".botlifereg", StringComparison.OrdinalIgnoreCase))
+                {
+                    HandleBotLifeRegenerationCommand(player, messageCommandArg);
+                }
+                if (messageCommand.Equals(".botreactiontime", StringComparison.OrdinalIgnoreCase))
+                {
+                    HandleBotReactionTimeCommand(player, messageCommandArg);
                 }
                 if (message.StartsWith(".spawn"))
                 {
