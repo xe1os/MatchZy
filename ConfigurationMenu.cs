@@ -85,6 +85,7 @@ public partial class MatchZy
     private static readonly TimeSpan ConfigurationMenuFeedbackDuration = TimeSpan.FromSeconds(2.5);
     private readonly Dictionary<int, ConfigurationMenuSession> configurationMenuSessions = new();
     private CounterStrikeSharp.API.Modules.Timers.Timer? configurationMenuRefreshTimer;
+    private CCSGameRules? configurationMenuGameRules;
 
     [ConsoleCommand("css_menu", "Toggles the MatchZy-Refined practice configuration menu")]
     public void OnConfigurationMenuCommand(CCSPlayerController? player, CommandInfo? command)
@@ -212,6 +213,7 @@ public partial class MatchZy
 
         configurationMenuRefreshTimer?.Kill();
         configurationMenuRefreshTimer = null;
+        configurationMenuGameRules = null;
     }
 
     private bool HandleConfigurationMenuInput(CCSPlayerController player, PlayerButtons pressed)
@@ -327,8 +329,8 @@ public partial class MatchZy
 
         if (hasStoredPosition)
         {
-            rows.Add(new(ConfigurationMenuRowId.TeleportPosition, MenuText("matchzy.menu.teleport_last_position"), storedValue));
-            rows.Add(new(ConfigurationMenuRowId.DeletePosition, MenuText("matchzy.menu.delete_last_position"), storedValue));
+            rows.Add(new(ConfigurationMenuRowId.TeleportPosition, MenuText("matchzy.menu.teleport_last_position")));
+            rows.Add(new(ConfigurationMenuRowId.DeletePosition, MenuText("matchzy.menu.delete_last_position")));
         }
 
         return rows;
@@ -575,6 +577,8 @@ public partial class MatchZy
     {
         if (configurationMenuSessions.Count == 0) return;
 
+        SuppressConfigurationMenuHudAnimation();
+
         foreach (ConfigurationMenuSession session in configurationMenuSessions.Values.ToList())
         {
             if (string.IsNullOrEmpty(session.LastRenderedHtml)) continue;
@@ -591,6 +595,24 @@ public partial class MatchZy
                 Log($"[ConfigurationMenu] Display failed for UserID {session.UserId}: {exception.Message}");
                 CloseConfigurationMenu(session.UserId, clearDisplay: false);
             }
+        }
+    }
+
+    private void SuppressConfigurationMenuHudAnimation()
+    {
+        // CS2's survival-status HUD otherwise replays a white fade roughly once
+        // per second while center HTML is refreshed. Keeping GameRestart aligned
+        // with its timer suppresses that client-side animation without altering
+        // the menu's opacity or reducing the refreshes needed for persistence.
+        configurationMenuGameRules ??= Utilities
+            .FindAllEntitiesByDesignerName<CCSGameRulesProxy>("cs_gamerules")
+            .FirstOrDefault()
+            ?.GameRules;
+
+        if (configurationMenuGameRules != null)
+        {
+            configurationMenuGameRules.GameRestart =
+                configurationMenuGameRules.RestartRoundTime < Server.CurrentTime;
         }
     }
 

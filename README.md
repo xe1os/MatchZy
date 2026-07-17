@@ -31,6 +31,7 @@ adds the following focused features, fixes, and changes.
 
 - Configuration-menu navigation uses CS2 movement actions, so the keys also move the player. Arrow keys work only when the player has bound them to the corresponding movement actions.
 - The configuration menu omits actions that cannot currently be used and keeps its five-row viewport compact so available options remain visible.
+- The configuration menu suppresses CS2's periodic white center-HUD fade while open and uses compact saved-position labels without redundant state suffixes.
 - Rethrow commands use per-player cooldowns and clear the corresponding state when a player disconnects.
 - Practice rounds continue until the configured timer expires when the final enemy bot dies, regardless of the bot-respawn setting.
 - `.clear` also removes dropped weapons, grenades, and defuse kits while preserving the C4 and player-held equipment.
