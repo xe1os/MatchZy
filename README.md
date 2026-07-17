@@ -13,6 +13,9 @@ adds the following focused features, fixes, and changes.
 - Added `.slp` to save the player's current position and view direction, and `.tlp` to return that player to their last saved location.
 - Added interactive T and CT spawn beams in practice mode; stand at a green beam and press `E` to teleport to that exact spawn.
 - Added `.sbp <name>`, `.lbp <name>`, and `.dbp <name>` for saving, restoring, and deleting named, multi-word bot-position setups with their teams, aim directions, and crouch states.
+- Added `.changemap <map-name>` so any player can switch to a validated map, with or without the `de_` prefix.
+- Added `.botshoot <true/false>` and `.botreactiontime <0-1000>` to turn practice bots into stationary, visibility-aware opponents and configure their firing delay.
+- Added `.botrespawn <true/false>` and `.botlifereg <true/false>` to control practice-bot respawning and health regeneration independently of human players.
 
 ## BugFixes
 
@@ -25,6 +28,10 @@ adds the following focused features, fixes, and changes.
 ## Changes
 
 - Rethrow commands use per-player cooldowns and clear the corresponding state when a player disconnects.
+- Practice rounds continue until the configured timer expires when the final enemy bot dies, regardless of the bot-respawn setting.
+- `.clear` also removes dropped weapons, grenades, and defuse kits while preserving the C4 and player-held equipment.
+- Human players retain full Kevlar during practice mode without preventing health damage.
+- Bot-position presets load more reliably when replacing existing bots and remain usable while bot respawning is disabled.
 
 ## Upstream project
 
