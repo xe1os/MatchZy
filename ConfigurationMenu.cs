@@ -23,6 +23,8 @@ public partial class MatchZy
     {
         Root,
         BotPlacement,
+        BotPositions,
+        DeleteBotPositions,
         BotConfiguration,
         PlayerConfiguration,
         Spawns,
@@ -44,6 +46,10 @@ public partial class MatchZy
         BoostBot,
         CrouchBoostBot,
         ClearAllBots,
+        ListBotPositions,
+        LoadBotPosition,
+        DeleteBotPositions,
+        DeleteBotPosition,
         BotShooting,
         BotReactionTime,
         BotRespawn,
@@ -74,6 +80,7 @@ public partial class MatchZy
         public ConfigurationMenuScreen Screen { get; set; } = ConfigurationMenuScreen.Root;
         public Dictionary<ConfigurationMenuScreen, int> SelectedRows { get; } = new();
         public Dictionary<ConfigurationMenuScreen, int> ScrollStarts { get; } = new();
+        public List<string> BotPositionPresetNames { get; set; } = new();
         public DateTime LastAcceptedInputUtc { get; set; } = DateTime.MinValue;
         public string? Feedback { get; set; }
         public DateTime FeedbackExpiresUtc { get; set; }
@@ -85,7 +92,8 @@ public partial class MatchZy
         string Label,
         string? Value = null,
         bool Enabled = true,
-        string? Help = null);
+        string? Help = null,
+        string? BotPositionPresetName = null);
 
     private const int ConfigurationMenuVisibleRows = 5;
     private static readonly TimeSpan ConfigurationMenuInputDebounce = TimeSpan.FromMilliseconds(150);
@@ -293,8 +301,12 @@ public partial class MatchZy
                 new(ConfigurationMenuRowId.PlaceCrouchBot, MenuText("matchzy.menu.place_crouch_bot")),
                 new(ConfigurationMenuRowId.BoostBot, MenuText("matchzy.menu.boost_bot")),
                 new(ConfigurationMenuRowId.CrouchBoostBot, MenuText("matchzy.menu.crouch_boost_bot")),
-                new(ConfigurationMenuRowId.ClearAllBots, MenuText("matchzy.menu.clear_all_bots"))
+                new(ConfigurationMenuRowId.ClearAllBots, MenuText("matchzy.menu.clear_all_bots")),
+                new(ConfigurationMenuRowId.ListBotPositions, MenuText("matchzy.menu.list_bot_positions")),
+                new(ConfigurationMenuRowId.DeleteBotPositions, MenuText("matchzy.menu.delete_bot_positions"))
             ],
+            ConfigurationMenuScreen.BotPositions => BuildBotPositionRows(session),
+            ConfigurationMenuScreen.DeleteBotPositions => BuildDeleteBotPositionRows(session),
             ConfigurationMenuScreen.BotConfiguration =>
             [
                 new(ConfigurationMenuRowId.Back, MenuText("matchzy.menu.back")),
@@ -350,6 +362,52 @@ public partial class MatchZy
             rows.Add(new(ConfigurationMenuRowId.DeletePosition, MenuText("matchzy.menu.delete_last_position")));
         }
 
+        return rows;
+    }
+
+    private List<ConfigurationMenuRow> BuildBotPositionRows(ConfigurationMenuSession session)
+    {
+        List<ConfigurationMenuRow> rows =
+        [
+            new(ConfigurationMenuRowId.Back, MenuText("matchzy.menu.back"))
+        ];
+
+        if (session.BotPositionPresetNames.Count == 0)
+        {
+            rows.Add(new(
+                ConfigurationMenuRowId.LoadBotPosition,
+                MenuText("matchzy.menu.no_bot_positions"),
+                Enabled: false));
+            return rows;
+        }
+
+        rows.AddRange(session.BotPositionPresetNames.Select(name => new ConfigurationMenuRow(
+            ConfigurationMenuRowId.LoadBotPosition,
+            name,
+            BotPositionPresetName: name)));
+        return rows;
+    }
+
+    private List<ConfigurationMenuRow> BuildDeleteBotPositionRows(ConfigurationMenuSession session)
+    {
+        List<ConfigurationMenuRow> rows =
+        [
+            new(ConfigurationMenuRowId.Back, MenuText("matchzy.menu.back"))
+        ];
+
+        if (session.BotPositionPresetNames.Count == 0)
+        {
+            rows.Add(new(
+                ConfigurationMenuRowId.DeleteBotPosition,
+                MenuText("matchzy.menu.no_bot_positions"),
+                Enabled: false));
+            return rows;
+        }
+
+        rows.AddRange(session.BotPositionPresetNames.Select(name => new ConfigurationMenuRow(
+            ConfigurationMenuRowId.DeleteBotPosition,
+            name,
+            BotPositionPresetName: name)));
         return rows;
     }
 
@@ -450,6 +508,10 @@ public partial class MatchZy
             ConfigurationMenuRowId.BoostBot => ExecuteConfigurationMenuAction(() => OnBoostBotCommand(player, null)),
             ConfigurationMenuRowId.CrouchBoostBot => ExecuteConfigurationMenuAction(() => OnCrouchBoostBotCommand(player, null)),
             ConfigurationMenuRowId.ClearAllBots => ExecuteConfigurationMenuAction(() => OnNoBotsCommand(player, null)),
+            ConfigurationMenuRowId.LoadBotPosition when row.BotPositionPresetName != null =>
+                ExecuteConfigurationMenuAction(() => HandleLoadBotPositionsCommand(player, row.BotPositionPresetName)),
+            ConfigurationMenuRowId.DeleteBotPosition when row.BotPositionPresetName != null =>
+                DeleteBotPositionFromConfigurationMenu(session, row.BotPositionPresetName),
             ConfigurationMenuRowId.StorePosition => SavePracticePlayerPosition(player),
             ConfigurationMenuRowId.TeleportPosition => LoadPracticePlayerPosition(player),
             ConfigurationMenuRowId.DeletePosition => DeletePracticePlayerPosition(player),
@@ -465,8 +527,14 @@ public partial class MatchZy
             ConfigurationMenuRowId.RethrowDecoy => RethrowSpecificPracticeUtility(player, PracticeGrenadeType.Decoy),
             ConfigurationMenuRowId.GlobalRethrow => RethrowGlobalLastUtility(player),
             ConfigurationMenuRowId.StartPractice => StartPracticeFromConfigurationMenu(player),
-            ConfigurationMenuRowId.Back => ChangeConfigurationMenuScreen(session, ConfigurationMenuScreen.Root),
+            ConfigurationMenuRowId.Back => ChangeConfigurationMenuScreen(
+                session,
+                session.Screen is ConfigurationMenuScreen.BotPositions or ConfigurationMenuScreen.DeleteBotPositions
+                    ? ConfigurationMenuScreen.BotPlacement
+                    : ConfigurationMenuScreen.Root),
             ConfigurationMenuRowId.BotPlacement => ChangeConfigurationMenuScreen(session, ConfigurationMenuScreen.BotPlacement),
+            ConfigurationMenuRowId.ListBotPositions => ChangeConfigurationMenuScreen(session, ConfigurationMenuScreen.BotPositions),
+            ConfigurationMenuRowId.DeleteBotPositions => ChangeConfigurationMenuScreen(session, ConfigurationMenuScreen.DeleteBotPositions),
             ConfigurationMenuRowId.BotConfiguration => ChangeConfigurationMenuScreen(session, ConfigurationMenuScreen.BotConfiguration),
             ConfigurationMenuRowId.PlayerConfiguration => ChangeConfigurationMenuScreen(session, ConfigurationMenuScreen.PlayerConfiguration),
             ConfigurationMenuRowId.Spawns => ChangeConfigurationMenuScreen(session, ConfigurationMenuScreen.Spawns),
@@ -483,6 +551,8 @@ public partial class MatchZy
 
         if (changed && row.Id is not ConfigurationMenuRowId.Back and
             not ConfigurationMenuRowId.BotPlacement and
+            not ConfigurationMenuRowId.ListBotPositions and
+            not ConfigurationMenuRowId.DeleteBotPositions and
             not ConfigurationMenuRowId.BotConfiguration and
             not ConfigurationMenuRowId.PlayerConfiguration and
             not ConfigurationMenuRowId.Spawns and
@@ -496,10 +566,31 @@ public partial class MatchZy
 
     private bool ChangeConfigurationMenuScreen(ConfigurationMenuSession session, ConfigurationMenuScreen screen)
     {
+        if (screen is ConfigurationMenuScreen.BotPositions or ConfigurationMenuScreen.DeleteBotPositions)
+        {
+            TryGetSavedBotPositionPresetNames(session.Player, out List<string> presetNames);
+            session.BotPositionPresetNames = presetNames;
+        }
+
         session.Screen = screen;
         session.SelectedRows.TryAdd(screen, 0);
         session.ScrollStarts.TryAdd(screen, 0);
         return true;
+    }
+
+    private bool DeleteBotPositionFromConfigurationMenu(ConfigurationMenuSession session, string presetName)
+    {
+        int presetCountBeforeDelete = session.BotPositionPresetNames.Count;
+        HandleDeleteBotPositionsCommand(session.Player, presetName);
+
+        if (!TryGetSavedBotPositionPresetNames(session.Player, out List<string> presetNames))
+        {
+            return false;
+        }
+
+        session.BotPositionPresetNames = presetNames;
+        return presetNames.Count < presetCountBeforeDelete &&
+            !presetNames.Contains(presetName, StringComparer.Ordinal);
     }
 
     private bool StartPracticeFromConfigurationMenu(CCSPlayerController player)
@@ -652,6 +743,8 @@ public partial class MatchZy
         {
             ConfigurationMenuScreen.Root => MenuText("matchzy.menu.subtitle_root"),
             ConfigurationMenuScreen.BotPlacement => MenuText("matchzy.menu.subtitle_bot_placement"),
+            ConfigurationMenuScreen.BotPositions => string.Format(MenuText("matchzy.menu.subtitle_bot_positions"), Server.MapName),
+            ConfigurationMenuScreen.DeleteBotPositions => string.Format(MenuText("matchzy.menu.subtitle_delete_bot_positions"), Server.MapName),
             ConfigurationMenuScreen.BotConfiguration => MenuText("matchzy.menu.subtitle_bot"),
             ConfigurationMenuScreen.PlayerConfiguration => MenuText("matchzy.menu.subtitle_player"),
             ConfigurationMenuScreen.Spawns => string.Format(

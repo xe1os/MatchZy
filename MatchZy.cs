@@ -14,7 +14,7 @@ namespace MatchZy
 
         public override string ModuleName => "MatchZy";
 
-        public override string ModuleVersion => "0.8.15-refined.1.1.1";
+        public override string ModuleVersion => "0.8.15-refined.1.1.2";
 
         public override string ModuleAuthor => "WD- (https://github.com/shobhit-pathak/)";
 
@@ -160,6 +160,7 @@ namespace MatchZy
                 { ".boost", OnBoostBotCommand },
                 { ".crouchboost", OnCrouchBoostBotCommand },
                 { ".nobots", OnNoBotsCommand },
+                { ".listbp", OnListBotPositionsCommand },
                 { ".solid", OnSolidCommand },
                 { ".impacts", OnImpactsCommand },
                 { ".traj", OnTrajCommand },

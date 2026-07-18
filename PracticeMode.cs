@@ -237,6 +237,7 @@ namespace MatchZy
             Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawn, .ctspawn, .tspawn, .bestspawn, .worstspawn");
             Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.showspawns, .hidespawns");
             Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.bot, .nobots, .botshoot <true/false>, .botreactiontime <0-1000>, .botrespawn <true/false>, .botlifereg <true/false>, .crouchbot, .boost, .crouchboost");
+            Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.sbp <name>, .lbp <name>, .dbp <name>, .listbp");
             Server.PrintToChatAll($" {ChatColors.Green}Nades: {ChatColors.Default}.loadnade, .savenade, .importnade, .listnades");
             Server.PrintToChatAll($" {ChatColors.Green}Nade Throw: {ChatColors.Default}.rethrow, .throwindex <index>, .lastindex, .delay <number>");
             Server.PrintToChatAll($" {ChatColors.Green}Utility & Toggles: {ChatColors.Default}.clear, .fastforward, .last, .back, .solid, .impacts, .traj");
@@ -2189,6 +2190,30 @@ namespace MatchZy
             HandleDeleteBotPositionsCommand(player, command.ArgString);
         }
 
+        [ConsoleCommand("css_listbp", "Lists bot positions saved for the current map")]
+        public void OnListBotPositionsCommand(CCSPlayerController? player, CommandInfo? command)
+        {
+            if (!isPractice || !IsPlayerValid(player)) return;
+
+            if (!TryGetSavedBotPositionPresetNames(player!, out List<string> presetNames))
+            {
+                ReplyToUserCommand(player, "Unable to list the saved bot positions.");
+                return;
+            }
+
+            if (presetNames.Count == 0)
+            {
+                ReplyToUserCommand(player, $"No bot-position presets are saved for {Server.MapName}.");
+                return;
+            }
+
+            ReplyToUserCommand(player, $"Bot-position presets saved for {Server.MapName}:");
+            foreach (string presetName in presetNames)
+            {
+                player!.PrintToChat($" {ChatColors.Green}- {ChatColors.Default}{presetName}");
+            }
+        }
+
         private void HandleSaveBotPositionsCommand(CCSPlayerController? player, string rawPresetName)
         {
             if (!isPractice || !IsPlayerValid(player)) return;
@@ -2327,7 +2352,12 @@ namespace MatchZy
 
         private void HandleDeleteBotPositionsCommand(CCSPlayerController? player, string rawPresetName)
         {
-            if (!isPractice || !IsPlayerValid(player)) return;
+            if (!IsPlayerValid(player)) return;
+            if (!isPractice)
+            {
+                ReplyToUserCommand(player, ".dbp is available only in practice mode.");
+                return;
+            }
 
             string presetQuery = NormalizeBotPresetName(rawPresetName);
             if (string.IsNullOrWhiteSpace(presetQuery))
@@ -2344,7 +2374,7 @@ namespace MatchZy
 
                 if (!presets.TryGetValue(playerSteamId, out Dictionary<string, SavedBotPositionPreset>? playerPresets))
                 {
-                    ReplyToUserCommand(player, $"Bot-position preset '{presetQuery}' was not found.");
+                    ReplyToUserCommand(player, $"Bot-position preset '{presetQuery}' was not found on {Server.MapName}.");
                     return;
                 }
 
@@ -2352,6 +2382,12 @@ namespace MatchZy
                     .Where(preset => preset.Value.Map == Server.MapName)
                     .Select(preset => preset.Key)
                     .ToList();
+                if (presetsOnCurrentMap.Count == 0)
+                {
+                    ReplyToUserCommand(player, $"Bot-position preset '{presetQuery}' was not found on {Server.MapName}.");
+                    return;
+                }
+
                 string resolvedPresetName = StringSimilarity.FindNearestName(presetQuery, presetsOnCurrentMap);
 
                 if (!presetsOnCurrentMap.Contains(resolvedPresetName) || !playerPresets.Remove(resolvedPresetName))
@@ -2593,6 +2629,33 @@ namespace MatchZy
         private static string NormalizeBotPresetName(string rawPresetName)
         {
             return string.Join(" ", rawPresetName.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim().Trim('"');
+        }
+
+        private bool TryGetSavedBotPositionPresetNames(CCSPlayerController player, out List<string> presetNames)
+        {
+            presetNames = new List<string>();
+
+            try
+            {
+                Dictionary<string, Dictionary<string, SavedBotPositionPreset>> presets =
+                    ReadSavedBotPositionPresets(GetSavedBotPositionsPath());
+                if (!presets.TryGetValue(player.SteamID.ToString(), out Dictionary<string, SavedBotPositionPreset>? playerPresets))
+                {
+                    return true;
+                }
+
+                presetNames = playerPresets
+                    .Where(preset => preset.Value.Map == Server.MapName)
+                    .Select(preset => preset.Key)
+                    .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                Log($"[ListBotPositions] Failed: {ex.Message}");
+                return false;
+            }
         }
 
         private static Dictionary<string, Dictionary<string, SavedBotPositionPreset>> ReadSavedBotPositionPresets(string presetsPath)

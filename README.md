@@ -13,7 +13,7 @@ adds the following focused features, fixes, and changes.
 - Added `.grt` as an explicit practice-mode command for CS2's server-global grenade rethrow.
 - Added `.slp` to save the player's current position and view direction, `.tlp` to return to it, and `.dlp` to delete it.
 - Added interactive T and CT spawn outlines in practice mode; stand inside a flat gold square and press `E` to teleport to that exact spawn. The outlines remain visible above shallow water, and `.showspawns` and `.hidespawns` control their visibility.
-- Added `.sbp <name>`, `.lbp <name>`, and `.dbp <name>` for saving, restoring, and deleting named, multi-word bot-position setups with their teams, aim directions, and crouch states.
+- Added `.sbp <name>`, `.lbp <name>`, `.dbp <name>`, and `.listbp` for saving, restoring, deleting, and listing named, multi-word bot-position setups with their teams, aim directions, and crouch states. Saved setups can also be listed, loaded, and deleted from Bot Placement in `.menu`.
 - Added `.changemap <map-name>` so any player can switch to a validated map, with or without the `de_` prefix.
 - Added `.botshoot <true/false>` and `.botreactiontime <0-1000>` to turn practice bots into stationary, visibility-aware opponents and configure their firing delay.
 - Added `.botrespawn <true/false>` and `.botlifereg <true/false>` to control practice-bot respawning and health regeneration independently of human players.

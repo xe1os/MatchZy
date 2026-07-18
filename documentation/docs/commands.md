@@ -33,6 +33,10 @@ Most of the commands can also be used using ! prefix instead of . (like !ready)
 - `.botreactiontime <0-1000>` Sets how many milliseconds a turret bot must continuously see its current enemy before firing. The default is `500`; `0` disables the delay.
 - `.botrespawn <true/false>` Controls whether practice bots respawn after death. Enabling it immediately respawns all currently dead practice bots. Disabling it leaves them dead without ending the round before its timer expires.
 - `.botlifereg <true/false>` Controls bot-only health regeneration. When enabled, every living injured practice bot returns to 100 HP on a fixed 100 ms cadence, including while taking continuous damage. Bots already at 100 HP are ignored. When disabled, global regeneration settings such as `sv_regeneration_force_on 1` are ignored for practice bots. The default is `false`.
+- `.sbp <name>` Saves all current bot positions under a multi-word name for the requesting player and current map.
+- `.lbp <name>` Loads the nearest matching bot-position preset for the requesting player and current map.
+- `.dbp <name>` Deletes the nearest matching bot-position preset for the requesting player and current map.
+- `.listbp` Lists the requesting player's saved bot-position preset names for the current map in private chat.
 - `.liferegon <true/false>` Controls health regeneration only for the requesting human player. It defaults to `true` when practice starts and for humans joining active practice. When enabled, an injured living player returns to maximum health on a fixed 100 ms cadence, including while taking continuous damage. Players already at the applicable maximum are ignored. With `.god` enabled, the applicable maximum is the God-mode health target instead of 100 HP. Setting it to `false` disables automatic regeneration for that player until they disconnect or practice restarts, allowing normal deaths unless separately protected by `.god`.
 - `.crouchbot` Adds a crouched bot on user's current position (Alias: `.cbot`)
 - `.boost` Adds a bot on current position and boosts player on it
