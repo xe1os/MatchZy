@@ -141,6 +141,7 @@
   "matchzy.menu.title": "MATCHZY-REFINED CONFIGURATION",
   "matchzy.menu.practice_only": "The configuration menu is available only in practice mode.",
   "matchzy.menu.start_practice": "Start Practice",
+  "matchzy.menu.start_round": "Start Round",
   "matchzy.menu.bot_placement": "Bot Placement",
   "matchzy.menu.bot_configuration": "Bot Configuration",
   "matchzy.menu.player_configuration": "Player Configuration",

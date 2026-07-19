@@ -29,7 +29,8 @@ Most of the commands can also be used using ! prefix instead of . (like !ready)
 - `.spawnmarkers` Toggles the competitive T and CT spawn markers
 - `.randomspawn` Teleports you to a randomly selected competitive spawn for your current T or CT side.
 - `.startround` Starts a fresh practice round with a five-second freeze and restores every tracked bot alive at its placed position and orientation.
-- `.bot` Adds and initially spawns a living bot at the user's current position. The initial spawn is independent of `.botrespawn`; that toggle controls later deaths.
+- `.ammo` Toggles `sv_infinite_ammo` between normal and infinite ammunition for every player in practice mode.
+- `.bot` Adds and initially spawns a living enemy bot at the user's current position. The initial spawn is independent of `.botrespawn`; that toggle controls later deaths, and a failed extra placement leaves existing bots intact.
 - `.botshoot` Toggles whether practice bots act as stationary turrets: they track visible enemies, stop firing when active smoke blocks their sightline, and use the highest bot difficulty, but cannot move. An explicit `true` or `false` remains supported.
 - `.botreactiontime <0-1000>` Sets how many milliseconds a turret bot must continuously see its current enemy before firing. The default is `500`; `0` disables the delay.
 - `.botrespawn` Toggles whether practice bots respawn after death. Enabling it immediately respawns all currently dead practice bots. Disabling it leaves them dead without ending the round before its timer expires. An explicit `true` or `false` remains supported.
@@ -48,8 +49,8 @@ Most of the commands can also be used using ! prefix instead of . (like !ready)
 - `.boost` Adds a bot on current position and boosts player on it
 - `.crouchboost` Adds a crouched bot on current position and boosts player on it
 - `.ct`, `.t`, `.spec` Changes player team to the requested team
-- `.fas` / `.watchme` Forces all players into spectator except the player who called this command
-- `.nobots` Removes all the bots
+- `.fas` / `.watchme` Forces all other players into spectator when the requesting player is alive on T or CT. Requests from spectators or dead players are ignored.
+- `.nobots` Removes every practice bot, including dead bot controllers still shown in the team roster, and frees their team slots for later `.bot` or `.placebot` use.
 - `.clear` Clears active utility effects and all dropped weapons, grenades, and defuse kits from the ground. The C4/bomb and player-held equipment are preserved.
 - `.fastforward` Fastforwards the server time to 20 seconds (Alias: `.ff`)
 - `.noflash` Toggles immunity for flashbang (it will still blind others with noflash disabled. Alias: `.noblind`)

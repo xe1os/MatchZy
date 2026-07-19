@@ -14,7 +14,7 @@ namespace MatchZy
 
         public override string ModuleName => "MatchZy";
 
-        public override string ModuleVersion => "0.8.15-refined.1.1.5";
+        public override string ModuleVersion => "0.8.15-refined.1.1.6";
 
         public override string ModuleAuthor => "WD- (https://github.com/shobhit-pathak/)";
 
@@ -150,6 +150,7 @@ namespace MatchZy
                 { ".spawnmarkers", OnSpawnMarkersCommand },
                 { ".randomspawn", OnRandomSpawnCommand },
                 { ".startround", OnStartPracticeRoundCommand },
+                { ".ammo", OnAmmoCommand },
                 { ".dryrun", OnDryRunCommand },
                 { ".dry", OnDryRunCommand },
                 { ".noflash", OnNoFlashCommand },
@@ -222,8 +223,8 @@ namespace MatchZy
             RegisterEventHandler<EventRoundFreezeEnd>(EventRoundFreezeEndHandler);
             RegisterEventHandler<EventPlayerGivenC4>(EventPlayerGivenC4);
             RegisterEventHandler<EventPlayerDeath>(EventPlayerDeathPreHandler, hookMode: HookMode.Pre);
-            RegisterListener<Listeners.OnClientDisconnect>(CaptureDisconnectingPracticeHumanPawn);
-            RegisterListener<Listeners.OnClientDisconnectPost>(RemoveDisconnectedPracticeHumanPawn);
+            RegisterListener<Listeners.OnClientDisconnect>(CaptureDisconnectingPracticePawn);
+            RegisterListener<Listeners.OnClientDisconnectPost>(RemoveDisconnectedPracticePawn);
             RegisterListener<Listeners.OnEntitySpawned>(OnEntitySpawnedHandler);
             RegisterListener<Listeners.OnPlayerButtonsChanged>(OnPlayerButtonsChanged);
             RegisterListener<Listeners.OnTick>(LockShootingBotsInPlace);
@@ -524,6 +525,10 @@ namespace MatchZy
                 if (messageCommand.Equals(".liferegon", StringComparison.OrdinalIgnoreCase))
                 {
                     HandleHumanLifeRegenerationCommand(player, messageCommandArg);
+                }
+                if (messageCommand.Equals(".allliferegon", StringComparison.OrdinalIgnoreCase))
+                {
+                    HandleAllHumanLifeRegenerationCommand(player, messageCommandArg);
                 }
                 if (messageCommand.Equals(".botreactiontime", StringComparison.OrdinalIgnoreCase))
                 {

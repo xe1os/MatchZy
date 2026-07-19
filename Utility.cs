@@ -1435,8 +1435,8 @@ namespace MatchZy
                 PrintAvailableCommandCategory(
                     player,
                     "Utility & Toggles",
-                    ".startround, .clear, .fastforward, .last, .back, .solid, .impacts, .traj",
-                    ".startround, .clear, .fastforward, .last, .back <number>, .solid, .impacts, .traj");
+                    ".startround, .ammo, .clear, .fastforward, .last, .back, .solid, .impacts, .traj",
+                    ".startround, .ammo, .clear, .fastforward, .last, .back <number>, .solid, .impacts, .traj");
                 PrintAvailableCommandCategory(
                     player,
                     "Locations",
@@ -1445,8 +1445,8 @@ namespace MatchZy
                 PrintAvailableCommandCategory(
                     player,
                     "Health",
-                    ".liferegon",
-                    ".liferegon");
+                    ".liferegon, .allliferegon",
+                    ".liferegon [true/false], .allliferegon <true/false>");
                 PrintAvailableCommandCategory(
                     player,
                     "Sides & Others",

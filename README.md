@@ -14,12 +14,14 @@ adds the following focused features, fixes, and changes.
 - Added `.slp` to save the player's current position and view direction, `.tlp` to return to it, and `.dlp` to delete it.
 - Added interactive spawn outlines in practice mode; stand inside a flat gold T-side or blue CT-side square and press `E` to teleport to that exact spawn. Each outline and its interaction zone use the cached local ground height at the spawn, `.spawnmarkers` toggles visibility, and `matchzy_spawn_markers_enabled_default` controls whether markers appear when practice starts.
 - Added `.sbp <name>`, `.lbp <name>`, `.dbp <name>`, and `.listbp` for saving, restoring, deleting, and listing named, multi-word bot-position setups with their teams, aim directions, and crouch states. Saved setups can also be listed, loaded, and deleted from Bot Placement in `.menu`.
-- Added `.botspawn <name>`, `.delbotspawn <name>`, `.listbotspawn`, and `.placebot <number> <name>` for building map-specific named spawn pools and placing bots at randomly selected, distinct saved XY positions and aim directions.
+- Added `.botspawn <name>`, `.delbotspawn <name>`, `.listbotspawn`, and `.placebot <number> <name>` for building map-specific named spawn pools and placing utility-free bots at randomly selected, distinct saved XY positions and aim directions.
 - Added `.kicklastbot` to remove the most recently placed practice bot; repeated uses work backward through the placement order.
 - Added `.changemap <map-name>` so any player can switch to a validated map, with or without the `de_` prefix.
 - Added `.botshoot` and `.botreactiontime <0-1000>` to turn practice bots into stationary, visibility-aware opponents and configure their firing delay.
-- Added `.botrespawn` and `.botlifereg` to control practice-bot respawning and health regeneration independently of human players.
+- Added `.botrespawn` and `.botlifereg` to control practice-bot respawning and health regeneration independently of human players; respawned tracked bots return to their last placed position and aim direction.
 - Added per-player `.liferegon` health regeneration for human players in practice mode, enabled by default and individually opt-out.
+- Added public `.allliferegon <true/false>` control so any player can enable or disable human health regeneration for everyone in the current practice session, including later joiners.
+- Added `.ammo` so any player can toggle infinite ammunition for the entire practice session; Start Round is also available directly below Start Practice in `.menu`.
 
 ## BugFixes
 
@@ -49,12 +51,13 @@ adds the following focused features, fixes, and changes.
 - Enabled `.liferegon` and `.botlifereg` restore injured players and bots on a fixed 100 ms cadence, including during continuous damage, while skipping entities already at maximum health.
 - `.help` keeps its private chat list compact by showing command names without argument hints and prints detailed usage to the requesting player's console.
 - `.botshoot`, `.botrespawn`, `.botlifereg`, and `.liferegon` now toggle their current state when used without an argument; explicit `true` or `false` values remain supported.
-- Plugin-managed practice bots use explicit add and kick operations without rewriting `bot_quota`; `.nobots` directly kicks every bot.
+- Plugin-managed practice bots are created directly on their intended enemy side. Removal releases their team membership before disconnecting the fake clients, clearing dead roster slots without runtime quota rewrites; full-team `.bot` requests return promptly without disturbing the existing setup.
 - Practice bots controlled by `.botshoot` stop firing when an active smoke blocks their sightline and reacquire their configured reaction delay after visibility returns.
-- `.startround` starts a fresh practice round with a five-second freeze while keeping every tracked bot alive at its placed position and orientation.
+- `.startround` starts a fresh practice round with a five-second freeze, assigns each human a different random team spawn, and keeps every tracked bot alive at its placed position and orientation.
 - `.randomspawn` safely teleports the requesting player to a randomly selected competitive spawn for their current T or CT side.
 - Temporary player/bot collision handling now stops safely when either pawn disappears or is replaced, preventing repeating null-reference errors during respawns, round restarts, disconnects, and bot removal.
 - Every `.placebot` and `.lbp` load kicks all existing bots, waits at least 500 ms for cleanup, and then creates the requested setup from scratch.
+- `.watchme` / `.fas` is ignored unless the requesting player is alive and currently playing on the T or CT side.
 
 ## Upstream project
 

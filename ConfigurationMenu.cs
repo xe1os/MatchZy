@@ -39,6 +39,7 @@ public partial class MatchZy
         Spawns,
         Utility,
         StartPractice,
+        StartRound,
         Close,
         Back,
         PlaceBot,
@@ -330,6 +331,7 @@ public partial class MatchZy
 
         if (isPractice)
         {
+            rows.Add(new(ConfigurationMenuRowId.StartRound, MenuText("matchzy.menu.start_round")));
             rows.Add(new(ConfigurationMenuRowId.BotPlacement, MenuText("matchzy.menu.bot_placement")));
             rows.Add(new(ConfigurationMenuRowId.BotConfiguration, MenuText("matchzy.menu.bot_configuration")));
             rows.Add(new(ConfigurationMenuRowId.PlayerConfiguration, MenuText("matchzy.menu.player_configuration")));
@@ -525,6 +527,7 @@ public partial class MatchZy
             ConfigurationMenuRowId.RethrowDecoy => RethrowSpecificPracticeUtility(player, PracticeGrenadeType.Decoy),
             ConfigurationMenuRowId.GlobalRethrow => RethrowGlobalLastUtility(player),
             ConfigurationMenuRowId.StartPractice => StartPracticeFromConfigurationMenu(player),
+            ConfigurationMenuRowId.StartRound => ExecuteConfigurationMenuAction(() => OnStartPracticeRoundCommand(player, null)),
             ConfigurationMenuRowId.Back => ChangeConfigurationMenuScreen(
                 session,
                 session.Screen is ConfigurationMenuScreen.BotPositions or ConfigurationMenuScreen.DeleteBotPositions
@@ -556,6 +559,7 @@ public partial class MatchZy
             not ConfigurationMenuRowId.Spawns and
             not ConfigurationMenuRowId.Utility and
             not ConfigurationMenuRowId.StartPractice and
+            not ConfigurationMenuRowId.StartRound and
             not ConfigurationMenuRowId.Close)
         {
             SetConfigurationMenuFeedback(session, MenuText("matchzy.menu.updated"));

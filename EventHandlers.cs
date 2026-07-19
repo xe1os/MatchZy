@@ -164,6 +164,7 @@ public partial class MatchZy
         {
             ResetPracticeRoundTimeout();
             RestoreTrackedPracticeBotsAfterRoundStart();
+            AssignUniquePracticeHumanSpawnsAfterRoundStart();
             HandlePostRoundStartEvent(@event);
             RefreshPracticeSpawnMarkersAfterRoundStart();
             return HookResult.Continue;
