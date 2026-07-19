@@ -127,9 +127,11 @@ namespace MatchZy
         Dictionary<int, PlayerPracticeTimer> playerTimers = new();
         Dictionary<int, PlayerLocationData> savedPlayerLocationData = new();
         readonly List<CBeam> spawnMarkerBeams = new();
+        readonly Dictionary<(float X, float Y, float Z), float> spawnMarkerGroundHeights = new();
 
         const float SpawnMarkerHalfSize = 18.0f;
-        const float SpawnMarkerHeightOffset = 8.0f;
+        const float SpawnMarkerGroundOffset = 8.0f;
+        const float SpawnMarkerNavSearchDistance = 128.0f;
         const float SpawnMarkerWidth = 1.5f;
         const float SpawnMarkerVerticalTolerance = 36.0f;
         const int MinimumCompetitiveSpawnCount = 5;
@@ -261,6 +263,7 @@ namespace MatchZy
         {
             // Resetting spawn data to avoid any glitches
             spawnsData = GetEmptySpawnsData();
+            spawnMarkerGroundHeights.Clear();
 
             AddCompetitiveTeamSpawns("info_player_counterterrorist", (byte)CsTeam.CounterTerrorist);
             AddCompetitiveTeamSpawns("info_player_terrorist", (byte)CsTeam.Terrorist);
@@ -835,7 +838,7 @@ namespace MatchZy
         {
             float centerX = spawn.PlayerPosition.X;
             float centerY = spawn.PlayerPosition.Y;
-            float markerZ = spawn.PlayerPosition.Z + SpawnMarkerHeightOffset;
+            float markerZ = GetSpawnMarkerGroundHeight(spawn) + SpawnMarkerGroundOffset;
 
             Vector northWest = new(centerX - SpawnMarkerHalfSize, centerY + SpawnMarkerHalfSize, markerZ);
             Vector northEast = new(centerX + SpawnMarkerHalfSize, centerY + SpawnMarkerHalfSize, markerZ);
@@ -846,6 +849,28 @@ namespace MatchZy
             CreateSpawnMarkerEdge(northEast, southEast, color);
             CreateSpawnMarkerEdge(southEast, southWest, color);
             CreateSpawnMarkerEdge(southWest, northWest, color);
+        }
+
+        private float GetSpawnMarkerGroundHeight(Position spawn)
+        {
+            Vector spawnPosition = spawn.PlayerPosition;
+            (float X, float Y, float Z) key = (spawnPosition.X, spawnPosition.Y, spawnPosition.Z);
+            if (spawnMarkerGroundHeights.TryGetValue(key, out float cachedGroundHeight))
+            {
+                return cachedGroundHeight;
+            }
+
+            CCSNavArea? navArea = CCSNavArea.GetClosestNavArea(
+                spawnPosition,
+                SpawnMarkerNavSearchDistance);
+            float groundHeight = spawnPosition.Z;
+            if (navArea != null)
+            {
+                groundHeight = navArea.GetClosestPoint(spawnPosition).Z;
+            }
+
+            spawnMarkerGroundHeights[key] = groundHeight;
+            return groundHeight;
         }
 
         private void InitializePracticeSpawnMarkers()
@@ -919,9 +944,10 @@ namespace MatchZy
             {
                 foreach (Position spawn in teamSpawns)
                 {
+                    float groundHeight = GetSpawnMarkerGroundHeight(spawn);
                     float deltaX = playerPosition.X - spawn.PlayerPosition.X;
                     float deltaY = playerPosition.Y - spawn.PlayerPosition.Y;
-                    float deltaZ = playerPosition.Z - spawn.PlayerPosition.Z;
+                    float deltaZ = playerPosition.Z - groundHeight;
 
                     if (MathF.Abs(deltaX) > SpawnMarkerHalfSize ||
                         MathF.Abs(deltaY) > SpawnMarkerHalfSize ||
