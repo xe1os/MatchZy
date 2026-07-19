@@ -14,7 +14,7 @@ namespace MatchZy
 
         public override string ModuleName => "MatchZy";
 
-        public override string ModuleVersion => "0.8.15-refined.1.1.6";
+        public override string ModuleVersion => "0.8.15-refined.1.1.7";
 
         public override string ModuleAuthor => "WD- (https://github.com/shobhit-pathak/)";
 
@@ -227,7 +227,7 @@ namespace MatchZy
             RegisterListener<Listeners.OnClientDisconnectPost>(RemoveDisconnectedPracticePawn);
             RegisterListener<Listeners.OnEntitySpawned>(OnEntitySpawnedHandler);
             RegisterListener<Listeners.OnPlayerButtonsChanged>(OnPlayerButtonsChanged);
-            RegisterListener<Listeners.OnTick>(LockShootingBotsInPlace);
+            RegisterListener<Listeners.OnTick>(ControlPracticeBots);
             RegisterListener<Listeners.OnTick>(DisplayConfigurationMenus);
             RegisterEventHandler<EventPlayerTeam>((@event, info) => {
                 CCSPlayerController? player = @event.Userid;
@@ -513,6 +513,14 @@ namespace MatchZy
                 if (messageCommand.Equals(".botshoot", StringComparison.OrdinalIgnoreCase))
                 {
                     HandleBotShootCommand(player, messageCommandArg);
+                }
+                if (messageCommand.Equals(".botjiggle", StringComparison.OrdinalIgnoreCase))
+                {
+                    HandleBotJiggleCommand(player, messageCommandArg);
+                }
+                if (messageCommand.Equals(".botjigglerandom", StringComparison.OrdinalIgnoreCase))
+                {
+                    HandleBotJiggleRandomCommand(player, messageCommandArg);
                 }
                 if (messageCommand.Equals(".botrespawn", StringComparison.OrdinalIgnoreCase))
                 {

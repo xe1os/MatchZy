@@ -52,6 +52,8 @@ public partial class MatchZy
         DeleteBotPositions,
         DeleteBotPosition,
         BotShooting,
+        BotJiggle,
+        BotJiggleRandom,
         BotReactionTime,
         BotRespawn,
         BotLifeRegeneration,
@@ -307,14 +309,7 @@ public partial class MatchZy
             ],
             ConfigurationMenuScreen.BotPositions => BuildBotPositionRows(session),
             ConfigurationMenuScreen.DeleteBotPositions => BuildDeleteBotPositionRows(session),
-            ConfigurationMenuScreen.BotConfiguration =>
-            [
-                new(ConfigurationMenuRowId.Back, MenuText("matchzy.menu.back")),
-                BooleanRow(ConfigurationMenuRowId.BotShooting, "matchzy.menu.bot_shooting", botShootingEnabled),
-                new(ConfigurationMenuRowId.BotReactionTime, MenuText("matchzy.menu.bot_reaction_time"), $"{botReactionTimeMs} {MenuText("matchzy.menu.ms")}"),
-                BooleanRow(ConfigurationMenuRowId.BotRespawn, "matchzy.menu.bot_respawn", botRespawnEnabled),
-                BooleanRow(ConfigurationMenuRowId.BotLifeRegeneration, "matchzy.menu.bot_hp_regeneration", botLifeRegenerationEnabled)
-            ],
+            ConfigurationMenuScreen.BotConfiguration => BuildBotConfigurationRows(),
             ConfigurationMenuScreen.PlayerConfiguration => BuildPlayerConfigurationRows(userId),
             ConfigurationMenuScreen.Spawns => BuildSpawnsRows(player),
             ConfigurationMenuScreen.Utility => BuildUtilityRows(userId),
@@ -363,6 +358,26 @@ public partial class MatchZy
             rows.Add(new(ConfigurationMenuRowId.DeletePosition, MenuText("matchzy.menu.delete_last_position")));
         }
 
+        return rows;
+    }
+
+    private List<ConfigurationMenuRow> BuildBotConfigurationRows()
+    {
+        List<ConfigurationMenuRow> rows =
+        [
+            new(ConfigurationMenuRowId.Back, MenuText("matchzy.menu.back")),
+            BooleanRow(ConfigurationMenuRowId.BotShooting, "matchzy.menu.bot_shooting", botShootingEnabled),
+            BooleanRow(ConfigurationMenuRowId.BotJiggle, "matchzy.menu.bot_jiggle", botJiggleEnabled)
+        ];
+
+        if (botJiggleEnabled)
+        {
+            rows.Add(BooleanRow(ConfigurationMenuRowId.BotJiggleRandom, "matchzy.menu.bot_jiggle_random", botJiggleRandomEnabled));
+        }
+
+        rows.Add(new(ConfigurationMenuRowId.BotReactionTime, MenuText("matchzy.menu.bot_reaction_time"), $"{botReactionTimeMs} {MenuText("matchzy.menu.ms")}"));
+        rows.Add(BooleanRow(ConfigurationMenuRowId.BotRespawn, "matchzy.menu.bot_respawn", botRespawnEnabled));
+        rows.Add(BooleanRow(ConfigurationMenuRowId.BotLifeRegeneration, "matchzy.menu.bot_hp_regeneration", botLifeRegenerationEnabled));
         return rows;
     }
 
@@ -478,6 +493,8 @@ public partial class MatchZy
     private void ApplyConfigurationMenuRow(ConfigurationMenuSession session, ConfigurationMenuRow row, bool right)
     {
         if (!right && row.Id is not ConfigurationMenuRowId.BotShooting and
+            not ConfigurationMenuRowId.BotJiggle and
+            not ConfigurationMenuRowId.BotJiggleRandom and
             not ConfigurationMenuRowId.BotReactionTime and
             not ConfigurationMenuRowId.BotRespawn and
             not ConfigurationMenuRowId.BotLifeRegeneration and
@@ -498,6 +515,8 @@ public partial class MatchZy
         bool changed = row.Id switch
         {
             ConfigurationMenuRowId.BotShooting => SetPracticeBotShooting(player, right),
+            ConfigurationMenuRowId.BotJiggle => SetPracticeBotJiggle(player, right),
+            ConfigurationMenuRowId.BotJiggleRandom => SetPracticeBotJiggleRandom(player, right),
             ConfigurationMenuRowId.BotReactionTime => SetPracticeBotReactionTime(player, Math.Clamp(botReactionTimeMs + (right ? 50 : -50), 0, 1000)),
             ConfigurationMenuRowId.BotRespawn => SetPracticeBotRespawn(player, right),
             ConfigurationMenuRowId.BotLifeRegeneration => SetPracticeBotLifeRegeneration(player, right),

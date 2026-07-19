@@ -152,6 +152,8 @@ namespace MatchZy
         public bool isSpawningBot;
         private int botPresetLoadGeneration;
         private bool botShootingEnabled;
+        private bool botJiggleEnabled;
+        private bool botJiggleRandomEnabled;
         private bool botRespawnEnabled = true;
         private bool botLifeRegenerationEnabled;
         private readonly HashSet<int> humanGodModeEnabled = new();
@@ -166,6 +168,10 @@ namespace MatchZy
         private float botNextRegenerationTime;
         private readonly Dictionary<int, float> humanNextRegenerationTimes = new();
         private readonly Dictionary<int, (uint TargetHandle, float VisibleSince)> botReactionStates = new();
+        private readonly Dictionary<int, bool> botRandomJiggleAssignments = new();
+        private readonly Dictionary<int, float> botJigglePauseStartTimes = new();
+        private readonly Dictionary<int, float> botJiggleAccumulatedPauseDurations = new();
+        private readonly Dictionary<int, Vector> botJiggleHoldPositions = new();
         private readonly HashSet<int> turretBotsAttacking = new();
         private readonly List<Vector> activeSmokeOcclusionCenters = new();
         private readonly Dictionary<int, uint> disconnectingPracticePawnHandles = new();
@@ -177,6 +183,8 @@ namespace MatchZy
         private const float PracticeLifeRegenerationIntervalSeconds = 0.1f;
         private const float PracticeSmokeOcclusionRadius = 144.0f;
         private const float PracticeSmokeCacheIntervalSeconds = 0.1f;
+        private const float PracticeBotJiggleDistance = 10.0f;
+        private const float PracticeBotJigglePeriodSeconds = 0.8f;
         private const float PracticeStartRoundFreezeSeconds = 5.0f;
         private const float PracticeStartRoundResetDelaySeconds = 7.0f;
         private static readonly HashSet<string> PracticeBotUtilityWeaponNames = new(StringComparer.OrdinalIgnoreCase)
@@ -195,6 +203,7 @@ namespace MatchZy
             "weapon_diversion"
         };
         private float nextSmokeOcclusionRefreshTime;
+        private float botJiggleCycleStartTime;
 
         public bool isDryRun = false;
 
@@ -236,6 +245,13 @@ namespace MatchZy
             Server.NextFrame(DisablePracticeTeamDamagePenalties);
             botRespawnEnabled = true;
             botLifeRegenerationEnabled = false;
+            botJiggleEnabled = false;
+            botJiggleRandomEnabled = false;
+            botRandomJiggleAssignments.Clear();
+            botJigglePauseStartTimes.Clear();
+            botJiggleAccumulatedPauseDurations.Clear();
+            botJiggleHoldPositions.Clear();
+            botJiggleCycleStartTime = 0.0f;
             ResetPracticeHumanGodModes();
             humanLifeRegenerationEnabled.Clear();
             humanLifeRegenerationDefaultEnabled = true;
@@ -269,7 +285,8 @@ namespace MatchZy
             Server.PrintToChatAll($" {ChatColors.Green}Configuration: {ChatColors.Default}.menu");
             Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawn, .ctspawn, .tspawn, .bestspawn, .worstspawn");
             Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawnmarkers, .randomspawn");
-            Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.bot, .nobots, .kicklastbot, .botshoot, .botreactiontime <0-1000>, .botrespawn, .botlifereg, .crouchbot, .boost, .crouchboost");
+            Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.bot, .nobots, .kicklastbot, .botshoot, .botreactiontime <0-1000>, .botrespawn, .botlifereg");
+            Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.botjiggle, .botjigglerandom, .crouchbot, .boost, .crouchboost");
             Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.sbp <name>, .lbp <name>, .dbp <name>, .listbp");
             Server.PrintToChatAll($" {ChatColors.Green}Bot Spawns: {ChatColors.Default}.botspawn <multi-word name>, .delbotspawn <multi-word name>, .listbotspawn, .placebot <number> <multi-word name>");
             Server.PrintToChatAll($" {ChatColors.Green}Nades: {ChatColors.Default}.loadnade, .savenade, .importnade, .listnades");
@@ -1219,6 +1236,18 @@ namespace MatchZy
 
         private void ApplyBotShootingState()
         {
+            if (isSpawningBot)
+            {
+                // A new controller can become alive before it is adopted and stripped.
+                // Keep all bot AI dormant until creation finishes so it cannot throw its
+                // default utility during that asynchronous window.
+                Server.ExecuteCommand("bot_dont_shoot 1");
+                Server.ExecuteCommand("bot_stop 1");
+                Server.ExecuteCommand("bot_zombie 1");
+                Server.ExecuteCommand("bot_freeze 1");
+                return;
+            }
+
             if (botShootingEnabled)
             {
                 // CS2 uses custom_bot_difficulty for offline games and bot_difficulty otherwise.
@@ -1236,10 +1265,168 @@ namespace MatchZy
                 return;
             }
 
+            if (botJiggleEnabled)
+            {
+                Server.ExecuteCommand("bot_dont_shoot 1");
+                // Jiggle positions are driven directly by the plugin. Keep native AI
+                // locomotion dormant so randomly unselected bots retain the original
+                // completely stationary turret behavior.
+                Server.ExecuteCommand("bot_stop 1");
+                Server.ExecuteCommand("bot_zombie 1");
+                Server.ExecuteCommand("bot_freeze 1");
+                return;
+            }
+
             Server.ExecuteCommand("bot_dont_shoot 1");
             Server.ExecuteCommand("bot_stop 1");
             Server.ExecuteCommand("bot_zombie 1");
             Server.ExecuteCommand("bot_freeze 1");
+        }
+
+        [ConsoleCommand("css_botjiggle", "Toggles short side-to-side movement for practice bots")]
+        public void OnBotJiggleCommand(CCSPlayerController? player, CommandInfo command)
+        {
+            HandleBotJiggleCommand(player, command.ArgString);
+        }
+
+        private void HandleBotJiggleCommand(CCSPlayerController? player, string commandArg)
+        {
+            if (!isPractice || !IsPlayerValid(player)) return;
+
+            if (!TryResolveBooleanToggle(commandArg, botJiggleEnabled, out bool enabled))
+            {
+                ReplyToUserCommand(player, Localizer["matchzy.cc.usage", ".botjiggle"]);
+                return;
+            }
+
+            SetPracticeBotJiggle(player, enabled);
+        }
+
+        private bool SetPracticeBotJiggle(CCSPlayerController? player, bool enabled)
+        {
+            if (!isPractice || !IsPlayerValid(player)) return false;
+
+            bool randomWasEnabled = botJiggleRandomEnabled;
+            botJiggleEnabled = enabled;
+            ResetBotJiggleMotionTiming();
+            if (!enabled)
+            {
+                botJiggleRandomEnabled = false;
+                botRandomJiggleAssignments.Clear();
+                RecenterTrackedPracticeBots();
+            }
+
+            ApplyBotShootingState();
+            string status = enabled ? Localizer["matchzy.cc.enabled"] : Localizer["matchzy.cc.disabled"];
+            string suffix = !enabled && randomWasEnabled ? " Random bot jiggling was also disabled." : string.Empty;
+            ReplyToUserCommand(player, $"Bot jiggling is {status}.{suffix}");
+            return true;
+        }
+
+        [ConsoleCommand("css_botjigglerandom", "Randomly selects which practice bots jiggle")]
+        public void OnBotJiggleRandomCommand(CCSPlayerController? player, CommandInfo command)
+        {
+            HandleBotJiggleRandomCommand(player, command.ArgString);
+        }
+
+        private void HandleBotJiggleRandomCommand(CCSPlayerController? player, string commandArg)
+        {
+            if (!isPractice || !IsPlayerValid(player)) return;
+
+            if (!TryResolveBooleanToggle(commandArg, botJiggleRandomEnabled, out bool enabled))
+            {
+                ReplyToUserCommand(player, Localizer["matchzy.cc.usage", ".botjigglerandom"]);
+                return;
+            }
+
+            SetPracticeBotJiggleRandom(player, enabled);
+        }
+
+        private bool SetPracticeBotJiggleRandom(CCSPlayerController? player, bool enabled)
+        {
+            if (!isPractice || !IsPlayerValid(player)) return false;
+            if (enabled && !botJiggleEnabled)
+            {
+                ReplyToUserCommand(player, "Enable .botjiggle before enabling random bot jiggling.");
+                return false;
+            }
+
+            botJiggleRandomEnabled = enabled;
+            ResetRandomBotJiggleAssignments();
+            ResetBotJiggleMotionTiming();
+
+            string status = enabled ? Localizer["matchzy.cc.enabled"] : Localizer["matchzy.cc.disabled"];
+            ReplyToUserCommand(player, $"Random bot jiggling is {status}.");
+            return true;
+        }
+
+        private void ResetRandomBotJiggleAssignments()
+        {
+            botRandomJiggleAssignments.Clear();
+            if (!botJiggleEnabled || !botJiggleRandomEnabled) return;
+
+            foreach (int botUserId in pracUsedBots.Keys)
+            {
+                AssignRandomBotJiggle(botUserId);
+            }
+        }
+
+        private void AssignRandomBotJiggle(int botUserId)
+        {
+            botRandomJiggleAssignments[botUserId] = Random.Shared.Next(2) == 0;
+        }
+
+        private bool ShouldPracticeBotJiggle(int botUserId)
+        {
+            if (!botJiggleEnabled) return false;
+            if (!botJiggleRandomEnabled) return true;
+
+            if (!botRandomJiggleAssignments.TryGetValue(botUserId, out bool shouldJiggle))
+            {
+                AssignRandomBotJiggle(botUserId);
+                shouldJiggle = botRandomJiggleAssignments[botUserId];
+            }
+
+            return shouldJiggle;
+        }
+
+        private void PauseBotJiggle(int botUserId, CCSPlayerPawn pawn)
+        {
+            if (!botJigglePauseStartTimes.TryAdd(botUserId, Server.CurrentTime)) return;
+
+            Vector? currentPosition = pawn.AbsOrigin;
+            if (currentPosition != null)
+            {
+                botJiggleHoldPositions[botUserId] = new Vector(
+                    currentPosition.X,
+                    currentPosition.Y,
+                    currentPosition.Z);
+            }
+        }
+
+        private void ResumeBotJiggle(int botUserId)
+        {
+            botJiggleHoldPositions.Remove(botUserId);
+            if (!botJigglePauseStartTimes.Remove(botUserId, out float pauseStartTime)) return;
+
+            float pauseDuration = Math.Max(0.0f, Server.CurrentTime - pauseStartTime);
+            botJiggleAccumulatedPauseDurations[botUserId] =
+                botJiggleAccumulatedPauseDurations.GetValueOrDefault(botUserId) + pauseDuration;
+        }
+
+        private void ClearBotJiggleMotionTiming(int botUserId)
+        {
+            botJigglePauseStartTimes.Remove(botUserId);
+            botJiggleAccumulatedPauseDurations.Remove(botUserId);
+            botJiggleHoldPositions.Remove(botUserId);
+        }
+
+        private void ResetBotJiggleMotionTiming()
+        {
+            botJigglePauseStartTimes.Clear();
+            botJiggleAccumulatedPauseDurations.Clear();
+            botJiggleHoldPositions.Clear();
+            botJiggleCycleStartTime = Server.CurrentTime;
         }
 
         [ConsoleCommand("css_botreactiontime", "Sets the practice bot reaction time in milliseconds")]
@@ -1501,6 +1688,8 @@ namespace MatchZy
             practiceRoundHumanSpawnAssignments.Clear();
             botHealthCeilings.Clear();
             ResetTurretCombatState();
+            ResetRandomBotJiggleAssignments();
+            ResetBotJiggleMotionTiming();
 
             Server.ExecuteCommand(string.Create(
                 CultureInfo.InvariantCulture,
@@ -1832,6 +2021,12 @@ namespace MatchZy
             CCSPlayerController? player = Utilities.GetPlayerFromSlot(playerSlot);
             if (player == null || !player.IsValid || player.IsHLTV || !player.PlayerPawn.IsValid) return;
 
+            if (player.IsBot && player.UserId.HasValue)
+            {
+                botRandomJiggleAssignments.Remove(player.UserId.Value);
+                ClearBotJiggleMotionTiming(player.UserId.Value);
+            }
+
             CCSPlayerPawn? pawn = player.PlayerPawn.Value;
             if (pawn == null || !pawn.IsValid) return;
 
@@ -1856,17 +2051,24 @@ namespace MatchZy
             });
         }
 
-        private void LockShootingBotsInPlace()
+        private void ControlPracticeBots()
         {
-            MaintainPracticeRoundTimeout();
+            if (!isPractice) return;
+
+            CCSGameRules? gameRules = GetPracticeGameRules();
+            MaintainPracticeRoundTimeout(gameRules);
             MaintainBotLifeRegeneration();
             MaintainPracticeHumanGodModes();
             MaintainHumanLifeRegeneration();
             MaintainHumanPracticeArmor();
+            MaintainTrackedPracticeBotUtilityRemoval();
 
-            if (!isPractice || !botShootingEnabled || pracUsedBots.Count == 0) return;
+            if ((!botShootingEnabled && !botJiggleEnabled) || pracUsedBots.Count == 0) return;
 
-            IReadOnlyList<Vector> smokeOcclusionCenters = GetActiveSmokeOcclusionCenters();
+            IReadOnlyList<Vector> smokeOcclusionCenters = botShootingEnabled
+                ? GetActiveSmokeOcclusionCenters()
+                : Array.Empty<Vector>();
+            bool jiggleAllowed = gameRules?.FreezePeriod != true;
             foreach (Dictionary<string, object> botData in pracUsedBots.Values)
             {
                 if (!botData.TryGetValue("controller", out object? controllerValue) ||
@@ -1883,11 +2085,13 @@ namespace MatchZy
                 if (pawn == null || !pawn.IsValid) continue;
 
                 CCSBot? botState = pawn.Bot;
-                if (botState == null) continue;
+                if (botState == null || !bot.UserId.HasValue) continue;
 
-                // Clear navigation input as well as correcting the physical position. This
-                // prevents the running animation and diagonal movement attempt from surviving
-                // even when the bot AI produces another pathfinding decision.
+                int botUserId = bot.UserId.Value;
+                bool shouldJiggle = jiggleAllowed && ShouldPracticeBotJiggle(botUserId);
+
+                // Clear AI navigation input before applying any plugin-controlled lateral
+                // movement, so native pathfinding cannot pull the bot away from its anchor.
                 botState.ForwardSpeed = 0.0f;
                 botState.LeftSpeed = 0.0f;
                 botState.VerticalSpeed = 0.0f;
@@ -1899,11 +2103,20 @@ namespace MatchZy
                     (ulong)PlayerButtons.Moveright |
                     (ulong)PlayerButtons.Jump);
 
+                if (!botShootingEnabled)
+                {
+                    ResumeBotJiggle(botUserId);
+                    ResetTurretReaction(bot, botState);
+                    PositionPracticeBot(pawn, botState, lockedPosition, lockedPosition.PlayerAngle, botUserId, shouldJiggle);
+                    continue;
+                }
+
                 CCSPlayerPawn? targetPawn = FindTurretTarget(bot, botState);
                 if (targetPawn == null)
                 {
+                    ResumeBotJiggle(botUserId);
                     ResetTurretReaction(bot, botState);
-                    LockBotPosition(pawn, lockedPosition, null);
+                    PositionPracticeBot(pawn, botState, lockedPosition, null, botUserId, shouldJiggle);
                     continue;
                 }
 
@@ -1914,7 +2127,9 @@ namespace MatchZy
                 Vector? targetOrigin = targetPawn.AbsOrigin;
                 if (targetOrigin == null)
                 {
+                    ResumeBotJiggle(botUserId);
                     ResetTurretReaction(bot, botState);
+                    PositionPracticeBot(pawn, botState, lockedPosition, null, botUserId, shouldJiggle);
                     continue;
                 }
                 float targetX = targetOrigin.X + targetPawn.ViewOffset.X;
@@ -1931,16 +2146,32 @@ namespace MatchZy
                 float yaw = MathF.Atan2(deltaY, deltaX) * 180.0f / MathF.PI;
                 QAngle aimAngle = new(pitch, yaw, 0.0f);
 
-                LockBotPosition(pawn, lockedPosition, aimAngle);
-                bot.ExecuteClientCommandFromServer(string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"setang {pitch:R} {yaw:R} 0"));
-
                 // CS2 can leave IsEnemyVisible set while smoke is between the bot and target.
                 // Require both native visibility and an unobstructed sightline through active
                 // smoke volumes. Losing either starts a fresh reaction delay.
                 bool targetVisible = targetWasCurrentEnemy && botState.IsEnemyVisible &&
                     !IsSightLineBlockedBySmoke(botEye, targetEye, smokeOcclusionCenters);
+
+                if (shouldJiggle && targetVisible)
+                {
+                    PauseBotJiggle(botUserId, pawn);
+                    StopPracticeBotAtCurrentPosition(pawn, botState, aimAngle, botUserId);
+                }
+                else
+                {
+                    ResumeBotJiggle(botUserId);
+                    PositionPracticeBot(
+                        pawn,
+                        botState,
+                        lockedPosition,
+                        aimAngle,
+                        botUserId,
+                        shouldJiggle);
+                }
+                bot.ExecuteClientCommandFromServer(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"setang {pitch:R} {yaw:R} 0"));
+
                 UpdateTurretReaction(bot, botState, targetHandle, targetVisible);
             }
         }
@@ -2342,29 +2573,156 @@ namespace MatchZy
                 (targetTeam == (byte)CsTeam.Terrorist || targetTeam == (byte)CsTeam.CounterTerrorist);
         }
 
-        private static void LockBotPosition(CCSPlayerPawn pawn, Position lockedPosition, QAngle? aimAngle)
+        private void PositionPracticeBot(
+            CCSPlayerPawn pawn,
+            CCSBot botState,
+            Position lockedPosition,
+            QAngle? aimAngle,
+            int botUserId,
+            bool shouldJiggle)
         {
             System.Numerics.Vector3? teleportAngle = aimAngle == null
                 ? null
                 : new System.Numerics.Vector3(0.0f, aimAngle.Y, 0.0f);
 
+            float offset = 0.0f;
+            float lateralSpeed = 0.0f;
+            botState.IsRunning = shouldJiggle;
+            if (!shouldJiggle)
+            {
+                ClearPracticeBotLocomotion(pawn, botState);
+            }
+            if (shouldJiggle)
+            {
+                float radiansPerSecond = 2.0f * MathF.PI / PracticeBotJigglePeriodSeconds;
+                float phase = (Math.Abs(botUserId) % 8) * (MathF.PI / 4.0f);
+                float pausedDuration = botJiggleAccumulatedPauseDurations.GetValueOrDefault(botUserId);
+                float cycle = (Server.CurrentTime - botJiggleCycleStartTime - pausedDuration) *
+                    radiansPerSecond + phase;
+                offset = MathF.Sin(cycle) * PracticeBotJiggleDistance;
+                lateralSpeed = MathF.Cos(cycle) * PracticeBotJiggleDistance * radiansPerSecond;
+
+                botState.LeftSpeed = lateralSpeed;
+                if (lateralSpeed >= 0.0f)
+                {
+                    botState.ButtonFlags |= (ulong)PlayerButtons.Moveleft;
+                }
+                else
+                {
+                    botState.ButtonFlags |= (ulong)PlayerButtons.Moveright;
+                }
+            }
+
+            float savedYawRadians = lockedPosition.PlayerAngle.Y * MathF.PI / 180.0f;
+            float strafeX = -MathF.Sin(savedYawRadians);
+            float strafeY = MathF.Cos(savedYawRadians);
+
             pawn.Teleport(
                 new System.Numerics.Vector3(
-                    lockedPosition.PlayerPosition.X,
-                    lockedPosition.PlayerPosition.Y,
+                    lockedPosition.PlayerPosition.X + strafeX * offset,
+                    lockedPosition.PlayerPosition.Y + strafeY * offset,
                     lockedPosition.PlayerPosition.Z),
                 teleportAngle,
-                System.Numerics.Vector3.Zero);
+                new System.Numerics.Vector3(
+                    strafeX * lateralSpeed,
+                    strafeY * lateralSpeed,
+                    0.0f));
         }
 
-        private void MaintainPracticeRoundTimeout()
+        private void StopPracticeBotAtCurrentPosition(
+            CCSPlayerPawn pawn,
+            CCSBot botState,
+            QAngle aimAngle,
+            int botUserId)
+        {
+            ClearPracticeBotLocomotion(pawn, botState);
+
+            if (!botJiggleHoldPositions.TryGetValue(botUserId, out Vector? holdPosition))
+            {
+                Vector? currentPosition = pawn.AbsOrigin;
+                if (currentPosition != null)
+                {
+                    holdPosition = new Vector(currentPosition.X, currentPosition.Y, currentPosition.Z);
+                    botJiggleHoldPositions[botUserId] = holdPosition;
+                }
+            }
+
+            // Lock to the exact point where this jiggle stopped. Using a concrete position
+            // gives the pawn the same fully stationary movement state as a normal turret bot
+            // without returning it to the original center anchor.
+            pawn.Teleport(
+                position: holdPosition == null
+                    ? null
+                    : new System.Numerics.Vector3(holdPosition.X, holdPosition.Y, holdPosition.Z),
+                angles: new System.Numerics.Vector3(0.0f, aimAngle.Y, 0.0f),
+                velocity: System.Numerics.Vector3.Zero);
+        }
+
+        private static void ClearPracticeBotLocomotion(CCSPlayerPawn pawn, CCSBot botState)
+        {
+            botState.ForwardSpeed = 0.0f;
+            botState.LeftSpeed = 0.0f;
+            botState.VerticalSpeed = 0.0f;
+            botState.IsRunning = false;
+            botState.ButtonFlags &= ~((ulong)PlayerButtons.Forward |
+                (ulong)PlayerButtons.Back |
+                (ulong)PlayerButtons.Left |
+                (ulong)PlayerButtons.Right |
+                (ulong)PlayerButtons.Moveleft |
+                (ulong)PlayerButtons.Moveright |
+                (ulong)PlayerButtons.Jump);
+
+            if (pawn.MovementServices == null) return;
+
+            CCSPlayer_MovementServices movementServices = new(pawn.MovementServices.Handle);
+            movementServices.CmdForwardMove = 0.0f;
+            movementServices.CmdLeftMove = 0.0f;
+            movementServices.CmdUpMove = 0.0f;
+            movementServices.ForwardMove = 0.0f;
+            movementServices.LeftMove = 0.0f;
+            movementServices.UpMove = 0.0f;
+
+            CCSPlayerAnimationState animationState = movementServices.AnimationState;
+            animationState.PreviousHorizontalSpeed = 0.0f;
+            animationState.WasStationaryLastUpdate = true;
+            animationState.GroundMoveState = CCSPlayerAnimationStateGroundMoveState_t.Idle;
+        }
+
+        private void RecenterTrackedPracticeBots()
+        {
+            foreach (KeyValuePair<int, Dictionary<string, object>> trackedBot in pracUsedBots)
+            {
+                Dictionary<string, object> botData = trackedBot.Value;
+                if (!botData.TryGetValue("controller", out object? controllerValue) ||
+                    controllerValue is not CCSPlayerController bot ||
+                    !IsPlayerValid(bot) ||
+                    !bot.PawnIsAlive ||
+                    !botData.TryGetValue("position", out object? positionValue) ||
+                    positionValue is not Position lockedPosition)
+                {
+                    continue;
+                }
+
+                CCSPlayerPawn? pawn = bot.PlayerPawn.Value;
+                CCSBot? botState = pawn?.Bot;
+                if (pawn == null || !pawn.IsValid || botState == null) continue;
+
+                botState.LeftSpeed = 0.0f;
+                botState.ButtonFlags &= ~((ulong)PlayerButtons.Moveleft | (ulong)PlayerButtons.Moveright);
+                PositionPracticeBot(pawn, botState, lockedPosition, null, trackedBot.Key, shouldJiggle: false);
+            }
+        }
+
+        private static CCSGameRules? GetPracticeGameRules()
+        {
+            return Utilities
+                .FindAllEntitiesByDesignerName<CCSGameRulesProxy>("cs_gamerules")
+                .FirstOrDefault()?.GameRules;
+        }
+
+        private void MaintainPracticeRoundTimeout(CCSGameRules? gameRules)
         {
             if (!isPractice || practiceRoundTimeoutEnding) return;
-
-            CCSGameRulesProxy? gameRulesProxy = Utilities
-                .FindAllEntitiesByDesignerName<CCSGameRulesProxy>("cs_gamerules")
-                .FirstOrDefault();
-            CCSGameRules? gameRules = gameRulesProxy?.GameRules;
             if (gameRules == null || gameRules.FreezePeriod || gameRules.RoundWinStatus != 0)
             {
                 return;
@@ -2523,6 +2881,8 @@ namespace MatchZy
                 };
                 practiceBotPlacementOrder.Remove(trackedBotUserId);
                 practiceBotPlacementOrder.Add(trackedBotUserId);
+                ClearBotJiggleMotionTiming(trackedBotUserId);
+                if (botJiggleRandomEnabled) AssignRandomBotJiggle(trackedBotUserId);
 
                 StripPracticeBotUtility(tempPlayer);
                 AddTimer(0.1f, () => StripTrackedPracticeBotUtility(trackedBotUserId));
@@ -2810,6 +3170,7 @@ namespace MatchZy
                 humanNextRegenerationTimes.Remove(userId);
                 botReactionStates.Remove(userId);
                 turretBotsAttacking.Remove(userId);
+                ClearBotJiggleMotionTiming(userId);
                 CCSBot? deadBotState = player.PlayerPawn.Value?.Bot;
                 if (deadBotState != null)
                 {
@@ -2861,6 +3222,8 @@ namespace MatchZy
                 botHealthCeilings.Remove(botUserId);
                 botReactionStates.Remove(botUserId);
                 turretBotsAttacking.Remove(botUserId);
+                botRandomJiggleAssignments.Remove(botUserId);
+                ClearBotJiggleMotionTiming(botUserId);
 
                 CCSPlayerController? bot = botData.TryGetValue("controller", out object? controller)
                     ? controller as CCSPlayerController
@@ -3390,6 +3753,10 @@ namespace MatchZy
             Log($"[PracticeBotCleanup] Starting replacement generation {loadGeneration}. {DescribePracticeBotState()}");
             pracUsedBots = new Dictionary<int, Dictionary<string, object>>();
             practiceBotPlacementOrder.Clear();
+            botRandomJiggleAssignments.Clear();
+            botJigglePauseStartTimes.Clear();
+            botJiggleAccumulatedPauseDurations.Clear();
+            botJiggleHoldPositions.Clear();
             KickAllPracticeBots();
             ApplyBotShootingState();
             Server.ExecuteCommand("bot_dont_shoot 1");
@@ -3595,6 +3962,8 @@ namespace MatchZy
             };
             practiceBotPlacementOrder.Remove(restoredBotUserId);
             practiceBotPlacementOrder.Add(restoredBotUserId);
+            ClearBotJiggleMotionTiming(restoredBotUserId);
+            if (botJiggleRandomEnabled) AssignRandomBotJiggle(restoredBotUserId);
 
             StripPracticeBotUtility(restoredBot);
             AddTimer(0.1f, () => StripTrackedPracticeBotUtility(restoredBotUserId));
@@ -3713,6 +4082,24 @@ namespace MatchZy
             StripPracticeBotUtility(bot);
         }
 
+        private void MaintainTrackedPracticeBotUtilityRemoval()
+        {
+            if (!isPractice || pracUsedBots.Count == 0) return;
+
+            foreach (Dictionary<string, object> botData in pracUsedBots.Values)
+            {
+                if (!botData.TryGetValue("controller", out object? controllerValue) ||
+                    controllerValue is not CCSPlayerController bot ||
+                    !IsPlayerValid(bot) ||
+                    !bot.PawnIsAlive)
+                {
+                    continue;
+                }
+
+                StripPracticeBotUtility(bot);
+            }
+        }
+
         private static void StripPracticeBotUtility(CCSPlayerController bot)
         {
             if (!bot.IsValid || !bot.IsBot || bot.IsHLTV || !bot.PawnIsAlive) return;
@@ -3795,6 +4182,10 @@ namespace MatchZy
             KickAllPracticeBots();
             pracUsedBots = new Dictionary<int, Dictionary<string, object>>();
             practiceBotPlacementOrder.Clear();
+            botRandomJiggleAssignments.Clear();
+            botJigglePauseStartTimes.Clear();
+            botJiggleAccumulatedPauseDurations.Clear();
+            botJiggleHoldPositions.Clear();
             AddTimer(
                 0.1f,
                 () => EnsurePracticeBotsRemoved(cleanupGeneration, attempt: 0),
@@ -4193,12 +4584,19 @@ namespace MatchZy
             ResetTurretCombatState();
             ResetPracticeHumanGodModes();
             botShootingEnabled = false;
+            botJiggleEnabled = false;
+            botJiggleRandomEnabled = false;
             botRespawnEnabled = true;
             botLifeRegenerationEnabled = false;
             humanLifeRegenerationEnabled.Clear();
             humanLifeRegenerationDefaultEnabled = true;
             botReactionTimeMs = DefaultBotReactionTimeMs;
             botHealthCeilings.Clear();
+            botRandomJiggleAssignments.Clear();
+            botJigglePauseStartTimes.Clear();
+            botJiggleAccumulatedPauseDurations.Clear();
+            botJiggleHoldPositions.Clear();
+            botJiggleCycleStartTime = 0.0f;
             botNextRegenerationTime = 0.0f;
             humanNextRegenerationTimes.Clear();
             practiceRoundTimeoutEnding = false;

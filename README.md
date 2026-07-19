@@ -17,7 +17,8 @@ adds the following focused features, fixes, and changes.
 - Added `.botspawn <name>`, `.delbotspawn <name>`, `.listbotspawn`, and `.placebot <number> <name>` for building map-specific named spawn pools and placing utility-free bots at randomly selected, distinct saved XY positions and aim directions.
 - Added `.kicklastbot` to remove the most recently placed practice bot; repeated uses work backward through the placement order.
 - Added `.changemap <map-name>` so any player can switch to a validated map, with or without the `de_` prefix.
-- Added `.botshoot` and `.botreactiontime <0-1000>` to turn practice bots into stationary, visibility-aware opponents and configure their firing delay.
+- Added `.botshoot` and `.botreactiontime <0-1000>` to turn practice bots into position-anchored, visibility-aware opponents and configure their firing delay.
+- Added `.botjiggle` for short side-to-side movement around each bot's placed position and `.botjigglerandom` for independent 50/50 per-bot participation that rerolls when random mode is re-enabled or `.startround` is used. Jiggle bots stop at their current offset after spotting an enemy, remain still while engaging, and resume the same anchored motion after losing sight; unselected bots retain stationary turret behavior.
 - Added `.botrespawn` and `.botlifereg` to control practice-bot respawning and health regeneration independently of human players; respawned tracked bots return to their last placed position and aim direction.
 - Added per-player `.liferegon` health regeneration for human players in practice mode, enabled by default and individually opt-out.
 - Added public `.allliferegon <true/false>` control so any player can enable or disable human health regeneration for everyone in the current practice session, including later joiners.
@@ -52,6 +53,7 @@ adds the following focused features, fixes, and changes.
 - `.help` keeps its private chat list compact by showing command names without argument hints and prints detailed usage to the requesting player's console.
 - `.botshoot`, `.botrespawn`, `.botlifereg`, and `.liferegon` now toggle their current state when used without an argument; explicit `true` or `false` values remain supported.
 - Plugin-managed practice bots are created directly on their intended enemy side. Removal releases their team membership before disconnecting the fake clients, clearing dead roster slots without runtime quota rewrites; full-team `.bot` requests return promptly without disturbing the existing setup.
+- Tracked practice bots are continuously stripped of all throwable utility, including utility granted asynchronously or picked up later.
 - Practice bots controlled by `.botshoot` stop firing when an active smoke blocks their sightline and reacquire their configured reaction delay after visibility returns.
 - `.startround` starts a fresh practice round with a five-second freeze, assigns each human a different random team spawn, and keeps every tracked bot alive at its placed position and orientation.
 - `.randomspawn` safely teleports the requesting player to a randomly selected competitive spawn for their current T or CT side.

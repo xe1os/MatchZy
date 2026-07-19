@@ -431,6 +431,10 @@ namespace MatchZy
                 // Reset owned bots data
                 pracUsedBots = new Dictionary<int, Dictionary<string, object>>();
                 practiceBotPlacementOrder.Clear();
+                botRandomJiggleAssignments.Clear();
+                botJigglePauseStartTimes.Clear();
+                botJiggleAccumulatedPauseDurations.Clear();
+                botJiggleHoldPositions.Clear();
                 noFlashList = new();
                 lastGrenadesData = new();
                 nadeSpecificLastGrenadeData = new();
@@ -1410,8 +1414,13 @@ namespace MatchZy
                 PrintAvailableCommandCategory(
                     player,
                     "Bots",
-                    ".bot, .nobots, .kicklastbot, .botshoot, .botreactiontime, .botrespawn, .botlifereg, .crouchbot, .boost, .crouchboost",
-                    ".bot, .nobots, .kicklastbot, .botshoot, .botreactiontime <0-1000>, .botrespawn, .botlifereg, .crouchbot, .boost, .crouchboost");
+                    ".bot, .nobots, .kicklastbot, .crouchbot, .boost, .crouchboost",
+                    ".bot, .nobots, .kicklastbot, .crouchbot, .boost, .crouchboost");
+                PrintAvailableCommandCategory(
+                    player,
+                    "Bot Settings",
+                    ".botshoot, .botjiggle, .botjigglerandom, .botreactiontime, .botrespawn, .botlifereg",
+                    ".botshoot, .botjiggle, .botjigglerandom, .botreactiontime <0-1000>, .botrespawn, .botlifereg");
                 PrintAvailableCommandCategory(
                     player,
                     "Bot Presets",

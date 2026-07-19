@@ -158,6 +158,8 @@
   "matchzy.menu.delete_bot_positions": "Delete Bot Pos",
   "matchzy.menu.no_bot_positions": "No saved Bot Positions",
   "matchzy.menu.bot_shooting": "Bot Shooting",
+  "matchzy.menu.bot_jiggle": "Bot Jiggle",
+  "matchzy.menu.bot_jiggle_random": "Random Bot Jiggle",
   "matchzy.menu.bot_reaction_time": "Bot Reaction Time",
   "matchzy.menu.bot_respawn": "Bot Respawn",
   "matchzy.menu.bot_hp_regeneration": "Bot HP Regeneration",
