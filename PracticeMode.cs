@@ -147,6 +147,7 @@ namespace MatchZy
 
         // This map stores the bots which are being used in prac (probably spawned using .bot). Key is the userid of the bot.
         public Dictionary<int, Dictionary<string, object>> pracUsedBots = new Dictionary<int, Dictionary<string, object>>();
+        private readonly List<int> practiceBotPlacementOrder = new();
 
         private CounterStrikeSharp.API.Modules.Timers.Timer? collisionGroupTimer;
 
@@ -159,11 +160,14 @@ namespace MatchZy
         private readonly HashSet<int> humanLifeRegenerationEnabled = new();
         private int botReactionTimeMs = DefaultBotReactionTimeMs;
         private bool practiceRoundTimeoutEnding;
+        private bool practiceRoundRestartPending;
+        private int practiceRoundRestartGeneration;
         private readonly Dictionary<int, int> botHealthCeilings = new();
         private float botNextRegenerationTime;
         private readonly Dictionary<int, float> humanNextRegenerationTimes = new();
         private readonly Dictionary<int, (uint TargetHandle, float VisibleSince)> botReactionStates = new();
         private readonly HashSet<int> turretBotsAttacking = new();
+        private readonly List<Vector> activeSmokeOcclusionCenters = new();
         private readonly Dictionary<int, uint> disconnectingPracticeHumanPawnHandles = new();
 
         private const int DefaultBotReactionTimeMs = 500;
@@ -171,6 +175,11 @@ namespace MatchZy
         private const float PracticeRespawnDelaySeconds = 0.5f;
         private const float PracticeSideInventoryUpdateDelaySeconds = PracticeRespawnDelaySeconds + 0.1f;
         private const float PracticeLifeRegenerationIntervalSeconds = 0.1f;
+        private const float PracticeSmokeOcclusionRadius = 144.0f;
+        private const float PracticeSmokeCacheIntervalSeconds = 0.1f;
+        private const float PracticeStartRoundFreezeSeconds = 5.0f;
+        private const float PracticeStartRoundResetDelaySeconds = 7.0f;
+        private float nextSmokeOcclusionRefreshTime;
 
         public bool isDryRun = false;
 
@@ -206,7 +215,7 @@ namespace MatchZy
                 Log($"[StartWarmup] Starting Practice Mode! Practice CFG not found in {absolutePath}, using default CFG!");
                 Server.ExecuteCommand("""sv_cheats "true"; mp_force_pick_time "0"; bot_quota "0"; sv_showimpacts "1"; mp_limitteams "0"; sv_deadtalk "true"; sv_full_alltalk "true"; sv_ignoregrenaderadio "false"; mp_forcecamera "0"; sv_grenade_trajectory_prac_pipreview "true"; sv_grenade_trajectory_prac_trailtime "3"; sv_infinite_ammo "1"; weapon_auto_cleanup_time "15"; weapon_max_before_cleanup "30"; mp_buy_anywhere "1"; mp_maxmoney "9999999"; mp_startmoney "9999999";""");
                 Server.ExecuteCommand("""mp_weapons_allow_typecount "-1"; mp_death_drop_breachcharge "false"; mp_death_drop_defuser "false"; mp_death_drop_taser "false"; mp_drop_knife_enable "true"; mp_death_drop_grenade "0"; ammo_grenade_limit_total "5"; mp_defuser_allocation "2"; mp_free_armor "2"; mp_ct_default_grenades "weapon_incgrenade weapon_hegrenade weapon_smokegrenade weapon_flashbang weapon_decoy"; mp_ct_default_primary "weapon_m4a1";""");
-                Server.ExecuteCommand("""mp_t_default_grenades "weapon_molotov weapon_hegrenade weapon_smokegrenade weapon_flashbang weapon_decoy"; mp_t_default_primary "weapon_ak47"; mp_warmup_online_enabled "true"; mp_warmup_pausetimer "1"; mp_warmup_start; bot_quota_mode fill; mp_solid_teammates 2; mp_autoteambalance false; mp_teammates_are_enemies false;""");
+                Server.ExecuteCommand("""mp_t_default_grenades "weapon_molotov weapon_hegrenade weapon_smokegrenade weapon_flashbang weapon_decoy"; mp_t_default_primary "weapon_ak47"; mp_warmup_online_enabled "true"; mp_warmup_pausetimer "1"; mp_warmup_start; bot_quota_mode normal; mp_solid_teammates 2; mp_autoteambalance false; mp_teammates_are_enemies false;""");
             }
             DisablePracticeTeamDamagePenalties();
             Server.NextFrame(DisablePracticeTeamDamagePenalties);
@@ -216,10 +225,14 @@ namespace MatchZy
             humanLifeRegenerationEnabled.Clear();
             botReactionTimeMs = DefaultBotReactionTimeMs;
             botHealthCeilings.Clear();
+            pracUsedBots = new Dictionary<int, Dictionary<string, object>>();
+            practiceBotPlacementOrder.Clear();
             botNextRegenerationTime = 0.0f;
             humanNextRegenerationTimes.Clear();
             ResetTurretCombatState();
             practiceRoundTimeoutEnding = false;
+            practiceRoundRestartPending = false;
+            practiceRoundRestartGeneration++;
             // Respawns are handled per player so bot respawns can be toggled without affecting humans.
             Server.ExecuteCommand("mp_respawn_on_death_ct 0; mp_respawn_on_death_t 0");
             // Human regeneration is managed per player by .liferegon. Disable the
@@ -238,15 +251,16 @@ namespace MatchZy
             PrintToAllChat($"Practice mode loaded!");
             Server.PrintToChatAll($" {ChatColors.Green}Configuration: {ChatColors.Default}.menu");
             Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawn, .ctspawn, .tspawn, .bestspawn, .worstspawn");
-            Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawnmarkers");
-            Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.bot, .nobots, .botshoot <true/false>, .botreactiontime <0-1000>, .botrespawn <true/false>, .botlifereg <true/false>, .crouchbot, .boost, .crouchboost");
+            Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawnmarkers, .randomspawn");
+            Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.bot, .nobots, .kicklastbot, .botshoot, .botreactiontime <0-1000>, .botrespawn, .botlifereg, .crouchbot, .boost, .crouchboost");
             Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.sbp <name>, .lbp <name>, .dbp <name>, .listbp");
+            Server.PrintToChatAll($" {ChatColors.Green}Bot Spawns: {ChatColors.Default}.botspawn <multi-word name>, .delbotspawn <multi-word name>, .listbotspawn, .placebot <number> <multi-word name>");
             Server.PrintToChatAll($" {ChatColors.Green}Nades: {ChatColors.Default}.loadnade, .savenade, .importnade, .listnades");
             Server.PrintToChatAll($" {ChatColors.Green}Nade Throw: {ChatColors.Default}.rethrow, .throwindex <index>, .lastindex, .delay <number>");
-            Server.PrintToChatAll($" {ChatColors.Green}Utility & Toggles: {ChatColors.Default}.clear, .fastforward, .last, .back, .solid, .impacts, .traj");
+            Server.PrintToChatAll($" {ChatColors.Green}Utility & Toggles: {ChatColors.Default}.startround, .clear, .fastforward, .last, .back, .solid, .impacts, .traj");
             // On new line to prevent text cutting off
             Server.PrintToChatAll($" {ChatColors.Green}Locations: {ChatColors.Default}.slp, .tlp, .dlp, .savepos, .loadpos");
-            Server.PrintToChatAll($" {ChatColors.Green}Health: {ChatColors.Default}.liferegon <true/false>");
+            Server.PrintToChatAll($" {ChatColors.Green}Health: {ChatColors.Default}.liferegon");
             Server.PrintToChatAll($" {ChatColors.Green}Sides & Others: {ChatColors.Default}.ct, .t, .spec, .fas, .god, .dryrun, .break, .exitprac");
         }
 
@@ -1039,6 +1053,7 @@ namespace MatchZy
 
             Server.ExecuteCommand("bot_kick");
             pracUsedBots = new Dictionary<int, Dictionary<string, object>>();
+            practiceBotPlacementOrder.Clear();
             noFlashList = new();
 
             ExecUnpracCommands();
@@ -1065,6 +1080,39 @@ namespace MatchZy
                 // ReplyToUserCommand(player, $"Usage: !spawn <round>");
                 ReplyToUserCommand(player, Localizer["matchzy.cc.usage", $"!spawn <round>"]);
             }
+        }
+
+        [ConsoleCommand("css_randomspawn", "Teleports the player to a random competitive spawn for their current side")]
+        public void OnRandomSpawnCommand(CCSPlayerController? player, CommandInfo? command)
+        {
+            if (!isPractice || !IsPlayerValid(player)) return;
+            if (player!.Team != CsTeam.Terrorist && player.Team != CsTeam.CounterTerrorist)
+            {
+                ReplyToUserCommand(player, ".randomspawn requires you to be on the T or CT side.");
+                return;
+            }
+            if (!player.PawnIsAlive)
+            {
+                ReplyToUserCommand(player, ".randomspawn requires you to be alive.");
+                return;
+            }
+
+            if (!spawnsData.TryGetValue(player.TeamNum, out List<Position>? teamSpawns) || teamSpawns.Count == 0)
+            {
+                GetSpawns();
+                if (!spawnsData.TryGetValue(player.TeamNum, out teamSpawns) || teamSpawns.Count == 0)
+                {
+                    ReplyToUserCommand(player, "No competitive spawn positions are available for your side.");
+                    return;
+                }
+            }
+
+            int spawnIndex = Random.Shared.Next(teamSpawns.Count);
+            Position selectedSpawn = teamSpawns[spawnIndex];
+            PlayerTeleport.TeleportSafely(player, selectedSpawn.PlayerPosition, selectedSpawn.PlayerAngle);
+
+            string sideName = player.Team == CsTeam.Terrorist ? "T" : "CT";
+            ReplyToUserCommand(player, $"Moved to random {sideName} spawn {spawnIndex + 1}/{teamSpawns.Count}.");
         }
 
         [ConsoleCommand("css_ctspawn", "Teleport to provided CT spawn")]
@@ -1120,19 +1168,19 @@ namespace MatchZy
             AddBot(player, true);
         }
 
-        [ConsoleCommand("css_botshoot", "Controls whether practice bots can shoot enemies")]
+        [ConsoleCommand("css_botshoot", "Toggles whether practice bots can shoot enemies")]
         public void OnBotShootCommand(CCSPlayerController? player, CommandInfo command)
         {
-            HandleBotShootCommand(player, command.ArgByIndex(1));
+            HandleBotShootCommand(player, command.ArgString);
         }
 
         private void HandleBotShootCommand(CCSPlayerController? player, string commandArg)
         {
             if (!isPractice || !IsPlayerValid(player)) return;
 
-            if (!bool.TryParse(commandArg.Trim(), out bool enabled))
+            if (!TryResolveBooleanToggle(commandArg, botShootingEnabled, out bool enabled))
             {
-                ReplyToUserCommand(player, Localizer["matchzy.cc.usage", ".botshoot <true/false>"]);
+                ReplyToUserCommand(player, Localizer["matchzy.cc.usage", ".botshoot"]);
                 return;
             }
 
@@ -1205,19 +1253,19 @@ namespace MatchZy
             return true;
         }
 
-        [ConsoleCommand("css_botrespawn", "Controls whether practice bots respawn after death")]
+        [ConsoleCommand("css_botrespawn", "Toggles whether practice bots respawn after death")]
         public void OnBotRespawnCommand(CCSPlayerController? player, CommandInfo command)
         {
-            HandleBotRespawnCommand(player, command.ArgByIndex(1));
+            HandleBotRespawnCommand(player, command.ArgString);
         }
 
         private void HandleBotRespawnCommand(CCSPlayerController? player, string commandArg)
         {
             if (!isPractice || !IsPlayerValid(player)) return;
 
-            if (!bool.TryParse(commandArg.Trim(), out bool enabled))
+            if (!TryResolveBooleanToggle(commandArg, botRespawnEnabled, out bool enabled))
             {
-                ReplyToUserCommand(player, Localizer["matchzy.cc.usage", ".botrespawn <true/false>"]);
+                ReplyToUserCommand(player, Localizer["matchzy.cc.usage", ".botrespawn"]);
                 return;
             }
 
@@ -1242,19 +1290,19 @@ namespace MatchZy
             return true;
         }
 
-        [ConsoleCommand("css_botlifereg", "Controls automatic health regeneration for practice bots")]
+        [ConsoleCommand("css_botlifereg", "Toggles automatic health regeneration for practice bots")]
         public void OnBotLifeRegenerationCommand(CCSPlayerController? player, CommandInfo command)
         {
-            HandleBotLifeRegenerationCommand(player, command.ArgByIndex(1));
+            HandleBotLifeRegenerationCommand(player, command.ArgString);
         }
 
         private void HandleBotLifeRegenerationCommand(CCSPlayerController? player, string commandArg)
         {
             if (!isPractice || !IsPlayerValid(player)) return;
 
-            if (!bool.TryParse(commandArg.Trim(), out bool enabled))
+            if (!TryResolveBooleanToggle(commandArg, botLifeRegenerationEnabled, out bool enabled))
             {
-                ReplyToUserCommand(player, Localizer["matchzy.cc.usage", ".botlifereg <true/false>"]);
+                ReplyToUserCommand(player, Localizer["matchzy.cc.usage", ".botlifereg"]);
                 return;
             }
 
@@ -1281,23 +1329,36 @@ namespace MatchZy
             return true;
         }
 
-        [ConsoleCommand("css_liferegon", "Controls automatic health regeneration for the requesting human player")]
+        [ConsoleCommand("css_liferegon", "Toggles automatic health regeneration for the requesting human player")]
         public void OnHumanLifeRegenerationCommand(CCSPlayerController? player, CommandInfo command)
         {
-            HandleHumanLifeRegenerationCommand(player, command.ArgByIndex(1));
+            HandleHumanLifeRegenerationCommand(player, command.ArgString);
         }
 
         private void HandleHumanLifeRegenerationCommand(CCSPlayerController? player, string commandArg)
         {
             if (!isPractice || !IsPlayerValid(player) || player!.IsBot || player.IsHLTV || !player.UserId.HasValue) return;
 
-            if (!bool.TryParse(commandArg.Trim(), out bool enabled))
+            bool currentlyEnabled = humanLifeRegenerationEnabled.Contains(player.UserId.Value);
+            if (!TryResolveBooleanToggle(commandArg, currentlyEnabled, out bool enabled))
             {
-                ReplyToUserCommand(player, Localizer["matchzy.cc.usage", ".liferegon <true/false>"]);
+                ReplyToUserCommand(player, Localizer["matchzy.cc.usage", ".liferegon"]);
                 return;
             }
 
             SetPracticeHumanLifeRegeneration(player, enabled);
+        }
+
+        private static bool TryResolveBooleanToggle(string commandArg, bool currentValue, out bool enabled)
+        {
+            string normalizedArgument = commandArg.Trim();
+            if (string.IsNullOrEmpty(normalizedArgument))
+            {
+                enabled = !currentValue;
+                return true;
+            }
+
+            return bool.TryParse(normalizedArgument, out enabled);
         }
 
         private bool SetPracticeHumanLifeRegeneration(CCSPlayerController? player, bool enabled)
@@ -1361,6 +1422,100 @@ namespace MatchZy
             }
 
             player.Respawn();
+        }
+
+        [ConsoleCommand("css_startround", "Starts a fresh practice round with a five-second freeze")]
+        public void OnStartPracticeRoundCommand(CCSPlayerController? player, CommandInfo? command)
+        {
+            if (!IsPlayerValid(player)) return;
+            if (!isPractice)
+            {
+                ReplyToUserCommand(player, ".startround is available only in practice mode.");
+                return;
+            }
+            if (practiceRoundRestartPending)
+            {
+                ReplyToUserCommand(player, "A practice round restart is already in progress.");
+                return;
+            }
+
+            practiceRoundRestartPending = true;
+            int restartGeneration = ++practiceRoundRestartGeneration;
+            botHealthCeilings.Clear();
+            ResetTurretCombatState();
+
+            Server.ExecuteCommand(string.Create(
+                CultureInfo.InvariantCulture,
+                $"mp_freezetime {PracticeStartRoundFreezeSeconds:R}; mp_restartgame 1; mp_warmup_end"));
+            AddTimer(
+                PracticeStartRoundResetDelaySeconds,
+                () => CompletePracticeRoundRestart(restartGeneration),
+                TimerFlags.STOP_ON_MAPCHANGE);
+
+            ReplyToUserCommand(player, "Restarting the practice round with a 5-second freeze.");
+        }
+
+        private void RestoreTrackedPracticeBotsAfterRoundStart()
+        {
+            if (!isPractice || !practiceRoundRestartPending) return;
+
+            foreach (int botUserId in pracUsedBots.Keys.ToList())
+            {
+                AddTimer(
+                    0.1f,
+                    () => TryRestoreTrackedPracticeBotAfterRoundStart(botUserId, attemptsRemaining: 10),
+                    TimerFlags.STOP_ON_MAPCHANGE);
+            }
+        }
+
+        private void TryRestoreTrackedPracticeBotAfterRoundStart(int botUserId, int attemptsRemaining)
+        {
+            if (!isPractice || !practiceRoundRestartPending ||
+                !pracUsedBots.TryGetValue(botUserId, out Dictionary<string, object>? botData) ||
+                !botData.TryGetValue("controller", out object? controllerValue) ||
+                controllerValue is not CCSPlayerController bot ||
+                !bot.UserId.HasValue ||
+                bot.UserId.Value != botUserId)
+            {
+                return;
+            }
+
+            if (!IsPlayerValid(bot) || !bot.PawnIsAlive)
+            {
+                if (IsPlayerValid(bot) &&
+                    (bot.Team == CsTeam.Terrorist || bot.Team == CsTeam.CounterTerrorist))
+                {
+                    bot.Respawn();
+                }
+
+                if (attemptsRemaining > 0)
+                {
+                    AddTimer(
+                        0.1f,
+                        () => TryRestoreTrackedPracticeBotAfterRoundStart(botUserId, attemptsRemaining - 1),
+                        TimerFlags.STOP_ON_MAPCHANGE);
+                }
+                return;
+            }
+
+            if (!RestoreTrackedPracticeBotPlacement(bot, botData) && attemptsRemaining > 0)
+            {
+                AddTimer(
+                    0.1f,
+                    () => TryRestoreTrackedPracticeBotAfterRoundStart(botUserId, attemptsRemaining - 1),
+                    TimerFlags.STOP_ON_MAPCHANGE);
+            }
+        }
+
+        private void CompletePracticeRoundRestart(int restartGeneration)
+        {
+            if (restartGeneration != practiceRoundRestartGeneration) return;
+
+            practiceRoundRestartPending = false;
+            if (isPractice)
+            {
+                Server.ExecuteCommand("mp_freezetime 0");
+            }
         }
 
         private void SchedulePracticeHumanRespawn(CCSPlayerController? player, float delaySeconds)
@@ -1541,6 +1696,7 @@ namespace MatchZy
 
             if (!isPractice || !botShootingEnabled || pracUsedBots.Count == 0) return;
 
+            IReadOnlyList<Vector> smokeOcclusionCenters = GetActiveSmokeOcclusionCenters();
             foreach (Dictionary<string, object> botData in pracUsedBots.Values)
             {
                 if (!botData.TryGetValue("controller", out object? controllerValue) ||
@@ -1595,6 +1751,7 @@ namespace MatchZy
                 float targetY = targetOrigin.Y + targetPawn.ViewOffset.Y;
                 float targetZ = targetOrigin.Z + targetPawn.ViewOffset.Z;
                 Vector botEye = botState.EyePosition;
+                Vector targetEye = new(targetX, targetY, targetZ);
 
                 float deltaX = targetX - botEye.X;
                 float deltaY = targetY - botEye.Y;
@@ -1609,10 +1766,71 @@ namespace MatchZy
                     CultureInfo.InvariantCulture,
                     $"setang {pitch:R} {yaw:R} 0"));
 
-                // IsEnemyVisible is calculated by the game's own bot vision. Losing sight
-                // or changing target starts a new reaction delay before firing is permitted.
-                UpdateTurretReaction(bot, botState, targetHandle, targetWasCurrentEnemy && botState.IsEnemyVisible);
+                // CS2 can leave IsEnemyVisible set while smoke is between the bot and target.
+                // Require both native visibility and an unobstructed sightline through active
+                // smoke volumes. Losing either starts a fresh reaction delay.
+                bool targetVisible = targetWasCurrentEnemy && botState.IsEnemyVisible &&
+                    !IsSightLineBlockedBySmoke(botEye, targetEye, smokeOcclusionCenters);
+                UpdateTurretReaction(bot, botState, targetHandle, targetVisible);
             }
+        }
+
+        private IReadOnlyList<Vector> GetActiveSmokeOcclusionCenters()
+        {
+            if (Server.CurrentTime < nextSmokeOcclusionRefreshTime)
+            {
+                return activeSmokeOcclusionCenters;
+            }
+
+            nextSmokeOcclusionRefreshTime = Server.CurrentTime + PracticeSmokeCacheIntervalSeconds;
+            activeSmokeOcclusionCenters.Clear();
+
+            foreach (CSmokeGrenadeProjectile smoke in Utilities
+                .FindAllEntitiesByDesignerName<CSmokeGrenadeProjectile>("smokegrenade_projectile"))
+            {
+                if (!smoke.IsValid || !smoke.DidSmokeEffect) continue;
+
+                Vector center = smoke.SmokeDetonationPos;
+                activeSmokeOcclusionCenters.Add(new Vector(center.X, center.Y, center.Z));
+            }
+
+            return activeSmokeOcclusionCenters;
+        }
+
+        private static bool IsSightLineBlockedBySmoke(
+            Vector start,
+            Vector end,
+            IReadOnlyList<Vector> smokeOcclusionCenters)
+        {
+            if (smokeOcclusionCenters.Count == 0) return false;
+
+            float lineX = end.X - start.X;
+            float lineY = end.Y - start.Y;
+            float lineZ = end.Z - start.Z;
+            float lineLengthSquared = lineX * lineX + lineY * lineY + lineZ * lineZ;
+            if (lineLengthSquared <= float.Epsilon) return false;
+
+            float radiusSquared = PracticeSmokeOcclusionRadius * PracticeSmokeOcclusionRadius;
+            foreach (Vector center in smokeOcclusionCenters)
+            {
+                float centerX = center.X - start.X;
+                float centerY = center.Y - start.Y;
+                float centerZ = center.Z - start.Z;
+                float lineFraction = (centerX * lineX + centerY * lineY + centerZ * lineZ) /
+                    lineLengthSquared;
+                lineFraction = Math.Clamp(lineFraction, 0.0f, 1.0f);
+
+                float closestX = start.X + lineX * lineFraction;
+                float closestY = start.Y + lineY * lineFraction;
+                float closestZ = start.Z + lineZ * lineFraction;
+                float distanceX = center.X - closestX;
+                float distanceY = center.Y - closestY;
+                float distanceZ = center.Z - closestZ;
+                float distanceSquared = distanceX * distanceX + distanceY * distanceY + distanceZ * distanceZ;
+                if (distanceSquared <= radiusSquared) return true;
+            }
+
+            return false;
         }
 
         private void MaintainHumanPracticeArmor()
@@ -1712,6 +1930,8 @@ namespace MatchZy
 
             botReactionStates.Clear();
             turretBotsAttacking.Clear();
+            activeSmokeOcclusionCenters.Clear();
+            nextSmokeOcclusionRefreshTime = 0.0f;
         }
 
         private void RecordPracticeBotDamage(CCSPlayerController bot, int postDamageHealth)
@@ -2034,6 +2254,7 @@ namespace MatchZy
                 }
                 isSpawningBot = true;
                 ApplyBotShootingState();
+                Server.ExecuteCommand("bot_quota_mode normal");
                 // !bot/.bot command is made using a lot of workarounds, as there is no direct way to create a bot entity and spawn it in CSSharp
                 // Hence there can be some issues with this approach. This will be revamped when we will be able to fake clients.
                 if (player.TeamNum == (byte)CsTeam.CounterTerrorist)
@@ -2088,6 +2309,8 @@ namespace MatchZy
                         pracUsedBots[tempPlayer.UserId.Value]["position"] = botOwnerPosition;
                         pracUsedBots[tempPlayer.UserId.Value]["owner"] = botOwner;
                         pracUsedBots[tempPlayer.UserId.Value]["crouchstate"] = crouch;
+                        practiceBotPlacementOrder.Remove(tempPlayer.UserId.Value);
+                        practiceBotPlacementOrder.Add(tempPlayer.UserId.Value);
 
                         // Newly added bot controllers can join dead because practice mode
                         // disables the engine's team-wide respawn cvars. Give every new bot
@@ -2114,6 +2337,7 @@ namespace MatchZy
                     PrintToAllChat(Localizer["matchzy.pm.botlimit"]);
                 }
 
+                SynchronizePracticeBotQuota();
                 isSpawningBot = false;
             }
             catch (JsonException ex)
@@ -2213,36 +2437,21 @@ namespace MatchZy
             // Respawing a bot where it was actually spawned during practice session
             if (isPractice && player!.IsValid && player.IsBot && player.UserId.HasValue)
             {
-                if (pracUsedBots.ContainsKey(player.UserId.Value))
+                if (pracUsedBots.TryGetValue(player.UserId.Value, out Dictionary<string, object>? botData))
                 {
-                    if (pracUsedBots[player.UserId.Value]["position"] is Position botPosition)
-                    {
-                        player.PlayerPawn.Value?.Teleport(botPosition.PlayerPosition, botPosition.PlayerAngle, new Vector(0, 0, 0));
-                        bool isCrouched = (bool)pracUsedBots[player.UserId.Value]["crouchstate"];
-                        if (isCrouched)
-                        {
-                            player.PlayerPawn.Value!.Flags |= (uint)PlayerFlags.FL_DUCKING;
-                            CCSPlayer_MovementServices movementService = new(player.PlayerPawn.Value.MovementServices!.Handle);
-                            AddTimer(0.1f, () => movementService.DuckAmount = 1);
-                            AddTimer(0.2f, () => player.PlayerPawn.Value.Bot!.IsCrouching = true);
-                        }
-                        CCSPlayerController? botOwner = (CCSPlayerController)pracUsedBots[player.UserId.Value]["owner"];
-                        if (botOwner != null && botOwner.IsValid && botOwner.PlayerPawn != null && botOwner.PlayerPawn.IsValid) {
-                            AddTimer(0.2f, () => TemporarilyDisableCollisions(botOwner, player));
-                        } 
-                    }
+                    RestoreTrackedPracticeBotPlacement(player, botData);
                 }
                 else if (!isSpawningBot && !player.IsHLTV)
                 {
-                    // Bot has been spawned, but we didn't spawn it, so kick it.
-                    // This most often happens when a player changes team with bot_quota_mode set to fill
-                    // Extra bots from bot_add are already handled in SpawnBot
-                    // Delay this for a few seconds to prevent crashes
-                    Log($"Kicking bot {player.PlayerName} due to erroneous spawning");
-                    AddTimer(2.5f, () =>
-                    {
-                        Server.ExecuteCommand($"bot_kick {player.PlayerName}");
-                    });
+                    // Delay removal so plugin-driven bot creation has time to adopt the
+                    // controller. Revalidate by user ID before kicking so a bot tracked by
+                    // .bot in the meantime cannot be removed by this stale callback.
+                    int untrackedBotUserId = player.UserId.Value;
+                    Log($"Scheduling untracked bot {player.PlayerName} ({untrackedBotUserId}) for cleanup");
+                    AddTimer(
+                        2.5f,
+                        () => RemoveBotIfStillUntracked(untrackedBotUserId),
+                        TimerFlags.STOP_ON_MAPCHANGE);
                 }
             }
             else if (isPractice && !player.IsBot && !player.IsHLTV && player.UserId.HasValue &&
@@ -2271,6 +2480,44 @@ namespace MatchZy
             }
 
             return HookResult.Continue;
+        }
+
+        private bool RestoreTrackedPracticeBotPlacement(
+            CCSPlayerController bot,
+            Dictionary<string, object> botData)
+        {
+            CCSPlayerPawn? pawn = bot.PlayerPawn.Value;
+            if (pawn == null || !pawn.IsValid || !bot.PawnIsAlive ||
+                !botData.TryGetValue("position", out object? positionValue) ||
+                positionValue is not Position botPosition)
+            {
+                return false;
+            }
+
+            pawn.Teleport(botPosition.PlayerPosition, botPosition.PlayerAngle, new Vector(0, 0, 0));
+            if (botData.TryGetValue("crouchstate", out object? crouchValue) &&
+                crouchValue is bool isCrouched &&
+                isCrouched)
+            {
+                pawn.Flags |= (uint)PlayerFlags.FL_DUCKING;
+                CCSPlayer_MovementServices movementService = new(pawn.MovementServices!.Handle);
+                AddTimer(0.1f, () => movementService.DuckAmount = 1);
+                AddTimer(0.2f, () =>
+                {
+                    CCSBot? botState = bot.PlayerPawn.Value?.Bot;
+                    if (botState != null) botState.IsCrouching = true;
+                });
+            }
+
+            CCSPlayerController? botOwner = botData.TryGetValue("owner", out object? ownerValue)
+                ? ownerValue as CCSPlayerController
+                : null;
+            if (botOwner != null && botOwner.IsValid && botOwner.PlayerPawn.IsValid)
+            {
+                AddTimer(0.2f, () => TemporarilyDisableCollisions(botOwner, bot));
+            }
+
+            return true;
         }
 
         [GameEventHandler]
@@ -2317,6 +2564,51 @@ namespace MatchZy
         {
             if (!isPractice || player == null) return;
             RemoveAllPracticeBots();
+            ReplyToUserCommand(player, "Removing all practice bots.");
+        }
+
+        [ConsoleCommand("css_kicklastbot", "Removes the most recently placed practice bot")]
+        public void OnKickLastBotCommand(CCSPlayerController? player, CommandInfo? command)
+        {
+            if (!IsPlayerValid(player)) return;
+            if (!isPractice)
+            {
+                ReplyToUserCommand(player, ".kicklastbot is available only in practice mode.");
+                return;
+            }
+
+            while (practiceBotPlacementOrder.Count > 0)
+            {
+                int lastIndex = practiceBotPlacementOrder.Count - 1;
+                int botUserId = practiceBotPlacementOrder[lastIndex];
+                practiceBotPlacementOrder.RemoveAt(lastIndex);
+
+                if (!pracUsedBots.Remove(botUserId, out Dictionary<string, object>? botData))
+                {
+                    continue;
+                }
+
+                botHealthCeilings.Remove(botUserId);
+                botReactionStates.Remove(botUserId);
+                turretBotsAttacking.Remove(botUserId);
+
+                CCSPlayerController? bot = botData.TryGetValue("controller", out object? controller)
+                    ? controller as CCSPlayerController
+                    : null;
+                if (bot == null || !bot.IsValid || !bot.IsBot || bot.IsHLTV)
+                {
+                    SynchronizePracticeBotQuota();
+                    continue;
+                }
+
+                string botName = bot.PlayerName;
+                Server.ExecuteCommand($"kickid {botUserId}");
+                SynchronizePracticeBotQuota();
+                ReplyToUserCommand(player, $"Removed the last placed bot '{botName}'.");
+                return;
+            }
+
+            ReplyToUserCommand(player, "No placed practice bot is available to remove.");
         }
 
         [ConsoleCommand("css_sbp", "Saves all bot positions under the provided name")]
@@ -2358,6 +2650,269 @@ namespace MatchZy
             foreach (string presetName in presetNames)
             {
                 player!.PrintToChat($" {ChatColors.Green}- {ChatColors.Default}{presetName}");
+            }
+        }
+
+        [ConsoleCommand("css_botspawn", "Adds the player's current position and view direction to a named bot-spawn set")]
+        public void OnSaveBotSpawnCommand(CCSPlayerController? player, CommandInfo command)
+        {
+            HandleSaveBotSpawnCommand(player, command.ArgString);
+        }
+
+        [ConsoleCommand("css_delbotspawn", "Deletes a named bot-spawn set for the current map")]
+        public void OnDeleteBotSpawnCommand(CCSPlayerController? player, CommandInfo command)
+        {
+            HandleDeleteBotSpawnCommand(player, command.ArgString);
+        }
+
+        [ConsoleCommand("css_listbotspawn", "Lists named bot-spawn sets for the current map")]
+        public void OnListBotSpawnsCommand(CCSPlayerController? player, CommandInfo? command)
+        {
+            if (!IsPlayerValid(player)) return;
+            if (!isPractice)
+            {
+                ReplyToUserCommand(player, ".listbotspawn is available only in practice mode.");
+                return;
+            }
+
+            try
+            {
+                Dictionary<string, Dictionary<string, List<SavedBotSpawnPoint>>> savedSpawns =
+                    ReadSavedBotSpawns(GetSavedBotSpawnsPath());
+                string? mapKey = FindCaseInsensitiveKey(savedSpawns, Server.MapName);
+                if (mapKey == null || savedSpawns[mapKey].Count == 0)
+                {
+                    ReplyToUserCommand(player, $"No bot-spawn sets are saved for {Server.MapName}.");
+                    return;
+                }
+
+                ReplyToUserCommand(player, $"Bot-spawn sets saved for {Server.MapName}:");
+                foreach ((string spawnName, List<SavedBotSpawnPoint> spawnPoints) in savedSpawns[mapKey]
+                    .OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    player!.PrintToChat($" {ChatColors.Green}- {ChatColors.Default}{spawnName} ({spawnPoints.Count} point(s))");
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                Log($"[ListBotSpawns] Failed: {ex.Message}");
+                ReplyToUserCommand(player, "Unable to list the saved bot spawns.");
+            }
+        }
+
+        [ConsoleCommand("css_placebot", "Places up to the requested number of bots at a named bot-spawn set")]
+        public void OnPlaceBotsCommand(CCSPlayerController? player, CommandInfo command)
+        {
+            HandlePlaceBotsCommand(player, command.ArgString);
+        }
+
+        private void HandleSaveBotSpawnCommand(CCSPlayerController? player, string rawSpawnName)
+        {
+            if (!IsPlayerValid(player)) return;
+            if (!isPractice)
+            {
+                ReplyToUserCommand(player, ".botspawn is available only in practice mode.");
+                return;
+            }
+
+            string requestedSpawnName = NormalizeBotPresetName(rawSpawnName);
+            if (string.IsNullOrWhiteSpace(requestedSpawnName))
+            {
+                ReplyToUserCommand(player, "Usage: .botspawn <multi-word name>");
+                return;
+            }
+
+            CCSPlayerPawn? pawn = player!.PlayerPawn.Value;
+            Vector? origin = pawn?.CBodyComponent?.SceneNode?.AbsOrigin;
+            if (pawn == null || !pawn.IsValid || origin == null)
+            {
+                ReplyToUserCommand(player, "Unable to save a bot spawn from the current player position.");
+                return;
+            }
+
+            QAngle viewAngle = pawn.EyeAngles;
+            SavedBotSpawnPoint spawnPoint = new()
+            {
+                PositionX = origin.X,
+                PositionY = origin.Y,
+                PositionZ = origin.Z,
+                ViewPitch = viewAngle.X,
+                ViewYaw = viewAngle.Y,
+                ViewRoll = viewAngle.Z
+            };
+
+            try
+            {
+                string spawnsPath = GetSavedBotSpawnsPath();
+                Directory.CreateDirectory(Path.GetDirectoryName(spawnsPath)!);
+                Dictionary<string, Dictionary<string, List<SavedBotSpawnPoint>>> savedSpawns =
+                    ReadSavedBotSpawns(spawnsPath);
+
+                string mapKey = FindCaseInsensitiveKey(savedSpawns, Server.MapName) ?? Server.MapName;
+                if (!savedSpawns.TryGetValue(mapKey, out Dictionary<string, List<SavedBotSpawnPoint>>? mapSpawns))
+                {
+                    mapSpawns = new Dictionary<string, List<SavedBotSpawnPoint>>();
+                    savedSpawns[mapKey] = mapSpawns;
+                }
+
+                string spawnName = FindCaseInsensitiveKey(mapSpawns, requestedSpawnName) ?? requestedSpawnName;
+                if (!mapSpawns.TryGetValue(spawnName, out List<SavedBotSpawnPoint>? spawnPoints))
+                {
+                    spawnPoints = new List<SavedBotSpawnPoint>();
+                    mapSpawns[spawnName] = spawnPoints;
+                }
+
+                spawnPoints.Add(spawnPoint);
+                WriteSavedBotSpawns(spawnsPath, savedSpawns);
+                ReplyToUserCommand(player, $"Added bot-spawn point {spawnPoints.Count} to '{spawnName}' on {Server.MapName}.");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                Log($"[SaveBotSpawn] Failed: {ex.Message}");
+                ReplyToUserCommand(player, "Unable to save the bot spawn.");
+            }
+        }
+
+        private void HandleDeleteBotSpawnCommand(CCSPlayerController? player, string rawSpawnName)
+        {
+            if (!IsPlayerValid(player)) return;
+            if (!isPractice)
+            {
+                ReplyToUserCommand(player, ".delbotspawn is available only in practice mode.");
+                return;
+            }
+
+            string requestedSpawnName = NormalizeBotPresetName(rawSpawnName);
+            if (string.IsNullOrWhiteSpace(requestedSpawnName))
+            {
+                ReplyToUserCommand(player, "Usage: .delbotspawn <multi-word name>");
+                return;
+            }
+
+            try
+            {
+                string spawnsPath = GetSavedBotSpawnsPath();
+                Dictionary<string, Dictionary<string, List<SavedBotSpawnPoint>>> savedSpawns =
+                    ReadSavedBotSpawns(spawnsPath);
+                string? mapKey = FindCaseInsensitiveKey(savedSpawns, Server.MapName);
+                if (mapKey == null)
+                {
+                    ReplyToUserCommand(player, $"Bot-spawn set '{requestedSpawnName}' was not found on {Server.MapName}.");
+                    return;
+                }
+
+                Dictionary<string, List<SavedBotSpawnPoint>> mapSpawns = savedSpawns[mapKey];
+                string? spawnName = FindCaseInsensitiveKey(mapSpawns, requestedSpawnName);
+                if (spawnName == null ||
+                    !mapSpawns.Remove(spawnName, out List<SavedBotSpawnPoint>? removedPoints) ||
+                    removedPoints == null)
+                {
+                    ReplyToUserCommand(player, $"Bot-spawn set '{requestedSpawnName}' was not found on {Server.MapName}.");
+                    return;
+                }
+
+                if (mapSpawns.Count == 0)
+                {
+                    savedSpawns.Remove(mapKey);
+                }
+
+                WriteSavedBotSpawns(spawnsPath, savedSpawns);
+                ReplyToUserCommand(player, $"Deleted bot-spawn set '{spawnName}' with {removedPoints.Count} point(s) from {Server.MapName}.");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                Log($"[DeleteBotSpawn] Failed: {ex.Message}");
+                ReplyToUserCommand(player, "Unable to delete the bot-spawn set.");
+            }
+        }
+
+        private void HandlePlaceBotsCommand(CCSPlayerController? player, string rawArguments)
+        {
+            if (!IsPlayerValid(player)) return;
+            if (!isPractice)
+            {
+                ReplyToUserCommand(player, ".placebot is available only in practice mode.");
+                return;
+            }
+
+            string[] arguments = rawArguments.Trim().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            string requestedSpawnName = arguments.Length == 2 ? NormalizeBotPresetName(arguments[1]) : string.Empty;
+            if (arguments.Length != 2 || !int.TryParse(arguments[0], out int requestedBotCount) || requestedBotCount <= 0 ||
+                string.IsNullOrWhiteSpace(requestedSpawnName))
+            {
+                ReplyToUserCommand(player, "Usage: .placebot <number> <multi-word name>");
+                return;
+            }
+
+            byte botTeam;
+            if (player!.TeamNum == (byte)CsTeam.CounterTerrorist)
+            {
+                botTeam = (byte)CsTeam.Terrorist;
+            }
+            else if (player.TeamNum == (byte)CsTeam.Terrorist)
+            {
+                botTeam = (byte)CsTeam.CounterTerrorist;
+            }
+            else
+            {
+                ReplyToUserCommand(player, "Join T or CT before placing bots.");
+                return;
+            }
+
+            try
+            {
+                Dictionary<string, Dictionary<string, List<SavedBotSpawnPoint>>> savedSpawns =
+                    ReadSavedBotSpawns(GetSavedBotSpawnsPath());
+                string? mapKey = FindCaseInsensitiveKey(savedSpawns, Server.MapName);
+                if (mapKey == null)
+                {
+                    ReplyToUserCommand(player, $"Bot-spawn set '{requestedSpawnName}' was not found on {Server.MapName}.");
+                    return;
+                }
+
+                Dictionary<string, List<SavedBotSpawnPoint>> mapSpawns = savedSpawns[mapKey];
+                string? spawnName = FindCaseInsensitiveKey(mapSpawns, requestedSpawnName);
+                if (spawnName == null || mapSpawns[spawnName].Count == 0)
+                {
+                    ReplyToUserCommand(player, $"Bot-spawn set '{requestedSpawnName}' was not found on {Server.MapName}.");
+                    return;
+                }
+
+                // One bot may occupy each exact XY coordinate in a placement run.
+                // Distinct saved points can still share a Z value or view direction.
+                List<SavedBotSpawnPoint> availablePoints = mapSpawns[spawnName]
+                    .GroupBy(point => (point.PositionX, point.PositionY))
+                    .Select(group => group.First())
+                    .ToList();
+                ShuffleBotSpawnPoints(availablePoints);
+
+                int botCount = Math.Min(requestedBotCount, availablePoints.Count);
+                List<SavedBotPosition> botsToPlace = availablePoints
+                    .Take(botCount)
+                    .Select(point => new SavedBotPosition
+                    {
+                        TeamNum = botTeam,
+                        PositionX = point.PositionX,
+                        PositionY = point.PositionY,
+                        PositionZ = point.PositionZ,
+                        ViewPitch = point.ViewPitch,
+                        ViewYaw = point.ViewYaw,
+                        ViewRoll = point.ViewRoll,
+                        Crouched = false
+                    })
+                    .ToList();
+
+                int loadGeneration = BeginBotPresetLoad();
+                ReplyToUserCommand(player, $"Placing {botCount} bot(s) from bot-spawn set '{spawnName}'.");
+                AddTimer(
+                    0.1f,
+                    () => WaitForBotPresetCleanup(player, spawnName, botsToPlace, loadGeneration, attempt: 0, isBotSpawnSet: true),
+                    TimerFlags.STOP_ON_MAPCHANGE);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                Log($"[PlaceBots] Failed: {ex.Message}");
+                ReplyToUserCommand(player, "Unable to place bots from the saved bot-spawn set.");
             }
         }
 
@@ -2560,17 +3115,14 @@ namespace MatchZy
 
         private int BeginBotPresetLoad()
         {
-            int loadGeneration = ++botPresetLoadGeneration;
-            ResetTurretCombatState();
-            botHealthCeilings.Clear();
+            RemoveAllPracticeBots();
+            int loadGeneration = botPresetLoadGeneration;
             ApplyBotShootingState();
-            Server.ExecuteCommand("bot_kick");
-            Server.ExecuteCommand("bot_quota 0");
+            Server.ExecuteCommand("bot_quota_mode normal; bot_quota 0");
             Server.ExecuteCommand("bot_dont_shoot 1");
             Server.ExecuteCommand("bot_stop 1");
             Server.ExecuteCommand("bot_freeze 1");
             Server.ExecuteCommand("bot_zombie 1");
-            pracUsedBots = new Dictionary<int, Dictionary<string, object>>();
             isSpawningBot = true;
             return loadGeneration;
         }
@@ -2580,12 +3132,14 @@ namespace MatchZy
             string presetName,
             List<SavedBotPosition> savedBots,
             int loadGeneration,
-            int attempt)
+            int attempt,
+            bool isBotSpawnSet = false)
         {
             if (loadGeneration != botPresetLoadGeneration) return;
             if (!IsPlayerValid(owner))
             {
                 isSpawningBot = false;
+                SynchronizePracticeBotQuota();
                 ApplyBotShootingState();
                 return;
             }
@@ -2594,7 +3148,7 @@ namespace MatchZy
                 .Any(bot => bot.IsValid && bot.IsBot && !bot.IsHLTV);
             if (!oldBotStillConnected)
             {
-                RestoreNextSavedBot(owner, presetName, savedBots, 0, loadGeneration);
+                RestoreNextSavedBot(owner, presetName, savedBots, 0, loadGeneration, isBotSpawnSet);
                 return;
             }
 
@@ -2602,27 +3156,38 @@ namespace MatchZy
             {
                 isSpawningBot = false;
                 ApplyBotShootingState();
-                ReplyToUserCommand(owner, $"Unable to clear existing bots before loading '{presetName}'.");
+                ReplyToUserCommand(
+                    owner,
+                    isBotSpawnSet
+                        ? $"Unable to clear existing bots before placing from bot-spawn set '{presetName}'."
+                        : $"Unable to clear existing bots before loading '{presetName}'.");
                 return;
             }
 
             if (attempt > 0 && attempt % 10 == 0)
             {
-                Server.ExecuteCommand("bot_kick");
+                Server.ExecuteCommand("bot_quota_mode normal; bot_quota 0; bot_kick");
             }
 
             AddTimer(
                 0.1f,
-                () => WaitForBotPresetCleanup(owner, presetName, savedBots, loadGeneration, attempt + 1),
+                () => WaitForBotPresetCleanup(owner, presetName, savedBots, loadGeneration, attempt + 1, isBotSpawnSet),
                 TimerFlags.STOP_ON_MAPCHANGE);
         }
 
-        private void RestoreNextSavedBot(CCSPlayerController owner, string presetName, List<SavedBotPosition> savedBots, int index, int loadGeneration)
+        private void RestoreNextSavedBot(
+            CCSPlayerController owner,
+            string presetName,
+            List<SavedBotPosition> savedBots,
+            int index,
+            int loadGeneration,
+            bool isBotSpawnSet = false)
         {
             if (loadGeneration != botPresetLoadGeneration) return;
             if (!IsPlayerValid(owner))
             {
                 isSpawningBot = false;
+                SynchronizePracticeBotQuota();
                 ApplyBotShootingState();
                 return;
             }
@@ -2630,8 +3195,13 @@ namespace MatchZy
             if (index >= savedBots.Count)
             {
                 isSpawningBot = false;
+                SynchronizePracticeBotQuota();
                 ApplyBotShootingState();
-                ReplyToUserCommand(owner, $"Loaded {savedBots.Count} bot position(s) from '{presetName}'.");
+                ReplyToUserCommand(
+                    owner,
+                    isBotSpawnSet
+                        ? $"Placed {savedBots.Count} bot(s) from bot-spawn set '{presetName}'."
+                        : $"Loaded {savedBots.Count} bot position(s) from '{presetName}'.");
                 return;
             }
 
@@ -2647,7 +3217,7 @@ namespace MatchZy
 
             AddTimer(
                 0.25f,
-                () => TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, existingBotUserIds, 0),
+                () => TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, existingBotUserIds, 0, isBotSpawnSet),
                 TimerFlags.STOP_ON_MAPCHANGE);
         }
 
@@ -2658,12 +3228,14 @@ namespace MatchZy
             int index,
             int loadGeneration,
             HashSet<int> existingBotUserIds,
-            int attempt)
+            int attempt,
+            bool isBotSpawnSet = false)
         {
             if (loadGeneration != botPresetLoadGeneration) return;
             if (!IsPlayerValid(owner))
             {
                 isSpawningBot = false;
+                SynchronizePracticeBotQuota();
                 ApplyBotShootingState();
                 return;
             }
@@ -2688,14 +3260,19 @@ namespace MatchZy
 
                     AddTimer(
                         0.1f,
-                        () => TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, existingBotUserIds, attempt + 1),
+                        () => TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, existingBotUserIds, attempt + 1, isBotSpawnSet),
                         TimerFlags.STOP_ON_MAPCHANGE);
                     return;
                 }
 
                 isSpawningBot = false;
+                SynchronizePracticeBotQuota();
                 ApplyBotShootingState();
-                ReplyToUserCommand(owner, $"Unable to create bot {index + 1}/{savedBots.Count} from '{presetName}'.");
+                ReplyToUserCommand(
+                    owner,
+                    isBotSpawnSet
+                        ? $"Unable to create bot {index + 1}/{savedBots.Count} from bot-spawn set '{presetName}'."
+                        : $"Unable to create bot {index + 1}/{savedBots.Count} from '{presetName}'.");
                 return;
             }
 
@@ -2707,25 +3284,22 @@ namespace MatchZy
                 if (attempt >= 40)
                 {
                     isSpawningBot = false;
+                    SynchronizePracticeBotQuota();
                     ApplyBotShootingState();
-                    ReplyToUserCommand(owner, $"Unable to spawn bot {index + 1}/{savedBots.Count} from '{presetName}'.");
+                    ReplyToUserCommand(
+                        owner,
+                        isBotSpawnSet
+                            ? $"Unable to spawn bot {index + 1}/{savedBots.Count} from bot-spawn set '{presetName}'."
+                            : $"Unable to spawn bot {index + 1}/{savedBots.Count} from '{presetName}'.");
                     return;
                 }
 
                 restoredBot.Respawn();
                 AddTimer(
                     0.1f,
-                    () => TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, existingBotUserIds, attempt + 1),
+                    () => TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, existingBotUserIds, attempt + 1, isBotSpawnSet),
                     TimerFlags.STOP_ON_MAPCHANGE);
                 return;
-            }
-
-            foreach (CCSPlayerController extraBot in newBots)
-            {
-                if (extraBot.UserId != restoredBot.UserId)
-                {
-                    Server.ExecuteCommand($"kickid {extraBot.UserId!.Value}");
-                }
             }
 
             int restoredBotUserId = restoredBot.UserId!.Value;
@@ -2737,6 +3311,17 @@ namespace MatchZy
                 { "owner", owner },
                 { "crouchstate", savedBot.Crouched }
             };
+            practiceBotPlacementOrder.Remove(restoredBotUserId);
+            practiceBotPlacementOrder.Add(restoredBotUserId);
+
+            foreach (CCSPlayerController extraBot in newBots)
+            {
+                if (extraBot.UserId != restoredBot.UserId)
+                {
+                    Server.ExecuteCommand($"kickid {extraBot.UserId!.Value}");
+                }
+            }
+            SynchronizePracticeBotQuota();
 
             CCSPlayerPawn? pawn = restoredBot.PlayerPawn.Value;
             if (pawn != null && pawn.IsValid)
@@ -2759,18 +3344,79 @@ namespace MatchZy
 
             AddTimer(
                 0.2f,
-                () => RestoreNextSavedBot(owner, presetName, savedBots, index + 1, loadGeneration),
+                () => RestoreNextSavedBot(owner, presetName, savedBots, index + 1, loadGeneration, isBotSpawnSet),
                 TimerFlags.STOP_ON_MAPCHANGE);
         }
 
         private void RemoveAllPracticeBots()
         {
-            botPresetLoadGeneration++;
+            int cleanupGeneration = ++botPresetLoadGeneration;
             isSpawningBot = false;
             ResetTurretCombatState();
             botHealthCeilings.Clear();
-            Server.ExecuteCommand("bot_kick");
+            Server.ExecuteCommand("bot_quota_mode normal; bot_quota 0; bot_kick");
             pracUsedBots = new Dictionary<int, Dictionary<string, object>>();
+            practiceBotPlacementOrder.Clear();
+            AddTimer(
+                0.1f,
+                () => EnsurePracticeBotsRemoved(cleanupGeneration, attempt: 0),
+                TimerFlags.STOP_ON_MAPCHANGE);
+        }
+
+        private void EnsurePracticeBotsRemoved(int cleanupGeneration, int attempt)
+        {
+            if (cleanupGeneration != botPresetLoadGeneration || isSpawningBot || !isPractice) return;
+
+            bool botStillConnected = Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
+                .Any(bot => bot.IsValid && bot.IsBot && !bot.IsHLTV);
+            if (!botStillConnected) return;
+
+            if (attempt >= 30)
+            {
+                Log("[RemoveAllPracticeBots] Unable to remove every bot after 30 retries.");
+                return;
+            }
+
+            Server.ExecuteCommand("bot_quota_mode normal; bot_quota 0; bot_kick");
+            AddTimer(
+                0.1f,
+                () => EnsurePracticeBotsRemoved(cleanupGeneration, attempt + 1),
+                TimerFlags.STOP_ON_MAPCHANGE);
+        }
+
+        private void SynchronizePracticeBotQuota()
+        {
+            int trackedBotCount = Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
+                .Count(bot => bot.IsValid && bot.IsBot && !bot.IsHLTV && bot.UserId.HasValue &&
+                    pracUsedBots.ContainsKey(bot.UserId.Value));
+            Server.ExecuteCommand($"bot_quota_mode normal; bot_quota {trackedBotCount}");
+        }
+
+        private void RemoveBotIfStillUntracked(int botUserId)
+        {
+            if (!isPractice || isSpawningBot || pracUsedBots.ContainsKey(botUserId)) return;
+
+            CCSPlayerController? bot = Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
+                .FirstOrDefault(candidate => candidate.IsValid && candidate.IsBot && !candidate.IsHLTV &&
+                    candidate.UserId == botUserId);
+            if (bot == null) return;
+
+            Server.ExecuteCommand($"kickid {botUserId}");
+            SynchronizePracticeBotQuota();
+        }
+
+        private static void ShuffleBotSpawnPoints(List<SavedBotSpawnPoint> spawnPoints)
+        {
+            for (int index = spawnPoints.Count - 1; index > 0; index--)
+            {
+                int swapIndex = Random.Shared.Next(index + 1);
+                (spawnPoints[index], spawnPoints[swapIndex]) = (spawnPoints[swapIndex], spawnPoints[index]);
+            }
+        }
+
+        private static string? FindCaseInsensitiveKey<T>(Dictionary<string, T> entries, string requestedKey)
+        {
+            return entries.Keys.FirstOrDefault(key => key.Equals(requestedKey, StringComparison.OrdinalIgnoreCase));
         }
 
         private static string NormalizeBotPresetName(string rawPresetName)
@@ -2814,9 +3460,35 @@ namespace MatchZy
                 ?? new Dictionary<string, Dictionary<string, SavedBotPositionPreset>>();
         }
 
+        private static Dictionary<string, Dictionary<string, List<SavedBotSpawnPoint>>> ReadSavedBotSpawns(string spawnsPath)
+        {
+            if (!File.Exists(spawnsPath))
+            {
+                return new Dictionary<string, Dictionary<string, List<SavedBotSpawnPoint>>>();
+            }
+
+            string json = File.ReadAllText(spawnsPath);
+            return JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, List<SavedBotSpawnPoint>>>>(json)
+                ?? new Dictionary<string, Dictionary<string, List<SavedBotSpawnPoint>>>();
+        }
+
+        private static void WriteSavedBotSpawns(
+            string spawnsPath,
+            Dictionary<string, Dictionary<string, List<SavedBotSpawnPoint>>> savedSpawns)
+        {
+            File.WriteAllText(
+                spawnsPath,
+                JsonSerializer.Serialize(savedSpawns, new JsonSerializerOptions { WriteIndented = true }));
+        }
+
         private static string GetSavedBotPositionsPath()
         {
             return Path.Join(Server.GameDirectory, "csgo/cfg/MatchZy/savedbotpositions.json");
+        }
+
+        private static string GetSavedBotSpawnsPath()
+        {
+            return Path.Join(Server.GameDirectory, "csgo/cfg/MatchZy/savedbotspawns.json");
         }
 
         [ConsoleCommand("css_ff", "Fast forwards the timescale to 20 seconds")]
@@ -3033,6 +3705,8 @@ namespace MatchZy
             botNextRegenerationTime = 0.0f;
             humanNextRegenerationTimes.Clear();
             practiceRoundTimeoutEnding = false;
+            practiceRoundRestartPending = false;
+            practiceRoundRestartGeneration++;
             Server.ExecuteCommand("bot_stop 0; bot_freeze 0; bot_zombie 0; bot_dont_shoot 0");
             Server.ExecuteCommand("mp_ignore_round_win_conditions 0");
             Server.ExecuteCommand("sv_cheats false;sv_grenade_trajectory_prac_pipreview false;sv_grenade_trajectory_prac_trailtime 0; mp_ct_default_grenades \"\"; mp_ct_default_primary \"\"; mp_t_default_grenades\"\"; mp_t_default_primary\"\"; mp_teammates_are_enemies false;");

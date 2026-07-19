@@ -163,6 +163,7 @@ public partial class MatchZy
         try
         {
             ResetPracticeRoundTimeout();
+            RestoreTrackedPracticeBotsAfterRoundStart();
             HandlePostRoundStartEvent(@event);
             RefreshPracticeSpawnMarkersAfterRoundStart();
             return HookResult.Continue;

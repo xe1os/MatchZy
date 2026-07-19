@@ -148,6 +148,8 @@ namespace MatchZy
                 { ".prac", OnPracCommand },
                 { ".menu", OnConfigurationMenuCommand },
                 { ".spawnmarkers", OnSpawnMarkersCommand },
+                { ".randomspawn", OnRandomSpawnCommand },
+                { ".startround", OnStartPracticeRoundCommand },
                 { ".dryrun", OnDryRunCommand },
                 { ".dry", OnDryRunCommand },
                 { ".noflash", OnNoFlashCommand },
@@ -159,7 +161,9 @@ namespace MatchZy
                 { ".boost", OnBoostBotCommand },
                 { ".crouchboost", OnCrouchBoostBotCommand },
                 { ".nobots", OnNoBotsCommand },
+                { ".kicklastbot", OnKickLastBotCommand },
                 { ".listbp", OnListBotPositionsCommand },
+                { ".listbotspawn", OnListBotSpawnsCommand },
                 { ".solid", OnSolidCommand },
                 { ".impacts", OnImpactsCommand },
                 { ".traj", OnTrajCommand },
@@ -492,6 +496,18 @@ namespace MatchZy
                 if (messageCommand.Equals(".dbp", StringComparison.OrdinalIgnoreCase))
                 {
                     HandleDeleteBotPositionsCommand(player, messageCommandArg);
+                }
+                if (messageCommand.Equals(".botspawn", StringComparison.OrdinalIgnoreCase))
+                {
+                    HandleSaveBotSpawnCommand(player, messageCommandArg);
+                }
+                if (messageCommand.Equals(".delbotspawn", StringComparison.OrdinalIgnoreCase))
+                {
+                    HandleDeleteBotSpawnCommand(player, messageCommandArg);
+                }
+                if (messageCommand.Equals(".placebot", StringComparison.OrdinalIgnoreCase))
+                {
+                    HandlePlaceBotsCommand(player, messageCommandArg);
                 }
                 if (messageCommand.Equals(".botshoot", StringComparison.OrdinalIgnoreCase))
                 {

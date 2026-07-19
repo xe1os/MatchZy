@@ -430,6 +430,7 @@ namespace MatchZy
 
                 // Reset owned bots data
                 pracUsedBots = new Dictionary<int, Dictionary<string, object>>();
+                practiceBotPlacementOrder.Clear();
                 noFlashList = new();
                 lastGrenadesData = new();
                 nadeSpecificLastGrenadeData = new();
@@ -1396,38 +1397,93 @@ namespace MatchZy
             if (!IsPlayerValid(player)) return;
 
             ReplyToUserCommand(player, "Available commands:");
+            player!.PrintToConsole("MatchZy available commands and usage:");
 
             if (isPractice)
             {
-                player!.PrintToChat($" {ChatColors.Green}Configuration: {ChatColors.Default}.menu");
-                player.PrintToChat($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawn, .ctspawn, .tspawn, .bestspawn, .worstspawn");
-                player.PrintToChat($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawnmarkers");
-                player.PrintToChat($" {ChatColors.Green}Bots: {ChatColors.Default}.bot, .nobots, .botshoot <true/false>, .botreactiontime <0-1000>, .botrespawn <true/false>, .botlifereg <true/false>, .crouchbot, .boost, .crouchboost");
-                player.PrintToChat($" {ChatColors.Green}Bots: {ChatColors.Default}.sbp <name>, .lbp <name>, .dbp <name>, .listbp");
-                player.PrintToChat($" {ChatColors.Green}Nades: {ChatColors.Default}.loadnade, .savenade, .importnade, .listnades");
-                player.PrintToChat($" {ChatColors.Green}Nade Throw: {ChatColors.Default}.rethrow, .throwindex <index>, .lastindex, .delay <number>");
-                player.PrintToChat($" {ChatColors.Green}Utility & Toggles: {ChatColors.Default}.clear, .fastforward, .last, .back, .solid, .impacts, .traj");
-                player.PrintToChat($" {ChatColors.Green}Locations: {ChatColors.Default}.slp, .tlp, .dlp, .savepos, .loadpos");
-                player.PrintToChat($" {ChatColors.Green}Health: {ChatColors.Default}.liferegon <true/false>");
-                player.PrintToChat($" {ChatColors.Green}Sides & Others: {ChatColors.Default}.ct, .t, .spec, .fas, .god, .dryrun, .break, .exitprac");
+                PrintAvailableCommandCategory(player, "Configuration", ".menu", ".menu");
+                PrintAvailableCommandCategory(
+                    player,
+                    "Spawns",
+                    ".spawn, .ctspawn, .tspawn, .randomspawn, .bestspawn, .worstspawn, .spawnmarkers",
+                    ".spawn <number>, .ctspawn <number>, .tspawn <number>, .randomspawn, .bestspawn, .worstspawn, .spawnmarkers");
+                PrintAvailableCommandCategory(
+                    player,
+                    "Bots",
+                    ".bot, .nobots, .kicklastbot, .botshoot, .botreactiontime, .botrespawn, .botlifereg, .crouchbot, .boost, .crouchboost",
+                    ".bot, .nobots, .kicklastbot, .botshoot, .botreactiontime <0-1000>, .botrespawn, .botlifereg, .crouchbot, .boost, .crouchboost");
+                PrintAvailableCommandCategory(
+                    player,
+                    "Bot Presets",
+                    ".sbp, .lbp, .dbp, .listbp",
+                    ".sbp <name>, .lbp <name>, .dbp <name>, .listbp");
+                PrintAvailableCommandCategory(
+                    player,
+                    "Bot Spawns",
+                    ".botspawn, .delbotspawn, .listbotspawn, .placebot",
+                    ".botspawn <multi-word name>, .delbotspawn <multi-word name>, .listbotspawn, .placebot <number> <multi-word name>");
+                PrintAvailableCommandCategory(
+                    player,
+                    "Nades",
+                    ".loadnade, .savenade, .importnade, .listnades",
+                    ".loadnade <name>, .savenade <name>, .importnade <code>, .listnades");
+                PrintAvailableCommandCategory(
+                    player,
+                    "Nade Throw",
+                    ".rethrow, .throwindex, .lastindex, .delay",
+                    ".rethrow, .throwindex <index>, .lastindex, .delay <seconds>");
+                PrintAvailableCommandCategory(
+                    player,
+                    "Utility & Toggles",
+                    ".startround, .clear, .fastforward, .last, .back, .solid, .impacts, .traj",
+                    ".startround, .clear, .fastforward, .last, .back <number>, .solid, .impacts, .traj");
+                PrintAvailableCommandCategory(
+                    player,
+                    "Locations",
+                    ".slp, .tlp, .dlp, .savepos, .loadpos",
+                    ".slp, .tlp, .dlp, .savepos, .loadpos");
+                PrintAvailableCommandCategory(
+                    player,
+                    "Health",
+                    ".liferegon",
+                    ".liferegon");
+                PrintAvailableCommandCategory(
+                    player,
+                    "Sides & Others",
+                    ".ct, .t, .spec, .fas, .god, .dryrun, .break, .exitprac",
+                    ".ct, .t, .spec, .fas, .god, .dryrun, .break, .exitprac");
                 return;
             }
             if (readyAvailable)
             {
-                player!.PrintToChat($" {ChatColors.Green}Ready/Unready: {ChatColors.Default}.ready, .unready");
+                PrintAvailableCommandCategory(player, "Ready/Unready", ".ready, .unready", ".ready, .unready");
                 return;
             }
             if (isSideSelectionPhase)
             {
-                player!.PrintToChat($" {ChatColors.Green}Side Selection: {ChatColors.Default}.stay, .switch, .ct, .t");
+                PrintAvailableCommandCategory(player, "Side Selection", ".stay, .switch, .ct, .t", ".stay, .switch, .ct, .t");
                 return;
             }
             if (matchStarted)
             {
                 string stopCommandMessage = isStopCommandAvailable ? ", .stop" : "";
-                player!.PrintToChat($" {ChatColors.Green}Pause/Restore: {ChatColors.Default}.pause, .unpause, .tac, .tech{stopCommandMessage}");
+                PrintAvailableCommandCategory(
+                    player,
+                    "Pause/Restore",
+                    $".pause, .unpause, .tac, .tech{stopCommandMessage}",
+                    $".pause, .unpause, .tac, .tech{stopCommandMessage}");
                 return;
             }
+        }
+
+        private static void PrintAvailableCommandCategory(
+            CCSPlayerController player,
+            string category,
+            string chatCommands,
+            string consoleCommands)
+        {
+            player.PrintToChat($" {ChatColors.Green}{category}: {ChatColors.Default}{chatCommands}");
+            player.PrintToConsole($"{category}: {consoleCommands}");
         }
 
         public void LoadClientNames()

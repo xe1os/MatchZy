@@ -14,10 +14,12 @@ adds the following focused features, fixes, and changes.
 - Added `.slp` to save the player's current position and view direction, `.tlp` to return to it, and `.dlp` to delete it.
 - Added interactive spawn outlines in practice mode; stand inside a flat gold T-side or blue CT-side square and press `E` to teleport to that exact spawn. Each outline and its interaction zone use the cached local ground height at the spawn, `.spawnmarkers` toggles visibility, and `matchzy_spawn_markers_enabled_default` controls whether markers appear when practice starts.
 - Added `.sbp <name>`, `.lbp <name>`, `.dbp <name>`, and `.listbp` for saving, restoring, deleting, and listing named, multi-word bot-position setups with their teams, aim directions, and crouch states. Saved setups can also be listed, loaded, and deleted from Bot Placement in `.menu`.
+- Added `.botspawn <name>`, `.delbotspawn <name>`, `.listbotspawn`, and `.placebot <number> <name>` for building map-specific named spawn pools and placing bots at randomly selected, distinct saved XY positions and aim directions.
+- Added `.kicklastbot` to remove the most recently placed practice bot; repeated uses work backward through the placement order.
 - Added `.changemap <map-name>` so any player can switch to a validated map, with or without the `de_` prefix.
-- Added `.botshoot <true/false>` and `.botreactiontime <0-1000>` to turn practice bots into stationary, visibility-aware opponents and configure their firing delay.
-- Added `.botrespawn <true/false>` and `.botlifereg <true/false>` to control practice-bot respawning and health regeneration independently of human players.
-- Added per-player `.liferegon <true/false>` health regeneration for human players in practice mode, enabled by default and individually opt-out.
+- Added `.botshoot` and `.botreactiontime <0-1000>` to turn practice bots into stationary, visibility-aware opponents and configure their firing delay.
+- Added `.botrespawn` and `.botlifereg` to control practice-bot respawning and health regeneration independently of human players.
+- Added per-player `.liferegon` health regeneration for human players in practice mode, enabled by default and individually opt-out.
 
 ## BugFixes
 
@@ -45,6 +47,12 @@ adds the following focused features, fixes, and changes.
 - Human practice deaths respawn at the player's `.slp` location, or at a random competitive spawn for the player's current side when no location is saved.
 - `.god` now uses real per-player damage immunity and a safe `int.MaxValue / 2` health target; `.liferegon` preserves that target while God mode is enabled.
 - Enabled `.liferegon` and `.botlifereg` restore injured players and bots on a fixed 100 ms cadence, including during continuous damage, while skipping entities already at maximum health.
+- `.help` keeps its private chat list compact by showing command names without argument hints and prints detailed usage to the requesting player's console.
+- `.botshoot`, `.botrespawn`, `.botlifereg`, and `.liferegon` now toggle their current state when used without an argument; explicit `true` or `false` values remain supported.
+- Plugin-managed practice bots now use quota-safe cleanup, so `.nobots`, repeated `.placebot` loads, later `.bot` additions, and `.botrespawn` keep one consistent tracked bot set.
+- Practice bots controlled by `.botshoot` stop firing when an active smoke blocks their sightline and reacquire their configured reaction delay after visibility returns.
+- `.startround` starts a fresh practice round with a five-second freeze while keeping every tracked bot alive at its placed position and orientation.
+- `.randomspawn` safely teleports the requesting player to a randomly selected competitive spawn for their current T or CT side.
 
 ## Upstream project
 

@@ -27,16 +27,23 @@ Most of the commands can also be used using ! prefix instead of . (like !ready)
 - `.besttspawn` Teleports you to T team's closest spawn from your current position
 - `.worsttspawn` Teleports you to T team's furthest spawn from your current position
 - `.spawnmarkers` Toggles the competitive T and CT spawn markers
+- `.randomspawn` Teleports you to a randomly selected competitive spawn for your current T or CT side.
+- `.startround` Starts a fresh practice round with a five-second freeze and restores every tracked bot alive at its placed position and orientation.
 - `.bot` Adds and initially spawns a living bot at the user's current position. The initial spawn is independent of `.botrespawn`; that toggle controls later deaths.
-- `.botshoot <true/false>` Controls whether practice bots act as stationary turrets: they track visible enemies, shoot, and use the highest bot difficulty, but cannot move.
+- `.botshoot` Toggles whether practice bots act as stationary turrets: they track visible enemies, stop firing when active smoke blocks their sightline, and use the highest bot difficulty, but cannot move. An explicit `true` or `false` remains supported.
 - `.botreactiontime <0-1000>` Sets how many milliseconds a turret bot must continuously see its current enemy before firing. The default is `500`; `0` disables the delay.
-- `.botrespawn <true/false>` Controls whether practice bots respawn after death. Enabling it immediately respawns all currently dead practice bots. Disabling it leaves them dead without ending the round before its timer expires.
-- `.botlifereg <true/false>` Controls bot-only health regeneration. When enabled, every living injured practice bot returns to 100 HP on a fixed 100 ms cadence, including while taking continuous damage. Bots already at 100 HP are ignored. When disabled, global regeneration settings such as `sv_regeneration_force_on 1` are ignored for practice bots. The default is `false`.
+- `.botrespawn` Toggles whether practice bots respawn after death. Enabling it immediately respawns all currently dead practice bots. Disabling it leaves them dead without ending the round before its timer expires. An explicit `true` or `false` remains supported.
+- `.botlifereg` Toggles bot-only health regeneration. When enabled, every living injured practice bot returns to 100 HP on a fixed 100 ms cadence, including while taking continuous damage. Bots already at 100 HP are ignored. When disabled, global regeneration settings such as `sv_regeneration_force_on 1` are ignored for practice bots. The default is `false`; an explicit `true` or `false` remains supported.
 - `.sbp <name>` Saves all current bot positions under a multi-word name for the requesting player and current map.
 - `.lbp <name>` Loads the nearest matching bot-position preset for the requesting player and current map.
 - `.dbp <name>` Deletes the nearest matching bot-position preset for the requesting player and current map.
 - `.listbp` Lists the requesting player's saved bot-position preset names for the current map in private chat.
-- `.liferegon <true/false>` Controls health regeneration only for the requesting human player. It defaults to `true` when practice starts and for humans joining active practice. When enabled, an injured living player returns to maximum health on a fixed 100 ms cadence, including while taking continuous damage. Players already at the applicable maximum are ignored. With `.god` enabled, the applicable maximum is the God-mode health target instead of 100 HP. Setting it to `false` disables automatic regeneration for that player until they disconnect or practice restarts, allowing normal deaths unless separately protected by `.god`.
+- `.botspawn <name>` Appends the requesting player's current position and view direction to a shared named pool for the current map.
+- `.delbotspawn <name>` Deletes all points in the exact named bot-spawn pool for the current map.
+- `.listbotspawn` Lists current-map bot-spawn pool names and point counts in private chat.
+- `.placebot <number> <name>` Clears existing bots and places up to the requested number at randomized, distinct saved XY positions from the named current-map pool.
+- `.kicklastbot` Removes the newest remaining placed practice bot; repeated uses work backward through placement order.
+- `.liferegon` Toggles health regeneration only for the requesting human player. It defaults to `true` when practice starts and for humans joining active practice. When enabled, an injured living player returns to maximum health on a fixed 100 ms cadence, including while taking continuous damage. Players already at the applicable maximum are ignored. With `.god` enabled, the applicable maximum is the God-mode health target instead of 100 HP. Disabling it stops automatic regeneration for that player until they disconnect or practice restarts, allowing normal deaths unless separately protected by `.god`. An explicit `true` or `false` remains supported.
 - `.crouchbot` Adds a crouched bot on user's current position (Alias: `.cbot`)
 - `.boost` Adds a bot on current position and boosts player on it
 - `.crouchboost` Adds a crouched bot on current position and boosts player on it
