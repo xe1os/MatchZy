@@ -49,10 +49,12 @@ adds the following focused features, fixes, and changes.
 - Enabled `.liferegon` and `.botlifereg` restore injured players and bots on a fixed 100 ms cadence, including during continuous damage, while skipping entities already at maximum health.
 - `.help` keeps its private chat list compact by showing command names without argument hints and prints detailed usage to the requesting player's console.
 - `.botshoot`, `.botrespawn`, `.botlifereg`, and `.liferegon` now toggle their current state when used without an argument; explicit `true` or `false` values remain supported.
-- Plugin-managed practice bots now use quota-safe cleanup, so `.nobots`, repeated `.placebot` loads, later `.bot` additions, and `.botrespawn` keep one consistent tracked bot set.
+- Plugin-managed practice bots use explicit add and kick operations without rewriting `bot_quota`; `.nobots` directly kicks every bot.
 - Practice bots controlled by `.botshoot` stop firing when an active smoke blocks their sightline and reacquire their configured reaction delay after visibility returns.
 - `.startround` starts a fresh practice round with a five-second freeze while keeping every tracked bot alive at its placed position and orientation.
 - `.randomspawn` safely teleports the requesting player to a randomly selected competitive spawn for their current T or CT side.
+- Temporary player/bot collision handling now stops safely when either pawn disappears or is replaced, preventing repeating null-reference errors during respawns, round restarts, disconnects, and bot removal.
+- Every `.placebot` and `.lbp` load kicks all existing bots, waits at least 500 ms for cleanup, and then creates the requested setup from scratch.
 
 ## Upstream project
 

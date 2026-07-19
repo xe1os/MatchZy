@@ -149,8 +149,6 @@ namespace MatchZy
         public Dictionary<int, Dictionary<string, object>> pracUsedBots = new Dictionary<int, Dictionary<string, object>>();
         private readonly List<int> practiceBotPlacementOrder = new();
 
-        private CounterStrikeSharp.API.Modules.Timers.Timer? collisionGroupTimer;
-
         public bool isSpawningBot;
         private int botPresetLoadGeneration;
         private bool botShootingEnabled;
@@ -2254,7 +2252,6 @@ namespace MatchZy
                 }
                 isSpawningBot = true;
                 ApplyBotShootingState();
-                Server.ExecuteCommand("bot_quota_mode normal");
                 // !bot/.bot command is made using a lot of workarounds, as there is no direct way to create a bot entity and spawn it in CSSharp
                 // Hence there can be some issues with this approach. This will be revamped when we will be able to fake clients.
                 if (player.TeamNum == (byte)CsTeam.CounterTerrorist)
@@ -2337,7 +2334,6 @@ namespace MatchZy
                     PrintToAllChat(Localizer["matchzy.pm.botlimit"]);
                 }
 
-                SynchronizePracticeBotQuota();
                 isSpawningBot = false;
             }
             catch (JsonException ex)
@@ -2348,37 +2344,54 @@ namespace MatchZy
 
         public void TemporarilyDisableCollisions(CCSPlayerController p1, CCSPlayerController p2)
         {
+            if (!p1.IsValid || !p2.IsValid || !p1.PlayerPawn.IsValid || !p2.PlayerPawn.IsValid) return;
+
+            CCSPlayerPawn? initialP1Pawn = p1.PlayerPawn.Value;
+            CCSPlayerPawn? initialP2Pawn = p2.PlayerPawn.Value;
+            if (initialP1Pawn == null || !initialP1Pawn.IsValid ||
+                initialP2Pawn == null || !initialP2Pawn.IsValid)
+            {
+                return;
+            }
+
             Log($"[TemporarilyDisableCollisions] Disabling {p1.PlayerName} {p2.PlayerName}");
             // Reference collision code: https://github.com/Source2ZE/CS2Fixes/blob/f009e399ff23a81915e5a2b2afda20da2ba93ada/src/events.cpp#L150
-            p1.PlayerPawn.Value!.Collision.CollisionAttribute.CollisionGroup = (byte)CollisionGroup.COLLISION_GROUP_DEBRIS;
-            p1.PlayerPawn.Value.Collision.CollisionGroup = (byte)CollisionGroup.COLLISION_GROUP_DEBRIS;
-            p2.PlayerPawn.Value!.Collision.CollisionAttribute.CollisionGroup = (byte)CollisionGroup.COLLISION_GROUP_DEBRIS;
-            p2.PlayerPawn.Value.Collision.CollisionGroup = (byte)CollisionGroup.COLLISION_GROUP_DEBRIS;
+            SetPracticePawnCollisionGroup(initialP1Pawn, CollisionGroup.COLLISION_GROUP_DEBRIS);
+            SetPracticePawnCollisionGroup(initialP2Pawn, CollisionGroup.COLLISION_GROUP_DEBRIS);
             // TODO: call CollisionRulesChanged
             var p1p = p1.PlayerPawn;
             var p2p = p2.PlayerPawn;
-            collisionGroupTimer?.Kill();
-            collisionGroupTimer = AddTimer(0.1f, () =>
+            CounterStrikeSharp.API.Modules.Timers.Timer? collisionTimer = null;
+            collisionTimer = AddTimer(0.1f, () =>
             {
-                if (!p1p.IsValid || !p2p.IsValid || !p1p.Value.IsValid || !p2p.Value.IsValid)
+                CCSPlayerPawn? p1Pawn = p1p.IsValid ? p1p.Value : null;
+                CCSPlayerPawn? p2Pawn = p2p.IsValid ? p2p.Value : null;
+                if (p1Pawn == null || !p1Pawn.IsValid || p2Pawn == null || !p2Pawn.IsValid)
                 {
-                    Log($"player handle invalid p1p {p1p.Value.IsValid} p2p {p2p.Value.IsValid}");
-                    collisionGroupTimer?.Kill();
+                    SetPracticePawnCollisionGroup(p1Pawn, CollisionGroup.COLLISION_GROUP_PLAYER_MOVEMENT);
+                    SetPracticePawnCollisionGroup(p2Pawn, CollisionGroup.COLLISION_GROUP_PLAYER_MOVEMENT);
+                    collisionTimer?.Kill();
                     return;
                 }
 
-                if (!DoPlayersCollide(p1p.Value, p2p.Value))
+                if (!DoPlayersCollide(p1Pawn, p2Pawn))
                 {
-                    // Once they no longer collide 
-                    p1p.Value.Collision.CollisionAttribute.CollisionGroup = (byte)CollisionGroup.COLLISION_GROUP_PLAYER_MOVEMENT;
-                    p1p.Value.Collision.CollisionGroup = (byte)CollisionGroup.COLLISION_GROUP_PLAYER_MOVEMENT;
-                    p2p.Value.Collision.CollisionAttribute.CollisionGroup = (byte)CollisionGroup.COLLISION_GROUP_PLAYER_MOVEMENT;
-                    p2p.Value.Collision.CollisionGroup = (byte)CollisionGroup.COLLISION_GROUP_PLAYER_MOVEMENT;
+                    // Once they no longer collide
+                    SetPracticePawnCollisionGroup(p1Pawn, CollisionGroup.COLLISION_GROUP_PLAYER_MOVEMENT);
+                    SetPracticePawnCollisionGroup(p2Pawn, CollisionGroup.COLLISION_GROUP_PLAYER_MOVEMENT);
                     // TODO: call CollisionRulesChanged
-                    collisionGroupTimer?.Kill();
+                    collisionTimer?.Kill();
                 }
 
             }, TimerFlags.REPEAT | TimerFlags.STOP_ON_MAPCHANGE);
+        }
+
+        private static void SetPracticePawnCollisionGroup(CCSPlayerPawn? pawn, CollisionGroup collisionGroup)
+        {
+            if (pawn == null || !pawn.IsValid) return;
+
+            pawn.Collision.CollisionAttribute.CollisionGroup = (byte)collisionGroup;
+            pawn.Collision.CollisionGroup = (byte)collisionGroup;
         }
 
         public bool DoPlayersCollide(CCSPlayerPawn p1, CCSPlayerPawn p2)
@@ -2386,10 +2399,12 @@ namespace MatchZy
             Vector p1min, p1max, p2min, p2max;
             var p1pos = p1.AbsOrigin;
             var p2pos = p2.AbsOrigin;
-            p1min = p1.Collision.Mins + p1pos!;
-            p1max = p1.Collision.Maxs + p1pos!;
-            p2min = p2.Collision.Mins + p2pos!;
-            p2max = p2.Collision.Maxs + p2pos!;
+            if (p1pos == null || p2pos == null) return false;
+
+            p1min = p1.Collision.Mins + p1pos;
+            p1max = p1.Collision.Maxs + p1pos;
+            p2min = p2.Collision.Mins + p2pos;
+            p2max = p2.Collision.Maxs + p2pos;
 
             return p1min.X <= p2max.X && p1max.X >= p2min.X &&
                     p1min.Y <= p2max.Y && p1max.Y >= p2min.Y &&
@@ -2597,13 +2612,11 @@ namespace MatchZy
                     : null;
                 if (bot == null || !bot.IsValid || !bot.IsBot || bot.IsHLTV)
                 {
-                    SynchronizePracticeBotQuota();
                     continue;
                 }
 
                 string botName = bot.PlayerName;
                 Server.ExecuteCommand($"kickid {botUserId}");
-                SynchronizePracticeBotQuota();
                 ReplyToUserCommand(player, $"Removed the last placed bot '{botName}'.");
                 return;
             }
@@ -2905,7 +2918,7 @@ namespace MatchZy
                 int loadGeneration = BeginBotPresetLoad();
                 ReplyToUserCommand(player, $"Placing {botCount} bot(s) from bot-spawn set '{spawnName}'.");
                 AddTimer(
-                    0.1f,
+                    0.5f,
                     () => WaitForBotPresetCleanup(player, spawnName, botsToPlace, loadGeneration, attempt: 0, isBotSpawnSet: true),
                     TimerFlags.STOP_ON_MAPCHANGE);
             }
@@ -3041,7 +3054,7 @@ namespace MatchZy
                 int loadGeneration = BeginBotPresetLoad();
                 ReplyToUserCommand(player, $"Loading {botsToRestore.Count} bot position(s) from '{resolvedPresetName}'.");
                 AddTimer(
-                    0.1f,
+                    0.5f,
                     () => WaitForBotPresetCleanup(player, resolvedPresetName, botsToRestore, loadGeneration, attempt: 0),
                     TimerFlags.STOP_ON_MAPCHANGE);
             }
@@ -3115,15 +3128,18 @@ namespace MatchZy
 
         private int BeginBotPresetLoad()
         {
-            RemoveAllPracticeBots();
-            int loadGeneration = botPresetLoadGeneration;
+            int loadGeneration = ++botPresetLoadGeneration;
+            isSpawningBot = true;
+            ResetTurretCombatState();
+            botHealthCeilings.Clear();
+            pracUsedBots = new Dictionary<int, Dictionary<string, object>>();
+            practiceBotPlacementOrder.Clear();
+            Server.ExecuteCommand("bot_kick");
             ApplyBotShootingState();
-            Server.ExecuteCommand("bot_quota_mode normal; bot_quota 0");
             Server.ExecuteCommand("bot_dont_shoot 1");
             Server.ExecuteCommand("bot_stop 1");
             Server.ExecuteCommand("bot_freeze 1");
             Server.ExecuteCommand("bot_zombie 1");
-            isSpawningBot = true;
             return loadGeneration;
         }
 
@@ -3139,14 +3155,13 @@ namespace MatchZy
             if (!IsPlayerValid(owner))
             {
                 isSpawningBot = false;
-                SynchronizePracticeBotQuota();
                 ApplyBotShootingState();
                 return;
             }
 
-            bool oldBotStillConnected = Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
+            bool botStillConnected = Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
                 .Any(bot => bot.IsValid && bot.IsBot && !bot.IsHLTV);
-            if (!oldBotStillConnected)
+            if (!botStillConnected)
             {
                 RestoreNextSavedBot(owner, presetName, savedBots, 0, loadGeneration, isBotSpawnSet);
                 return;
@@ -3164,11 +3179,7 @@ namespace MatchZy
                 return;
             }
 
-            if (attempt > 0 && attempt % 10 == 0)
-            {
-                Server.ExecuteCommand("bot_quota_mode normal; bot_quota 0; bot_kick");
-            }
-
+            Server.ExecuteCommand("bot_kick");
             AddTimer(
                 0.1f,
                 () => WaitForBotPresetCleanup(owner, presetName, savedBots, loadGeneration, attempt + 1, isBotSpawnSet),
@@ -3187,38 +3198,17 @@ namespace MatchZy
             if (!IsPlayerValid(owner))
             {
                 isSpawningBot = false;
-                SynchronizePracticeBotQuota();
                 ApplyBotShootingState();
                 return;
             }
 
             if (index >= savedBots.Count)
             {
-                isSpawningBot = false;
-                SynchronizePracticeBotQuota();
-                ApplyBotShootingState();
-                ReplyToUserCommand(
-                    owner,
-                    isBotSpawnSet
-                        ? $"Placed {savedBots.Count} bot(s) from bot-spawn set '{presetName}'."
-                        : $"Loaded {savedBots.Count} bot position(s) from '{presetName}'.");
+                FinishBotPresetLoad(owner, presetName, savedBots.Count, loadGeneration, isBotSpawnSet, cleanupAttempt: 0);
                 return;
             }
 
-            SavedBotPosition savedBot = savedBots[index];
-            HashSet<int> existingBotUserIds = Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
-                .Where(bot => bot.IsValid && bot.IsBot && bot.UserId.HasValue)
-                .Select(bot => bot.UserId!.Value)
-                .ToHashSet();
-
-            string teamName = savedBot.TeamNum == (byte)CsTeam.Terrorist ? "T" : "CT";
-            Server.ExecuteCommand($"bot_join_team {teamName}");
-            Server.ExecuteCommand(savedBot.TeamNum == (byte)CsTeam.Terrorist ? "bot_add_t" : "bot_add_ct");
-
-            AddTimer(
-                0.25f,
-                () => TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, existingBotUserIds, 0, isBotSpawnSet),
-                TimerFlags.STOP_ON_MAPCHANGE);
+            TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, attempt: 0, isBotSpawnSet);
         }
 
         private void TryPlaceRestoredBot(
@@ -3227,7 +3217,6 @@ namespace MatchZy
             List<SavedBotPosition> savedBots,
             int index,
             int loadGeneration,
-            HashSet<int> existingBotUserIds,
             int attempt,
             bool isBotSpawnSet = false)
         {
@@ -3235,38 +3224,34 @@ namespace MatchZy
             if (!IsPlayerValid(owner))
             {
                 isSpawningBot = false;
-                SynchronizePracticeBotQuota();
                 ApplyBotShootingState();
                 return;
             }
 
             SavedBotPosition savedBot = savedBots[index];
-            List<CCSPlayerController> newBots = Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
-                .Where(bot => IsPlayerValid(bot) && bot.IsBot && !bot.IsHLTV && bot.UserId.HasValue && !existingBotUserIds.Contains(bot.UserId.Value))
-                .ToList();
-            CCSPlayerController? restoredBot = newBots.FirstOrDefault(bot => bot.TeamNum == savedBot.TeamNum);
+            CCSPlayerController? restoredBot = FindUntrackedPracticeBot(savedBot.TeamNum);
 
             if (restoredBot == null)
             {
-                if (attempt < 40)
+                if (attempt < 100)
                 {
-                    // bot_add can be ignored while a previous bot client is still finishing
-                    // its connection. Reissue it periodically while continuing to watch for
-                    // the controller, then clean up any duplicate bot that appears later.
-                    if (attempt > 0 && attempt % 10 == 0)
+                    // Bot controllers connect asynchronously. Retry the explicit add once
+                    // per second until the newly requested controller becomes available.
+                    if (attempt % 10 == 0)
                     {
+                        string teamName = savedBot.TeamNum == (byte)CsTeam.Terrorist ? "T" : "CT";
+                        Server.ExecuteCommand($"bot_join_team {teamName}");
                         Server.ExecuteCommand(savedBot.TeamNum == (byte)CsTeam.Terrorist ? "bot_add_t" : "bot_add_ct");
                     }
 
                     AddTimer(
                         0.1f,
-                        () => TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, existingBotUserIds, attempt + 1, isBotSpawnSet),
+                        () => TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, attempt + 1, isBotSpawnSet),
                         TimerFlags.STOP_ON_MAPCHANGE);
                     return;
                 }
 
                 isSpawningBot = false;
-                SynchronizePracticeBotQuota();
                 ApplyBotShootingState();
                 ReplyToUserCommand(
                     owner,
@@ -3284,7 +3269,6 @@ namespace MatchZy
                 if (attempt >= 40)
                 {
                     isSpawningBot = false;
-                    SynchronizePracticeBotQuota();
                     ApplyBotShootingState();
                     ReplyToUserCommand(
                         owner,
@@ -3297,7 +3281,7 @@ namespace MatchZy
                 restoredBot.Respawn();
                 AddTimer(
                     0.1f,
-                    () => TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, existingBotUserIds, attempt + 1, isBotSpawnSet),
+                    () => TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, attempt + 1, isBotSpawnSet),
                     TimerFlags.STOP_ON_MAPCHANGE);
                 return;
             }
@@ -3313,15 +3297,6 @@ namespace MatchZy
             };
             practiceBotPlacementOrder.Remove(restoredBotUserId);
             practiceBotPlacementOrder.Add(restoredBotUserId);
-
-            foreach (CCSPlayerController extraBot in newBots)
-            {
-                if (extraBot.UserId != restoredBot.UserId)
-                {
-                    Server.ExecuteCommand($"kickid {extraBot.UserId!.Value}");
-                }
-            }
-            SynchronizePracticeBotQuota();
 
             CCSPlayerPawn? pawn = restoredBot.PlayerPawn.Value;
             if (pawn != null && pawn.IsValid)
@@ -3343,9 +3318,68 @@ namespace MatchZy
             }
 
             AddTimer(
-                0.2f,
+                0.35f,
                 () => RestoreNextSavedBot(owner, presetName, savedBots, index + 1, loadGeneration, isBotSpawnSet),
                 TimerFlags.STOP_ON_MAPCHANGE);
+        }
+
+        private CCSPlayerController? FindUntrackedPracticeBot(byte teamNum)
+        {
+            return Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
+                .FirstOrDefault(bot => bot.IsValid && bot.IsBot && !bot.IsHLTV && bot.UserId.HasValue &&
+                    bot.TeamNum == teamNum && !pracUsedBots.ContainsKey(bot.UserId.Value));
+        }
+
+        private void FinishBotPresetLoad(
+            CCSPlayerController owner,
+            string presetName,
+            int placedBotCount,
+            int loadGeneration,
+            bool isBotSpawnSet,
+            int cleanupAttempt)
+        {
+            if (loadGeneration != botPresetLoadGeneration) return;
+
+            List<int> untrackedBotUserIds = Utilities
+                .FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
+                .Where(bot => bot.IsValid && bot.IsBot && !bot.IsHLTV && bot.UserId.HasValue &&
+                    !pracUsedBots.ContainsKey(bot.UserId.Value))
+                .Select(bot => bot.UserId!.Value)
+                .ToList();
+            if (untrackedBotUserIds.Count > 0 && cleanupAttempt < 50)
+            {
+                foreach (int untrackedBotUserId in untrackedBotUserIds)
+                {
+                    Server.ExecuteCommand($"kickid {untrackedBotUserId}");
+                }
+
+                AddTimer(
+                    0.1f,
+                    () => FinishBotPresetLoad(
+                        owner,
+                        presetName,
+                        placedBotCount,
+                        loadGeneration,
+                        isBotSpawnSet,
+                        cleanupAttempt + 1),
+                    TimerFlags.STOP_ON_MAPCHANGE);
+                return;
+            }
+
+            if (untrackedBotUserIds.Count > 0)
+            {
+                Log($"[FinishBotPresetLoad] Unable to remove {untrackedBotUserIds.Count} extra bot controller(s).");
+            }
+
+            isSpawningBot = false;
+            ApplyBotShootingState();
+            if (!IsPlayerValid(owner)) return;
+
+            ReplyToUserCommand(
+                owner,
+                isBotSpawnSet
+                    ? $"Placed {placedBotCount} bot(s) from bot-spawn set '{presetName}'."
+                    : $"Loaded {placedBotCount} bot position(s) from '{presetName}'.");
         }
 
         private void RemoveAllPracticeBots()
@@ -3354,7 +3388,7 @@ namespace MatchZy
             isSpawningBot = false;
             ResetTurretCombatState();
             botHealthCeilings.Clear();
-            Server.ExecuteCommand("bot_quota_mode normal; bot_quota 0; bot_kick");
+            Server.ExecuteCommand("bot_kick");
             pracUsedBots = new Dictionary<int, Dictionary<string, object>>();
             practiceBotPlacementOrder.Clear();
             AddTimer(
@@ -3377,19 +3411,11 @@ namespace MatchZy
                 return;
             }
 
-            Server.ExecuteCommand("bot_quota_mode normal; bot_quota 0; bot_kick");
+            Server.ExecuteCommand("bot_kick");
             AddTimer(
                 0.1f,
                 () => EnsurePracticeBotsRemoved(cleanupGeneration, attempt + 1),
                 TimerFlags.STOP_ON_MAPCHANGE);
-        }
-
-        private void SynchronizePracticeBotQuota()
-        {
-            int trackedBotCount = Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
-                .Count(bot => bot.IsValid && bot.IsBot && !bot.IsHLTV && bot.UserId.HasValue &&
-                    pracUsedBots.ContainsKey(bot.UserId.Value));
-            Server.ExecuteCommand($"bot_quota_mode normal; bot_quota {trackedBotCount}");
         }
 
         private void RemoveBotIfStillUntracked(int botUserId)
@@ -3402,7 +3428,6 @@ namespace MatchZy
             if (bot == null) return;
 
             Server.ExecuteCommand($"kickid {botUserId}");
-            SynchronizePracticeBotQuota();
         }
 
         private static void ShuffleBotSpawnPoints(List<SavedBotSpawnPoint> spawnPoints)
