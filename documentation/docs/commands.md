@@ -26,8 +26,7 @@ Most of the commands can also be used using ! prefix instead of . (like !ready)
 - `.worstctspawn` Teleports you to CT team's furthest spawn from your current position
 - `.besttspawn` Teleports you to T team's closest spawn from your current position
 - `.worsttspawn` Teleports you to T team's furthest spawn from your current position
-- `.showspawns` Highlights all the competitive spawns
-- `.hidespawns` Hides the highlighted spawns
+- `.spawnmarkers` Toggles the competitive T and CT spawn markers
 - `.bot` Adds and initially spawns a living bot at the user's current position. The initial spawn is independent of `.botrespawn`; that toggle controls later deaths.
 - `.botshoot <true/false>` Controls whether practice bots act as stationary turrets: they track visible enemies, shoot, and use the highest bot difficulty, but cannot move.
 - `.botreactiontime <0-1000>` Sets how many milliseconds a turret bot must continuously see its current enemy before firing. The default is `500`; `0` disables the delay.

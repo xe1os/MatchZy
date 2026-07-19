@@ -164,6 +164,7 @@ public partial class MatchZy
         {
             ResetPracticeRoundTimeout();
             HandlePostRoundStartEvent(@event);
+            RefreshPracticeSpawnMarkersAfterRoundStart();
             return HookResult.Continue;
         }
         catch (Exception e)

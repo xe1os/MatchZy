@@ -60,8 +60,7 @@ public partial class MatchZy
         StorePosition,
         TeleportPosition,
         DeletePosition,
-        ShowSpawns,
-        HideSpawns,
+        ToggleSpawnMarkers,
         ChangeToT,
         ChangeToCT,
         RethrowUtility,
@@ -421,9 +420,9 @@ public partial class MatchZy
             new(ConfigurationMenuRowId.Back, MenuText("matchzy.menu.back")),
         ];
 
-        rows.Add(spawnMarkersVisible
-            ? new(ConfigurationMenuRowId.HideSpawns, MenuText("matchzy.menu.hide_spawn_locations"))
-            : new(ConfigurationMenuRowId.ShowSpawns, MenuText("matchzy.menu.show_spawn_locations")));
+        rows.Add(spawnMarkersEnabled
+            ? new(ConfigurationMenuRowId.ToggleSpawnMarkers, MenuText("matchzy.menu.hide_spawn_locations"))
+            : new(ConfigurationMenuRowId.ToggleSpawnMarkers, MenuText("matchzy.menu.show_spawn_locations")));
 
         if (isT)
         {
@@ -515,8 +514,7 @@ public partial class MatchZy
             ConfigurationMenuRowId.StorePosition => SavePracticePlayerPosition(player),
             ConfigurationMenuRowId.TeleportPosition => LoadPracticePlayerPosition(player),
             ConfigurationMenuRowId.DeletePosition => DeletePracticePlayerPosition(player),
-            ConfigurationMenuRowId.ShowSpawns => SetPracticeSpawnMarkersVisible(player, true),
-            ConfigurationMenuRowId.HideSpawns => SetPracticeSpawnMarkersVisible(player, false),
+            ConfigurationMenuRowId.ToggleSpawnMarkers => TogglePracticeSpawnMarkers(player),
             ConfigurationMenuRowId.ChangeToT => SwitchPracticePlayerSide(player, CsTeam.Terrorist),
             ConfigurationMenuRowId.ChangeToCT => SwitchPracticePlayerSide(player, CsTeam.CounterTerrorist),
             ConfigurationMenuRowId.RethrowUtility => RethrowLastPracticeUtility(player),

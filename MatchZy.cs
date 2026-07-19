@@ -14,7 +14,7 @@ namespace MatchZy
 
         public override string ModuleName => "MatchZy";
 
-        public override string ModuleVersion => "0.8.15-refined.1.1.2";
+        public override string ModuleVersion => "0.8.15-refined.1.1.3";
 
         public override string ModuleAuthor => "WD- (https://github.com/shobhit-pathak/)";
 
@@ -147,8 +147,7 @@ namespace MatchZy
                 { ".tactics", OnPracCommand },
                 { ".prac", OnPracCommand },
                 { ".menu", OnConfigurationMenuCommand },
-                { ".showspawns", OnShowSpawnsCommand },
-                { ".hidespawns", OnHideSpawnsCommand },
+                { ".spawnmarkers", OnSpawnMarkersCommand },
                 { ".dryrun", OnDryRunCommand },
                 { ".dry", OnDryRunCommand },
                 { ".noflash", OnNoFlashCommand },
@@ -242,6 +241,10 @@ namespace MatchZy
                 if (isPractice && (@event.Team == (int)CsTeam.Terrorist || @event.Team == (int)CsTeam.CounterTerrorist))
                 {
                     SchedulePracticeHumanRespawn(@event.Userid, PracticeRespawnDelaySeconds);
+                    SchedulePracticeSideInventoryUpdate(
+                        @event.Userid,
+                        (CsTeam)@event.Oldteam,
+                        (CsTeam)@event.Team);
                 }
                 return HookResult.Continue;
             }, HookMode.Post);
@@ -510,7 +513,7 @@ namespace MatchZy
                 {
                     HandleBotReactionTimeCommand(player, messageCommandArg);
                 }
-                if (message.StartsWith(".spawn"))
+                if (messageCommand.Equals(".spawn", StringComparison.OrdinalIgnoreCase))
                 {
                     HandleSpawnCommand(player, messageCommandArg, player.TeamNum, "spawn");
                 }

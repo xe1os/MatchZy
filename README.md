@@ -12,7 +12,7 @@ adds the following focused features, fixes, and changes.
 - Added `.menu` for a per-player center-screen configuration menu covering practice startup, bot placement and removal, bot settings, player settings and saved positions, spawn controls, and utility actions. Use `W`/`S` to navigate and `A`/`D` to change values or select actions.
 - Added `.grt` as an explicit practice-mode command for CS2's server-global grenade rethrow.
 - Added `.slp` to save the player's current position and view direction, `.tlp` to return to it, and `.dlp` to delete it.
-- Added interactive T and CT spawn outlines in practice mode; stand inside a flat gold square and press `E` to teleport to that exact spawn. The outlines remain visible above shallow water, and `.showspawns` and `.hidespawns` control their visibility.
+- Added interactive spawn outlines in practice mode; stand inside a gold T-side or blue CT-side square and press `E` to teleport to that exact spawn. The outlines remain visible above shallow water, `.spawnmarkers` toggles their visibility, and `matchzy_spawn_markers_enabled_default` controls whether they appear when practice starts.
 - Added `.sbp <name>`, `.lbp <name>`, `.dbp <name>`, and `.listbp` for saving, restoring, deleting, and listing named, multi-word bot-position setups with their teams, aim directions, and crouch states. Saved setups can also be listed, loaded, and deleted from Bot Placement in `.menu`.
 - Added `.changemap <map-name>` so any player can switch to a validated map, with or without the `de_` prefix.
 - Added `.botshoot <true/false>` and `.botreactiontime <0-1000>` to turn practice bots into stationary, visibility-aware opponents and configure their firing delay.
@@ -32,6 +32,7 @@ adds the following focused features, fixes, and changes.
 
 - Practice mode allows unrestricted teammate damage without warnings, punishment, or automatic kicks.
 - Human and bot practice death respawns now use a 500 ms delay; humans use the same delay after joining a team.
+- Practice side switching replaces a carried T-side Molotov with a CT incendiary grenade and removes the defuse kit when moving from CT to T.
 - Configuration-menu navigation uses CS2 movement actions, so the keys also move the player. Arrow keys work only when the player has bound them to the corresponding movement actions.
 - The configuration menu omits actions that cannot currently be used and keeps its five-row viewport compact so available options remain visible.
 - The configuration menu suppresses CS2's periodic white center-HUD fade while open and uses compact saved-position labels without redundant state suffixes.

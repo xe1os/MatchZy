@@ -117,6 +117,9 @@ Example: `matchzy_demo_upload_url "https://your-website.com/upload-endpoint"` <b
 ####`matchzy_smoke_color_enabled`
 :   If enabled, the smoke's color will be changed to player's team color (player's color seen in the radar) .<br>**`Default: false`**
 
+####`matchzy_spawn_markers_enabled_default`
+:   Whether competitive spawn markers are visible when practice mode starts. The `.spawnmarkers` command can still toggle them for the current practice session.<br>**`Default: true`**
+
 ####`matchzy_everyone_is_admin`
 :   If set to true, everyone will be granted admin permissions for MatchZy.<br>**`Default: false`**
 

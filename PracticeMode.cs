@@ -130,11 +130,11 @@ namespace MatchZy
 
         const float SpawnMarkerHalfSize = 18.0f;
         const float SpawnMarkerHeightOffset = 8.0f;
-        const float SpawnMarkerWidth = 3.0f;
+        const float SpawnMarkerWidth = 1.5f;
         const float SpawnMarkerVerticalTolerance = 36.0f;
         const int MinimumCompetitiveSpawnCount = 5;
 
-        bool spawnMarkersVisible;
+        bool spawnMarkersEnabled;
 
         public Dictionary<byte, List<Position>> spawnsData = GetEmptySpawnsData();
 
@@ -167,6 +167,7 @@ namespace MatchZy
         private const int DefaultBotReactionTimeMs = 500;
         private const int GodModeHealth = int.MaxValue / 2;
         private const float PracticeRespawnDelaySeconds = 0.5f;
+        private const float PracticeSideInventoryUpdateDelaySeconds = PracticeRespawnDelaySeconds + 0.1f;
         private const float PracticeLifeRegenerationIntervalSeconds = 0.1f;
 
         public bool isDryRun = false;
@@ -231,11 +232,11 @@ namespace MatchZy
             // elimination wins. The normal round timeout is enforced by the plugin.
             Server.ExecuteCommand("mp_ignore_round_win_conditions 1");
             GetSpawns();
-            ShowSpawnMarkers();
+            InitializePracticeSpawnMarkers();
             PrintToAllChat($"Practice mode loaded!");
             Server.PrintToChatAll($" {ChatColors.Green}Configuration: {ChatColors.Default}.menu");
             Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawn, .ctspawn, .tspawn, .bestspawn, .worstspawn");
-            Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.showspawns, .hidespawns");
+            Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawnmarkers");
             Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.bot, .nobots, .botshoot <true/false>, .botreactiontime <0-1000>, .botrespawn <true/false>, .botlifereg <true/false>, .crouchbot, .boost, .crouchboost");
             Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.sbp <name>, .lbp <name>, .dbp <name>, .listbp");
             Server.PrintToChatAll($" {ChatColors.Green}Nades: {ChatColors.Default}.loadnade, .savenade, .importnade, .listnades");
@@ -807,7 +808,7 @@ namespace MatchZy
             }
         }
 
-        private void CreateSpawnMarkerEdge(Vector start, Vector end)
+        private void CreateSpawnMarkerEdge(Vector start, Vector end, Color color)
         {
             CBeam? beam = Utilities.CreateEntityByName<CBeam>("beam");
             if (beam == null)
@@ -818,7 +819,7 @@ namespace MatchZy
 
             beam.LifeState = 1;
             beam.Width = SpawnMarkerWidth;
-            beam.Render = Color.Gold;
+            beam.Render = color;
 
             beam.EndPos.X = end.X;
             beam.EndPos.Y = end.Y;
@@ -830,7 +831,7 @@ namespace MatchZy
             spawnMarkerBeams.Add(beam);
         }
 
-        public void ShowSpawnMarker(Position spawn)
+        public void ShowSpawnMarker(Position spawn, Color color)
         {
             float centerX = spawn.PlayerPosition.X;
             float centerY = spawn.PlayerPosition.Y;
@@ -841,31 +842,47 @@ namespace MatchZy
             Vector southEast = new(centerX + SpawnMarkerHalfSize, centerY - SpawnMarkerHalfSize, markerZ);
             Vector southWest = new(centerX - SpawnMarkerHalfSize, centerY - SpawnMarkerHalfSize, markerZ);
 
-            CreateSpawnMarkerEdge(northWest, northEast);
-            CreateSpawnMarkerEdge(northEast, southEast);
-            CreateSpawnMarkerEdge(southEast, southWest);
-            CreateSpawnMarkerEdge(southWest, northWest);
+            CreateSpawnMarkerEdge(northWest, northEast, color);
+            CreateSpawnMarkerEdge(northEast, southEast, color);
+            CreateSpawnMarkerEdge(southEast, southWest, color);
+            CreateSpawnMarkerEdge(southWest, northWest, color);
+        }
+
+        private void InitializePracticeSpawnMarkers()
+        {
+            RemoveSpawnMarkerEntities();
+            spawnMarkersEnabled = spawnMarkersEnabledByDefault.Value;
+        }
+
+        private void RefreshPracticeSpawnMarkersAfterRoundStart()
+        {
+            if (!isPractice || !spawnMarkersEnabled) return;
+
+            Server.NextFrame(() =>
+            {
+                if (!isPractice || !spawnMarkersEnabled) return;
+                ShowSpawnMarkers();
+            });
         }
 
         private void ShowSpawnMarkers()
         {
-            RemoveSpawnMarkers();
+            RemoveSpawnMarkerEntities();
             if (spawnsData.Values.Any(list => list.Count == 0)) GetSpawns();
 
             foreach (Position spawn in spawnsData[(byte)CsTeam.CounterTerrorist])
             {
-                ShowSpawnMarker(spawn);
+                ShowSpawnMarker(spawn, Color.Blue);
             }
 
             foreach (Position spawn in spawnsData[(byte)CsTeam.Terrorist])
             {
-                ShowSpawnMarker(spawn);
+                ShowSpawnMarker(spawn, Color.Gold);
             }
 
-            spawnMarkersVisible = true;
         }
 
-        public void RemoveSpawnMarkers()
+        private void RemoveSpawnMarkerEntities()
         {
             foreach (CBeam beam in spawnMarkerBeams)
             {
@@ -873,14 +890,22 @@ namespace MatchZy
             }
 
             spawnMarkerBeams.Clear();
-            spawnMarkersVisible = false;
+        }
+
+        public void RemoveSpawnMarkers()
+        {
+            spawnMarkersEnabled = false;
+            RemoveSpawnMarkerEntities();
         }
 
         public void OnPlayerButtonsChanged(CCSPlayerController player, PlayerButtons pressed, PlayerButtons released)
         {
             HandleConfigurationMenuInput(player, pressed);
 
-            if (!isPractice || !spawnMarkersVisible || !IsPlayerValid(player)) return;
+            if (!isPractice ||
+                !spawnMarkersEnabled ||
+                !spawnMarkerBeams.Any(beam => beam.IsValid) ||
+                !IsPlayerValid(player)) return;
             if ((pressed & PlayerButtons.Use) == 0) return;
 
             CCSPlayerPawn? pawn = player.PlayerPawn.Value;
@@ -1320,6 +1345,102 @@ namespace MatchZy
                 delaySeconds,
                 () => TryRespawnJoinedPracticeHuman(player, attemptsRemaining: 5),
                 TimerFlags.STOP_ON_MAPCHANGE);
+        }
+
+        private void SchedulePracticeSideInventoryUpdate(
+            CCSPlayerController? player,
+            CsTeam previousTeam,
+            CsTeam newTeam)
+        {
+            bool replacesMolotov = previousTeam == CsTeam.Terrorist && newTeam == CsTeam.CounterTerrorist;
+            bool removesDefuseKit = previousTeam == CsTeam.CounterTerrorist && newTeam == CsTeam.Terrorist;
+            if ((!replacesMolotov && !removesDefuseKit) ||
+                player == null ||
+                player.IsBot ||
+                player.IsHLTV ||
+                !IsConnectedPracticeHuman(player))
+            {
+                return;
+            }
+
+            AddTimer(
+                PracticeSideInventoryUpdateDelaySeconds,
+                () => TryApplyPracticeSideInventoryUpdate(player, previousTeam, newTeam, attemptsRemaining: 5),
+                TimerFlags.STOP_ON_MAPCHANGE);
+        }
+
+        private void TryApplyPracticeSideInventoryUpdate(
+            CCSPlayerController player,
+            CsTeam previousTeam,
+            CsTeam newTeam,
+            int attemptsRemaining)
+        {
+            if (!isPractice ||
+                player.IsBot ||
+                player.IsHLTV ||
+                !IsConnectedPracticeHuman(player) ||
+                player.Team != newTeam)
+            {
+                return;
+            }
+
+            CCSPlayerPawn? pawn = player.PlayerPawn.Value;
+            if (!IsPlayerValid(player) || !player.PawnIsAlive || pawn == null || !pawn.IsValid)
+            {
+                if (attemptsRemaining <= 0) return;
+                AddTimer(
+                    0.2f,
+                    () => TryApplyPracticeSideInventoryUpdate(player, previousTeam, newTeam, attemptsRemaining - 1),
+                    TimerFlags.STOP_ON_MAPCHANGE);
+                return;
+            }
+
+            if (previousTeam == CsTeam.Terrorist && newTeam == CsTeam.CounterTerrorist)
+            {
+                ReplacePracticeMolotovWithIncendiary(player, pawn);
+            }
+            else if (previousTeam == CsTeam.CounterTerrorist && newTeam == CsTeam.Terrorist)
+            {
+                CCSPlayer_ItemServices? itemServices = pawn.ItemServices?.As<CCSPlayer_ItemServices>();
+                if (itemServices != null && itemServices.HasDefuser)
+                {
+                    itemServices.HasDefuser = false;
+                    Utilities.SetStateChanged(pawn, "CBasePlayerPawn", "m_pItemServices");
+                }
+            }
+        }
+
+        private static void ReplacePracticeMolotovWithIncendiary(
+            CCSPlayerController player,
+            CCSPlayerPawn pawn)
+        {
+            if (pawn.WeaponServices == null) return;
+
+            List<CBasePlayerWeapon> molotovs = pawn.WeaponServices.MyWeapons
+                .Where(weapon => weapon.IsValid &&
+                    weapon.Value != null &&
+                    weapon.Value.IsValid &&
+                    weapon.Value.DesignerName.Equals("weapon_molotov", StringComparison.OrdinalIgnoreCase))
+                .Select(weapon => weapon.Value!)
+                .ToList();
+            if (molotovs.Count == 0) return;
+
+            bool hasIncendiary = pawn.WeaponServices.MyWeapons.Any(weapon =>
+                weapon.IsValid &&
+                weapon.Value != null &&
+                weapon.Value.IsValid &&
+                weapon.Value.DesignerName.Equals("weapon_incgrenade", StringComparison.OrdinalIgnoreCase));
+
+            foreach (CBasePlayerWeapon molotov in molotovs)
+            {
+                pawn.RemovePlayerItem(molotov);
+                if (molotov.IsValid) molotov.Remove();
+            }
+
+            if (!hasIncendiary)
+            {
+                player.GiveNamedItem("weapon_incgrenade");
+            }
         }
 
         private void TryRespawnJoinedPracticeHuman(CCSPlayerController player, int attemptsRemaining)
@@ -3455,16 +3576,15 @@ namespace MatchZy
             TeleportPlayerToWorstSpawn(player!, (byte)CsTeam.Terrorist);
         }
 
-        [ConsoleCommand("css_showspawns", "Highlights all the competitive spawns")]
-        public void OnShowSpawnsCommand(CCSPlayerController? player, CommandInfo? command)
+        [ConsoleCommand("css_spawnmarkers", "Toggles the competitive spawn markers")]
+        public void OnSpawnMarkersCommand(CCSPlayerController? player, CommandInfo? command)
         {
-            SetPracticeSpawnMarkersVisible(player, true);
+            TogglePracticeSpawnMarkers(player);
         }
 
-        [ConsoleCommand("css_hidespawns", "Hides the highlighted spawns")]
-        public void OnHideSpawnsCommand(CCSPlayerController? player, CommandInfo? command)
+        private bool TogglePracticeSpawnMarkers(CCSPlayerController? player)
         {
-            SetPracticeSpawnMarkersVisible(player, false);
+            return SetPracticeSpawnMarkersVisible(player, !spawnMarkersEnabled);
         }
 
         private bool SetPracticeSpawnMarkersVisible(CCSPlayerController? player, bool visible)
@@ -3473,6 +3593,7 @@ namespace MatchZy
 
             if (visible)
             {
+                spawnMarkersEnabled = true;
                 ShowSpawnMarkers();
                 ReplyToUserCommand(player, $"Spawn outlines shown: {spawnsData[(byte)CsTeam.CounterTerrorist].Count} CT and {spawnsData[(byte)CsTeam.Terrorist].Count} T. Stand inside an outline and press E to teleport.");
             }
