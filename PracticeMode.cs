@@ -4524,6 +4524,21 @@ namespace MatchZy
             {
                 entity?.Remove();
             }
+            var flashes = Utilities.FindAllEntitiesByDesignerName<CFlashbangProjectile>("flashbang_projectile");
+            foreach (var entity in flashes)
+            {
+                entity?.Remove();
+            }
+            var decoys = Utilities.FindAllEntitiesByDesignerName<CDecoyProjectile>("decoy_projectile");
+            foreach (var entity in decoys)
+            {
+                entity?.Remove();
+            }
+            var heGrenades = Utilities.FindAllEntitiesByDesignerName<CHEGrenadeProjectile>("hegrenade_projectile");
+            foreach (var entity in heGrenades)
+            {
+                entity?.Remove();
+            }
             var mollys = Utilities.FindAllEntitiesByDesignerName<CSmokeGrenadeProjectile>("molotov_projectile");
             foreach (var entity in mollys)
             {

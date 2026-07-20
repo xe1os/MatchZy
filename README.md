@@ -7,6 +7,24 @@ the original project.
 This fork includes all functionality available in the forked repository and
 adds the following focused features, fixes, and changes.
 
+## Required CS2 Linux Server Version
+
+> [!WARNING]
+> MatchZy-Refined uses native functions from the latest CS2 Linux
+> `libserver.so`. Older CS2 server versions from before the new bomb-explosion
+> update are not supported and will cause native grenade rethrows to fail.
+>
+> Update and validate the complete CS2 dedicated-server installation through
+> [Valve's official SteamCMD](https://developer.valvesoftware.com/wiki/SteamCMD)
+> or through your game server provider's official Steam-based update function.
+> This safely obtains the matching `libserver.so` directly from Valve and
+> installs it at:
+>
+> `.../game/csgo/bin/linuxsteamrt64/libserver.so`
+>
+> Do not download `libserver.so` from third-party websites or replace only that
+> single file. It must match the rest of the installed CS2 server build.
+
 ## Features
 
 - Added `.menu` for a per-player center-screen configuration menu covering practice startup, bot placement and removal, bot settings, player settings and saved positions, spawn controls, and utility actions. Use `W`/`S` to navigate and `A`/`D` to change values or select actions.
@@ -26,6 +44,7 @@ adds the following focused features, fixes, and changes.
 
 ## BugFixes
 
+- `.clear` now removes active flashbang, decoy, and HE grenade projectiles.
 - Disconnecting during practice no longer leaves behind a respawned, attackable player pawn or persistent corpse; dropped C4 and equipment remain in the world.
 - `.rt`, `.rethrow`, and `.throw` now use the requesting player's own utility history during multiplayer practice sessions.
 - Smoke and HE grenade rethrows now recreate the correct projectile, follow the recorded trajectory, and detonate normally.
