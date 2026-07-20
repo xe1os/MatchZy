@@ -154,6 +154,7 @@ namespace MatchZy
         private bool botShootingEnabled;
         private bool botJiggleEnabled;
         private bool botJiggleRandomEnabled;
+        private int botJiggleRangeUnits = DefaultBotJiggleRangeUnits;
         private bool botRespawnEnabled = true;
         private bool botLifeRegenerationEnabled;
         private readonly HashSet<int> humanGodModeEnabled = new();
@@ -175,15 +176,15 @@ namespace MatchZy
         private readonly HashSet<int> turretBotsAttacking = new();
         private readonly List<Vector> activeSmokeOcclusionCenters = new();
         private readonly Dictionary<int, uint> disconnectingPracticePawnHandles = new();
+        private readonly HashSet<int> practiceBotsPendingCleanup = new();
 
         private const int DefaultBotReactionTimeMs = 500;
+        private const int DefaultBotJiggleRangeUnits = 10;
         private const int GodModeHealth = int.MaxValue / 2;
         private const float PracticeRespawnDelaySeconds = 0.5f;
-        private const float PracticeSideInventoryUpdateDelaySeconds = PracticeRespawnDelaySeconds + 0.1f;
         private const float PracticeLifeRegenerationIntervalSeconds = 0.1f;
         private const float PracticeSmokeOcclusionRadius = 144.0f;
         private const float PracticeSmokeCacheIntervalSeconds = 0.1f;
-        private const float PracticeBotJiggleDistance = 10.0f;
         private const float PracticeBotJigglePeriodSeconds = 0.8f;
         private const float PracticeStartRoundFreezeSeconds = 5.0f;
         private const float PracticeStartRoundResetDelaySeconds = 7.0f;
@@ -247,6 +248,8 @@ namespace MatchZy
             botLifeRegenerationEnabled = false;
             botJiggleEnabled = false;
             botJiggleRandomEnabled = false;
+            botJiggleRangeUnits = DefaultBotJiggleRangeUnits;
+            practiceBotsPendingCleanup.Clear();
             botRandomJiggleAssignments.Clear();
             botJigglePauseStartTimes.Clear();
             botJiggleAccumulatedPauseDurations.Clear();
@@ -283,11 +286,12 @@ namespace MatchZy
             InitializePracticeSpawnMarkers();
             PrintToAllChat($"Practice mode loaded!");
             Server.PrintToChatAll($" {ChatColors.Green}Configuration: {ChatColors.Default}.menu");
-            Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawn, .ctspawn, .tspawn, .randomspawn, .bestspawn, .worstspawn, .spawnmarkers");
-            Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.bot, .nobots, .kicklastbot, .crouchbot, .boost, .crouchboost");
-            Server.PrintToChatAll($" {ChatColors.Green}Bot Settings: {ChatColors.Default}.botshoot, .botjiggle, .botjigglerandom, .botreactiontime, .botrespawn, .botlifereg");
-            Server.PrintToChatAll($" {ChatColors.Green}Bot Presets: {ChatColors.Default}.sbp, .lbp, .dbp, .listbp");
-            Server.PrintToChatAll($" {ChatColors.Green}Bot Spawns: {ChatColors.Default}.botspawn, .delbotspawn, .listbotspawn, .placebot");
+            Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawn, .ctspawn, .tspawn, .bestspawn, .worstspawn");
+            Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawnmarkers, .randomspawn");
+            Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.bot, .nobots, .kicklastbot, .botshoot, .botreactiontime <0-1000>, .botrespawn, .botlifereg");
+            Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.botjiggle, .botjigglerandom, .botjigglerange <number>, .crouchbot, .boost, .crouchboost");
+            Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.sbp <name>, .lbp <name>, .dbp <name>, .listbp");
+            Server.PrintToChatAll($" {ChatColors.Green}Bot Spawns: {ChatColors.Default}.botspawn <multi-word name>, .delbotspawn <multi-word name>, .listbotspawn, .placebot <number> <multi-word name>");
             Server.PrintToChatAll($" {ChatColors.Green}Nades: {ChatColors.Default}.loadnade, .savenade, .importnade, .listnades");
             Server.PrintToChatAll($" {ChatColors.Green}Nade Throw: {ChatColors.Default}.rethrow, .throwindex, .lastindex, .delay");
             Server.PrintToChatAll($" {ChatColors.Green}Utility & Toggles: {ChatColors.Default}.startround, .ammo, .clear, .fastforward, .last, .back, .solid, .impacts, .traj");
@@ -1318,6 +1322,35 @@ namespace MatchZy
             string status = enabled ? Localizer["matchzy.cc.enabled"] : Localizer["matchzy.cc.disabled"];
             string suffix = !enabled && randomWasEnabled ? " Random bot jiggling was also disabled." : string.Empty;
             ReplyToUserCommand(player, $"Bot jiggling is {status}.{suffix}");
+            return true;
+        }
+
+        [ConsoleCommand("css_botjigglerange", "Sets the side-to-side range for jiggling practice bots")]
+        public void OnBotJiggleRangeCommand(CCSPlayerController? player, CommandInfo command)
+        {
+            HandleBotJiggleRangeCommand(player, command.ArgByIndex(1));
+        }
+
+        private void HandleBotJiggleRangeCommand(CCSPlayerController? player, string commandArg)
+        {
+            if (!isPractice || !IsPlayerValid(player)) return;
+
+            if (!int.TryParse(commandArg.Trim(), out int rangeUnits) || rangeUnits < 0)
+            {
+                ReplyToUserCommand(player, Localizer["matchzy.cc.usage", ".botjigglerange <number>"]);
+                return;
+            }
+
+            SetPracticeBotJiggleRange(player, rangeUnits);
+        }
+
+        private bool SetPracticeBotJiggleRange(CCSPlayerController? player, int rangeUnits)
+        {
+            if (!isPractice || !IsPlayerValid(player) || rangeUnits < 0) return false;
+
+            botJiggleRangeUnits = rangeUnits;
+            ResetBotJiggleMotionTiming();
+            ReplyToUserCommand(player, $"Bot jiggle range set to {botJiggleRangeUnits} units.");
             return true;
         }
 
@@ -2502,8 +2535,8 @@ namespace MatchZy
                 float pausedDuration = botJiggleAccumulatedPauseDurations.GetValueOrDefault(botUserId);
                 float cycle = (Server.CurrentTime - botJiggleCycleStartTime - pausedDuration) *
                     radiansPerSecond + phase;
-                offset = MathF.Sin(cycle) * PracticeBotJiggleDistance;
-                lateralSpeed = MathF.Cos(cycle) * PracticeBotJiggleDistance * radiansPerSecond;
+                offset = MathF.Sin(cycle) * botJiggleRangeUnits;
+                lateralSpeed = MathF.Cos(cycle) * botJiggleRangeUnits * radiansPerSecond;
 
                 botState.LeftSpeed = lateralSpeed;
                 if (lateralSpeed >= 0.0f)
@@ -4138,15 +4171,73 @@ namespace MatchZy
 
         private void KickAllPracticeBots()
         {
-            // Force each bot to release its playing-team membership before disconnecting
-            // the fake client. CS2 can otherwise keep a full dead-bot roster reserved
-            // until the next round even though every controller logged a disconnect.
             List<CCSPlayerController> bots = Utilities
                 .FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
-                .Where(bot => bot.IsValid && bot.IsBot && !bot.IsHLTV && bot.UserId.HasValue)
+                .Where(bot => bot.IsValid && bot.IsBot && !bot.IsHLTV && bot.UserId.HasValue &&
+                    !practiceBotsPendingCleanup.Contains(bot.UserId.Value))
                 .ToList();
             List<int> botUserIds = bots.Select(bot => bot.UserId!.Value).ToList();
             Log($"[PracticeBotCleanup] Preparing {bots.Count} bot controller(s) for removal. {DescribePracticeBotState()}");
+
+            if (botUserIds.Count == 0) return;
+
+            foreach (int botUserId in botUserIds)
+            {
+                practiceBotsPendingCleanup.Add(botUserId);
+            }
+
+            PreparePracticeBotsForRemoval(botUserIds, kickAllFallback: true, attempt: 0);
+        }
+
+        private void PreparePracticeBotsForRemoval(
+            IReadOnlyCollection<int> botUserIds,
+            bool kickAllFallback,
+            int attempt)
+        {
+            List<CCSPlayerController> bots = Utilities
+                .FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
+                .Where(bot => bot.IsValid && bot.IsBot && !bot.IsHLTV && bot.UserId.HasValue &&
+                    botUserIds.Contains(bot.UserId.Value))
+                .ToList();
+
+            if (bots.Count == 0)
+            {
+                foreach (int botUserId in botUserIds)
+                {
+                    practiceBotsPendingCleanup.Remove(botUserId);
+                }
+                return;
+            }
+
+            List<CCSPlayerController> deadPlayingBots = bots
+                .Where(bot =>
+                    (bot.Team == CsTeam.Terrorist || bot.Team == CsTeam.CounterTerrorist) &&
+                    !bot.PawnIsAlive)
+                .ToList();
+
+            if (deadPlayingBots.Count > 0 && attempt < 10)
+            {
+                if (attempt == 0)
+                {
+                    Log($"[PracticeBotCleanup] Respawning {deadPlayingBots.Count} dead bot(s) before team release. {DescribePracticeBotState()}");
+                }
+
+                foreach (CCSPlayerController bot in deadPlayingBots)
+                {
+                    bot.Respawn();
+                }
+
+                AddTimer(
+                    0.1f,
+                    () => PreparePracticeBotsForRemoval(botUserIds, kickAllFallback, attempt + 1),
+                    TimerFlags.STOP_ON_MAPCHANGE);
+                return;
+            }
+
+            if (deadPlayingBots.Count > 0)
+            {
+                Log($"[PracticeBotCleanup] {deadPlayingBots.Count} bot(s) remained dead after {attempt} respawn attempts; continuing with team release. {DescribePracticeBotState()}");
+            }
 
             foreach (CCSPlayerController bot in bots)
             {
@@ -4164,9 +4255,18 @@ namespace MatchZy
                 {
                     Server.ExecuteCommand($"kickid {botUserId}");
                 }
-                Server.ExecuteCommand("bot_kick all");
+                if (kickAllFallback)
+                {
+                    Server.ExecuteCommand("bot_kick all");
+                }
                 Server.NextFrame(() =>
-                    Log($"[PracticeBotCleanup] Post-kick frame. {DescribePracticeBotState()}"));
+                {
+                    foreach (int botUserId in botUserIds)
+                    {
+                        practiceBotsPendingCleanup.Remove(botUserId);
+                    }
+                    Log($"[PracticeBotCleanup] Post-kick frame. {DescribePracticeBotState()}");
+                });
             });
         }
 
@@ -4174,19 +4274,10 @@ namespace MatchZy
         {
             if (!bot.IsValid || !bot.IsBot || bot.IsHLTV || !bot.UserId.HasValue) return;
 
-            // Release the team slot before disconnecting this exact fake client. The
-            // numeric user ID is generated by the server and cannot inject a command.
             int botUserId = bot.UserId.Value;
-            if (bot.Team == CsTeam.Terrorist || bot.Team == CsTeam.CounterTerrorist)
-            {
-                Log($"[PracticeBotCleanup] Releasing exact user ID {botUserId} from playing team {bot.TeamNum} through ChangeTeam(Spectator).");
-                bot.ChangeTeam(CsTeam.Spectator);
-            }
-            Server.NextFrame(() =>
-            {
-                Log($"[PracticeBotCleanup] Kicking exact user ID {botUserId}. {DescribePracticeBotState()}");
-                Server.ExecuteCommand($"kickid {botUserId}");
-            });
+            if (!practiceBotsPendingCleanup.Add(botUserId)) return;
+
+            PreparePracticeBotsForRemoval(new[] { botUserId }, kickAllFallback: false, attempt: 0);
         }
 
         private static void ShuffleBotSpawnPoints(List<SavedBotSpawnPoint> spawnPoints)
@@ -4508,6 +4599,8 @@ namespace MatchZy
             botShootingEnabled = false;
             botJiggleEnabled = false;
             botJiggleRandomEnabled = false;
+            botJiggleRangeUnits = DefaultBotJiggleRangeUnits;
+            practiceBotsPendingCleanup.Clear();
             botRespawnEnabled = true;
             botLifeRegenerationEnabled = false;
             humanLifeRegenerationEnabled.Clear();

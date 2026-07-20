@@ -53,6 +53,7 @@ public partial class MatchZy
         DeleteBotPosition,
         BotShooting,
         BotJiggle,
+        BotJiggleRange,
         BotJiggleRandom,
         BotReactionTime,
         BotRespawn,
@@ -367,7 +368,8 @@ public partial class MatchZy
         [
             new(ConfigurationMenuRowId.Back, MenuText("matchzy.menu.back")),
             BooleanRow(ConfigurationMenuRowId.BotShooting, "matchzy.menu.bot_shooting", botShootingEnabled),
-            BooleanRow(ConfigurationMenuRowId.BotJiggle, "matchzy.menu.bot_jiggle", botJiggleEnabled)
+            BooleanRow(ConfigurationMenuRowId.BotJiggle, "matchzy.menu.bot_jiggle", botJiggleEnabled),
+            new(ConfigurationMenuRowId.BotJiggleRange, MenuText("matchzy.menu.bot_jiggle_range"), $"{botJiggleRangeUnits} {MenuText("matchzy.menu.units")}")
         ];
 
         if (botJiggleEnabled)
@@ -495,6 +497,7 @@ public partial class MatchZy
         if (!right && row.Id is not ConfigurationMenuRowId.BotShooting and
             not ConfigurationMenuRowId.BotJiggle and
             not ConfigurationMenuRowId.BotJiggleRandom and
+            not ConfigurationMenuRowId.BotJiggleRange and
             not ConfigurationMenuRowId.BotReactionTime and
             not ConfigurationMenuRowId.BotRespawn and
             not ConfigurationMenuRowId.BotLifeRegeneration and
@@ -517,6 +520,11 @@ public partial class MatchZy
             ConfigurationMenuRowId.BotShooting => SetPracticeBotShooting(player, right),
             ConfigurationMenuRowId.BotJiggle => SetPracticeBotJiggle(player, right),
             ConfigurationMenuRowId.BotJiggleRandom => SetPracticeBotJiggleRandom(player, right),
+            ConfigurationMenuRowId.BotJiggleRange => SetPracticeBotJiggleRange(
+                player,
+                right
+                    ? botJiggleRangeUnits == int.MaxValue ? int.MaxValue : botJiggleRangeUnits + 1
+                    : Math.Max(0, botJiggleRangeUnits - 1)),
             ConfigurationMenuRowId.BotReactionTime => SetPracticeBotReactionTime(player, Math.Clamp(botReactionTimeMs + (right ? 50 : -50), 0, 1000)),
             ConfigurationMenuRowId.BotRespawn => SetPracticeBotRespawn(player, right),
             ConfigurationMenuRowId.BotLifeRegeneration => SetPracticeBotLifeRegeneration(player, right),
