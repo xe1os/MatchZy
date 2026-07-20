@@ -12,7 +12,8 @@ adds the following focused features, fixes, and changes.
 > [!WARNING]
 > MatchZy-Refined uses native functions from the latest CS2 Linux
 > `libserver.so`. Older CS2 server versions from before the new bomb-explosion
-> update are not supported and will cause native grenade rethrows to fail.
+> update are not supported and cannot use the verified native grenade recreation
+> paths; fallback entity recreation on an unsupported build is best-effort only.
 >
 > Update and validate the complete CS2 dedicated-server installation through
 > [Valve's official SteamCMD](https://developer.valvesoftware.com/wiki/SteamCMD)
@@ -47,7 +48,7 @@ adds the following focused features, fixes, and changes.
 - `.clear` now removes active flashbang, decoy, and HE grenade projectiles.
 - Disconnecting during practice no longer leaves behind a respawned, attackable player pawn or persistent corpse; dropped C4 and equipment remain in the world.
 - `.rt`, `.rethrow`, and `.throw` now use the requesting player's own utility history during multiplayer practice sessions.
-- Smoke and HE grenade rethrows now recreate the correct projectile, follow the recorded trajectory, and detonate normally.
+- Smoke, HE grenade, Molotov, and decoy rethrows now use the matching native recreation path on supported Linux and Windows servers and fall back to engine entity creation when a native factory is unavailable.
 - Player teleports no longer apply camera pitch or roll to the player model.
 - Nade deletion commands now resolve multi-word lineup queries consistently with `.loadnade`.
 - Spawn commands and markers now use each map's primary competitive T and CT spawn groups, with higher-priority fallbacks used only when needed to provide five spawns per side.
