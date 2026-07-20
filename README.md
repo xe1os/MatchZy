@@ -35,9 +35,9 @@ adds the following focused features, fixes, and changes.
 - Added `.sbp <name>`, `.lbp <name>`, `.dbp <name>`, and `.listbp` for saving, restoring, deleting, and listing named, multi-word bot-position setups with their teams, aim directions, and crouch states. Saved setups can also be listed, loaded, and deleted from Bot Placement in `.menu`.
 - Added `.botspawn <name>`, `.delbotspawn <name>`, `.listbotspawn`, and `.placebot <number> <name>` for building map-specific named spawn pools and placing utility-free bots at randomly selected, distinct saved XY positions and aim directions.
 - Added `.kicklastbot` to remove the most recently placed practice bot; repeated uses work backward through the placement order.
-- Added `.changemap <map-name>` so any player can switch to a validated map, with or without the `de_` prefix.
+- Added `.changemap <map-name>` so any player can switch to a validated map, with or without the `de_` prefix; names are case-insensitive, and unsafe or unavailable maps are rejected before an engine command is run.
 - Added `.botshoot` and `.botreactiontime <0-1000>` to turn practice bots into position-anchored, visibility-aware opponents and configure their firing delay.
-- Added `.botjiggle` for short side-to-side movement around each bot's placed position and `.botjigglerandom` for independent 50/50 per-bot participation that rerolls when random mode is re-enabled or `.startround` is used. Jiggle bots stop at their current offset after spotting an enemy, remain still while engaging, and resume the same anchored motion after losing sight; unselected bots retain stationary turret behavior.
+- Added `.botjiggle` for short side-to-side movement around each bot's placed position, `.botjigglerange <number>` and its Bot Configuration menu row for changing the shared range from its 10-unit default, and `.botjigglerandom` for independent 50/50 per-bot participation that rerolls when random mode is re-enabled or `.startround` is used. Jiggle bots stop at their current offset after spotting an enemy, remain still while engaging, and resume the same anchored motion after losing sight; unselected bots retain stationary turret behavior.
 - Added `.botrespawn` and `.botlifereg` to control practice-bot respawning and health regeneration independently of human players; respawned tracked bots return to their last placed position and aim direction.
 - Added per-player `.liferegon` health regeneration for human players in practice mode, enabled by default and individually opt-out.
 - Added public `.allliferegon <true/false>` control so any player can enable or disable human health regeneration for everyone in the current practice session, including later joiners.
@@ -57,7 +57,7 @@ adds the following focused features, fixes, and changes.
 
 - Practice mode allows unrestricted teammate damage without warnings, punishment, or automatic kicks.
 - Human and bot practice death respawns now use a 500 ms delay; humans use the same delay after joining a team.
-- Practice side switching replaces a carried T-side Molotov with a CT incendiary grenade and removes the defuse kit when moving from CT to T.
+- Practice respawns use CS2's team-specific default grenade loadouts, preventing side switches from dropping excess utility or retaining the wrong fire grenade.
 - Configuration-menu navigation uses CS2 movement actions, so the keys also move the player. Arrow keys work only when the player has bound them to the corresponding movement actions.
 - The configuration menu omits actions that cannot currently be used and keeps its five-row viewport compact so available options remain visible.
 - The configuration menu suppresses CS2's periodic white center-HUD fade while open and uses compact saved-position labels without redundant state suffixes.
@@ -72,13 +72,13 @@ adds the following focused features, fixes, and changes.
 - Enabled `.liferegon` and `.botlifereg` restore injured players and bots on a fixed 100 ms cadence, including during continuous damage, while skipping entities already at maximum health.
 - `.help` keeps its private chat list compact by showing command names without argument hints and prints detailed usage to the requesting player's console.
 - `.botshoot`, `.botrespawn`, `.botlifereg`, and `.liferegon` now toggle their current state when used without an argument; explicit `true` or `false` values remain supported.
-- Plugin-managed practice bots are created directly on their intended enemy side. Removal releases their team membership before disconnecting the fake clients, clearing dead roster slots without runtime quota rewrites; full-team `.bot` requests return promptly without disturbing the existing setup.
+- Plugin-managed practice bots are created directly on their intended enemy side. Removal briefly revives dead bots while frozen before releasing their team membership and disconnecting the fake clients, clearing hidden dead-bot slot reservations without runtime quota rewrites; full-team `.bot` requests return promptly without disturbing the existing setup.
 - Tracked practice bots are continuously stripped of all throwable utility, including utility granted asynchronously or picked up later.
 - Practice bots controlled by `.botshoot` stop firing when an active smoke blocks their sightline and reacquire their configured reaction delay after visibility returns.
 - `.startround` starts a fresh practice round with a five-second freeze, assigns each human a different random team spawn, and keeps every tracked bot alive at its placed position and orientation.
 - `.randomspawn` safely teleports the requesting player to a randomly selected competitive spawn for their current T or CT side.
 - Temporary player/bot collision handling now stops safely when either pawn disappears or is replaced, preventing repeating null-reference errors during respawns, round restarts, disconnects, and bot removal.
-- Every `.placebot` and `.lbp` load kicks all existing bots, waits at least 500 ms for cleanup, and then creates the requested setup from scratch.
+- Every `.placebot` and `.lbp` load fully releases living and dead bots, waits at least 500 ms for cleanup, and then creates the requested setup from scratch.
 - `.watchme` / `.fas` is ignored unless the requesting player is alive and currently playing on the T or CT side.
 
 ## Upstream project

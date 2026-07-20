@@ -14,7 +14,7 @@ namespace MatchZy
 
         public override string ModuleName => "MatchZy";
 
-        public override string ModuleVersion => "0.8.15-refined.1.1.10";
+        public override string ModuleVersion => "0.8.15-refined.1.1.11";
 
         public override string ModuleAuthor => "WD- (https://github.com/shobhit-pathak/)";
 
@@ -246,10 +246,6 @@ namespace MatchZy
                 if (isPractice && (@event.Team == (int)CsTeam.Terrorist || @event.Team == (int)CsTeam.CounterTerrorist))
                 {
                     SchedulePracticeHumanRespawn(@event.Userid, PracticeRespawnDelaySeconds);
-                    SchedulePracticeSideInventoryUpdate(
-                        @event.Userid,
-                        (CsTeam)@event.Oldteam,
-                        (CsTeam)@event.Team);
                 }
                 return HookResult.Continue;
             }, HookMode.Post);
@@ -517,6 +513,10 @@ namespace MatchZy
                 if (messageCommand.Equals(".botjiggle", StringComparison.OrdinalIgnoreCase))
                 {
                     HandleBotJiggleCommand(player, messageCommandArg);
+                }
+                if (messageCommand.Equals(".botjigglerange", StringComparison.OrdinalIgnoreCase))
+                {
+                    HandleBotJiggleRangeCommand(player, messageCommandArg);
                 }
                 if (messageCommand.Equals(".botjigglerandom", StringComparison.OrdinalIgnoreCase))
                 {

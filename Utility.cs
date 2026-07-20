@@ -655,26 +655,50 @@ namespace MatchZy
 
         private void HandlePlayerMapChangeCommand(CCSPlayerController? player, string mapName)
         {
-            mapName = mapName.Trim();
-
             if (string.IsNullOrWhiteSpace(mapName))
             {
                 ReplyToUserCommand(player, Localizer["matchzy.cc.usage", ".changemap <map-name>"]);
                 return;
             }
 
-            if (!mapName.StartsWith("de_", StringComparison.OrdinalIgnoreCase))
-            {
-                mapName = "de_" + mapName;
-            }
-
-            if (!Server.IsMapValid(mapName))
+            if (!TryNormalizePlayerMapName(mapName, out string normalizedMapName))
             {
                 ReplyToUserCommand(player, Localizer["matchzy.cc.invalidmap"]);
                 return;
             }
 
-            Server.ExecuteCommand($"map \"{mapName}\"");
+            bool isMapValid;
+            try
+            {
+                isMapValid = Server.IsMapValid(normalizedMapName);
+            }
+            catch (Exception exception)
+            {
+                Log($"[HandlePlayerMapChangeCommand] Could not validate map '{normalizedMapName}': {exception.Message}");
+                ReplyToUserCommand(player, Localizer["matchzy.cc.invalidmap"]);
+                return;
+            }
+
+            if (!isMapValid)
+            {
+                ReplyToUserCommand(player, Localizer["matchzy.cc.invalidmap"]);
+                return;
+            }
+
+            Server.ExecuteCommand($"map \"{normalizedMapName}\"");
+        }
+
+        private static bool TryNormalizePlayerMapName(string mapName, out string normalizedMapName)
+        {
+            normalizedMapName = mapName.Trim().ToLowerInvariant();
+            if (!normalizedMapName.StartsWith("de_", StringComparison.Ordinal))
+            {
+                normalizedMapName = "de_" + normalizedMapName;
+            }
+
+            return normalizedMapName.Length <= 64 &&
+                normalizedMapName.All(character =>
+                    char.IsAsciiLetterOrDigit(character) || character == '_' || character == '-');
         }
 
         private void HandleReadyRequiredCommand(CCSPlayerController? player, string commandArg)
@@ -1419,8 +1443,13 @@ namespace MatchZy
                 PrintAvailableCommandCategory(
                     player,
                     "Bot Settings",
-                    ".botshoot, .botjiggle, .botjigglerandom, .botreactiontime, .botrespawn, .botlifereg",
-                    ".botshoot, .botjiggle, .botjigglerandom, .botreactiontime <0-1000>, .botrespawn, .botlifereg");
+                    ".botshoot, .botreactiontime, .botrespawn, .botlifereg",
+                    ".botshoot, .botreactiontime <0-1000>, .botrespawn, .botlifereg");
+                PrintAvailableCommandCategory(
+                    player,
+                    "Bot Jiggle",
+                    ".botjiggle, .botjigglerandom, .botjigglerange",
+                    ".botjiggle, .botjigglerandom, .botjigglerange <number>");
                 PrintAvailableCommandCategory(
                     player,
                     "Bot Presets",
