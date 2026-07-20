@@ -293,11 +293,10 @@ namespace MatchZy
             Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.sbp <name>, .lbp <name>, .dbp <name>, .listbp");
             Server.PrintToChatAll($" {ChatColors.Green}Bot Spawns: {ChatColors.Default}.botspawn <multi-word name>, .delbotspawn <multi-word name>, .listbotspawn, .placebot <number> <multi-word name>");
             Server.PrintToChatAll($" {ChatColors.Green}Nades: {ChatColors.Default}.loadnade, .savenade, .importnade, .listnades");
-            Server.PrintToChatAll($" {ChatColors.Green}Nade Throw: {ChatColors.Default}.rethrow, .throwindex <index>, .lastindex, .delay <number>");
+            Server.PrintToChatAll($" {ChatColors.Green}Nade Throw: {ChatColors.Default}.rethrow, .throwindex, .lastindex, .delay");
             Server.PrintToChatAll($" {ChatColors.Green}Utility & Toggles: {ChatColors.Default}.startround, .ammo, .clear, .fastforward, .last, .back, .solid, .impacts, .traj");
-            // On new line to prevent text cutting off
             Server.PrintToChatAll($" {ChatColors.Green}Locations: {ChatColors.Default}.slp, .tlp, .dlp, .savepos, .loadpos");
-            Server.PrintToChatAll($" {ChatColors.Green}Health: {ChatColors.Default}.liferegon, .allliferegon <true/false>");
+            Server.PrintToChatAll($" {ChatColors.Green}Health: {ChatColors.Default}.liferegon, .allliferegon");
             Server.PrintToChatAll($" {ChatColors.Green}Sides & Others: {ChatColors.Default}.ct, .t, .spec, .fas, .god, .dryrun, .break, .exitprac");
         }
 
@@ -1918,6 +1917,7 @@ namespace MatchZy
                 () => TryRespawnJoinedPracticeHuman(player, attemptsRemaining: 5),
                 TimerFlags.STOP_ON_MAPCHANGE);
         }
+
 
         private void TryRespawnJoinedPracticeHuman(CCSPlayerController player, int attemptsRemaining)
         {
@@ -4499,6 +4499,10 @@ namespace MatchZy
               ReplyToUserCommand(player, Localizer["matchzy.pm.spectatorbroken"]);
               return false;
             }
+            if (player.TeamNum == (byte)team) return false;
+            if (isPractice && player.PawnIsAlive) {
+                player.PlayerPawn.Value?.CommitSuicide(explode: false, force: true);
+            }
             player.ChangeTeam(team);
             return true;
           }
@@ -4654,6 +4658,13 @@ namespace MatchZy
             return RethrowSpecificNade(player, nadeType);
         }
 
+        private (int R, int G, int B)? GetSmokeColorForRethrow(CCSPlayerController player)
+        {
+            if (!smokeColorEnabled.Value) return null;
+            var color = GetPlayerTeammateColor(player);
+            return (color.R, color.G, color.B);
+        }
+
         public bool RethrowSpecificNade(CCSPlayerController player, string nadeType)
         {
             if (!isPractice || !IsPlayerValid(player) || !player.UserId.HasValue) return false;
@@ -4669,7 +4680,7 @@ namespace MatchZy
             {
                 if (IsPlayerValid(player) && player.UserId == userId)
                 {
-                    grenadeThrown.Throw(player);
+                    grenadeThrown.Throw(player, GetSmokeColorForRethrow(player));
                 }
             });
             return true;
@@ -4733,7 +4744,7 @@ namespace MatchZy
                         {
                             if (IsPlayerValid(player) && player.UserId == userId)
                             {
-                                grenadeThrown.Throw(player);
+                                grenadeThrown.Throw(player, GetSmokeColorForRethrow(player));
                             }
                         });
                         // PrintToPlayerChat(player, $"Throwing grenade of history position: {positionNumber+1}/{lastGrenadesData[userId].Count}");
@@ -4818,7 +4829,7 @@ namespace MatchZy
             {
                 if (IsPlayerValid(validPlayer) && validPlayer.UserId == userId)
                 {
-                    lastGrenade.Throw(validPlayer);
+                    lastGrenade.Throw(validPlayer, GetSmokeColorForRethrow(validPlayer));
                 }
             });
             return true;

@@ -45,7 +45,7 @@ public class GrenadeThrownData
         PlayerTeleport.TeleportSafely(player, PlayerPosition, PlayerAngle);
     }
 
-    public void Throw(CCSPlayerController player)
+    public void Throw(CCSPlayerController player, (int R, int G, int B)? smokeColor = null)
     {
         CCSPlayerPawn? playerPawn = player.PlayerPawn.Value;
         if (playerPawn == null || !playerPawn.IsValid)
@@ -91,6 +91,14 @@ public class GrenadeThrownData
         grenadeEntity.Thrower.Raw = playerPawn.EntityHandle.Raw;
         grenadeEntity.OriginalThrower.Raw = playerPawn.EntityHandle.Raw;
         grenadeEntity.OwnerEntity.Raw = playerPawn.EntityHandle.Raw;
+
+        if (Type == "smoke" && smokeColor.HasValue)
+        {
+            var smoke = new CSmokeGrenadeProjectile(grenadeEntity.Handle);
+            smoke.SmokeColor.X = smokeColor.Value.R;
+            smoke.SmokeColor.Y = smokeColor.Value.G;
+            smoke.SmokeColor.Z = smokeColor.Value.B;
+        }
     }
 
     private CBaseCSGrenadeProjectile? TryCreateNativeProjectile(CCSPlayerPawn playerPawn, int teamNumber)

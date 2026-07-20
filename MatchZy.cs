@@ -280,6 +280,10 @@ namespace MatchZy
                         }
                     }
                 }
+                else if (isPractice && player != null && player.IsValid && player.PawnIsAlive)
+                {
+                    player.PlayerPawn.Value?.CommitSuicide(explode: false, force: true);
+                }
                 return HookResult.Continue;
             });
 
