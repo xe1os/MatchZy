@@ -1405,7 +1405,7 @@ namespace MatchZy
 
             if (isPractice)
             {
-                PrintAvailableCommandCategory(player, "Configuration", ".menu", ".menu");
+                PrintAvailableCommandCategory(player, "Configuration", ".menu (command references in console)", ".menu");
                 PrintAvailableCommandCategory(
                     player,
                     "Spawns",

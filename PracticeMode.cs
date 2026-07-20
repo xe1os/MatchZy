@@ -282,7 +282,7 @@ namespace MatchZy
             GetSpawns();
             InitializePracticeSpawnMarkers();
             PrintToAllChat($"Practice mode loaded!");
-            Server.PrintToChatAll($" {ChatColors.Green}Configuration: {ChatColors.Default}.menu (command references in console)");
+            Server.PrintToChatAll($" {ChatColors.Green}Configuration: {ChatColors.Default}.menu");
             Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawn, .ctspawn, .tspawn, .randomspawn, .bestspawn, .worstspawn, .spawnmarkers");
             Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.bot, .nobots, .kicklastbot, .crouchbot, .boost, .crouchboost");
             Server.PrintToChatAll($" {ChatColors.Green}Bot Settings: {ChatColors.Default}.botshoot, .botjiggle, .botjigglerandom, .botreactiontime, .botrespawn, .botlifereg");
