@@ -246,10 +246,6 @@ namespace MatchZy
                 if (isPractice && (@event.Team == (int)CsTeam.Terrorist || @event.Team == (int)CsTeam.CounterTerrorist))
                 {
                     SchedulePracticeHumanRespawn(@event.Userid, PracticeRespawnDelaySeconds);
-                    SchedulePracticeSideInventoryUpdate(
-                        @event.Userid,
-                        (CsTeam)@event.Oldteam,
-                        (CsTeam)@event.Team);
                 }
                 return HookResult.Continue;
             }, HookMode.Post);
@@ -283,6 +279,10 @@ namespace MatchZy
                             return HookResult.Stop;
                         }
                     }
+                }
+                else if (isPractice && player != null && player.IsValid && player.PawnIsAlive)
+                {
+                    player.PlayerPawn.Value?.CommitSuicide(explode: false, force: true);
                 }
                 return HookResult.Continue;
             });

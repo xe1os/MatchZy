@@ -282,19 +282,17 @@ namespace MatchZy
             GetSpawns();
             InitializePracticeSpawnMarkers();
             PrintToAllChat($"Practice mode loaded!");
-            Server.PrintToChatAll($" {ChatColors.Green}Configuration: {ChatColors.Default}.menu");
-            Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawn, .ctspawn, .tspawn, .bestspawn, .worstspawn");
-            Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawnmarkers, .randomspawn");
-            Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.bot, .nobots, .kicklastbot, .botshoot, .botreactiontime <0-1000>, .botrespawn, .botlifereg");
-            Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.botjiggle, .botjigglerandom, .crouchbot, .boost, .crouchboost");
-            Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.sbp <name>, .lbp <name>, .dbp <name>, .listbp");
-            Server.PrintToChatAll($" {ChatColors.Green}Bot Spawns: {ChatColors.Default}.botspawn <multi-word name>, .delbotspawn <multi-word name>, .listbotspawn, .placebot <number> <multi-word name>");
+            Server.PrintToChatAll($" {ChatColors.Green}Configuration: {ChatColors.Default}.menu (command references in console)");
+            Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawn, .ctspawn, .tspawn, .randomspawn, .bestspawn, .worstspawn, .spawnmarkers");
+            Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.bot, .nobots, .kicklastbot, .crouchbot, .boost, .crouchboost");
+            Server.PrintToChatAll($" {ChatColors.Green}Bot Settings: {ChatColors.Default}.botshoot, .botjiggle, .botjigglerandom, .botreactiontime, .botrespawn, .botlifereg");
+            Server.PrintToChatAll($" {ChatColors.Green}Bot Presets: {ChatColors.Default}.sbp, .lbp, .dbp, .listbp");
+            Server.PrintToChatAll($" {ChatColors.Green}Bot Spawns: {ChatColors.Default}.botspawn, .delbotspawn, .listbotspawn, .placebot");
             Server.PrintToChatAll($" {ChatColors.Green}Nades: {ChatColors.Default}.loadnade, .savenade, .importnade, .listnades");
-            Server.PrintToChatAll($" {ChatColors.Green}Nade Throw: {ChatColors.Default}.rethrow, .throwindex <index>, .lastindex, .delay <number>");
+            Server.PrintToChatAll($" {ChatColors.Green}Nade Throw: {ChatColors.Default}.rethrow, .throwindex, .lastindex, .delay");
             Server.PrintToChatAll($" {ChatColors.Green}Utility & Toggles: {ChatColors.Default}.startround, .ammo, .clear, .fastforward, .last, .back, .solid, .impacts, .traj");
-            // On new line to prevent text cutting off
             Server.PrintToChatAll($" {ChatColors.Green}Locations: {ChatColors.Default}.slp, .tlp, .dlp, .savepos, .loadpos");
-            Server.PrintToChatAll($" {ChatColors.Green}Health: {ChatColors.Default}.liferegon, .allliferegon <true/false>");
+            Server.PrintToChatAll($" {ChatColors.Green}Health: {ChatColors.Default}.liferegon, .allliferegon");
             Server.PrintToChatAll($" {ChatColors.Green}Sides & Others: {ChatColors.Default}.ct, .t, .spec, .fas, .god, .dryrun, .break, .exitprac");
         }
 
@@ -1887,101 +1885,6 @@ namespace MatchZy
                 TimerFlags.STOP_ON_MAPCHANGE);
         }
 
-        private void SchedulePracticeSideInventoryUpdate(
-            CCSPlayerController? player,
-            CsTeam previousTeam,
-            CsTeam newTeam)
-        {
-            bool replacesMolotov = previousTeam == CsTeam.Terrorist && newTeam == CsTeam.CounterTerrorist;
-            bool removesDefuseKit = previousTeam == CsTeam.CounterTerrorist && newTeam == CsTeam.Terrorist;
-            if ((!replacesMolotov && !removesDefuseKit) ||
-                player == null ||
-                player.IsBot ||
-                player.IsHLTV ||
-                !IsConnectedPracticeHuman(player))
-            {
-                return;
-            }
-
-            AddTimer(
-                PracticeSideInventoryUpdateDelaySeconds,
-                () => TryApplyPracticeSideInventoryUpdate(player, previousTeam, newTeam, attemptsRemaining: 5),
-                TimerFlags.STOP_ON_MAPCHANGE);
-        }
-
-        private void TryApplyPracticeSideInventoryUpdate(
-            CCSPlayerController player,
-            CsTeam previousTeam,
-            CsTeam newTeam,
-            int attemptsRemaining)
-        {
-            if (!isPractice ||
-                player.IsBot ||
-                player.IsHLTV ||
-                !IsConnectedPracticeHuman(player) ||
-                player.Team != newTeam)
-            {
-                return;
-            }
-
-            CCSPlayerPawn? pawn = player.PlayerPawn.Value;
-            if (!IsPlayerValid(player) || !player.PawnIsAlive || pawn == null || !pawn.IsValid)
-            {
-                if (attemptsRemaining <= 0) return;
-                AddTimer(
-                    0.2f,
-                    () => TryApplyPracticeSideInventoryUpdate(player, previousTeam, newTeam, attemptsRemaining - 1),
-                    TimerFlags.STOP_ON_MAPCHANGE);
-                return;
-            }
-
-            if (previousTeam == CsTeam.Terrorist && newTeam == CsTeam.CounterTerrorist)
-            {
-                ReplacePracticeMolotovWithIncendiary(player, pawn);
-            }
-            else if (previousTeam == CsTeam.CounterTerrorist && newTeam == CsTeam.Terrorist)
-            {
-                CCSPlayer_ItemServices? itemServices = pawn.ItemServices?.As<CCSPlayer_ItemServices>();
-                if (itemServices != null && itemServices.HasDefuser)
-                {
-                    itemServices.HasDefuser = false;
-                    Utilities.SetStateChanged(pawn, "CBasePlayerPawn", "m_pItemServices");
-                }
-            }
-        }
-
-        private static void ReplacePracticeMolotovWithIncendiary(
-            CCSPlayerController player,
-            CCSPlayerPawn pawn)
-        {
-            if (pawn.WeaponServices == null) return;
-
-            List<CBasePlayerWeapon> molotovs = pawn.WeaponServices.MyWeapons
-                .Where(weapon => weapon.IsValid &&
-                    weapon.Value != null &&
-                    weapon.Value.IsValid &&
-                    weapon.Value.DesignerName.Equals("weapon_molotov", StringComparison.OrdinalIgnoreCase))
-                .Select(weapon => weapon.Value!)
-                .ToList();
-            if (molotovs.Count == 0) return;
-
-            bool hasIncendiary = pawn.WeaponServices.MyWeapons.Any(weapon =>
-                weapon.IsValid &&
-                weapon.Value != null &&
-                weapon.Value.IsValid &&
-                weapon.Value.DesignerName.Equals("weapon_incgrenade", StringComparison.OrdinalIgnoreCase));
-
-            foreach (CBasePlayerWeapon molotov in molotovs)
-            {
-                pawn.RemovePlayerItem(molotov);
-                if (molotov.IsValid) molotov.Remove();
-            }
-
-            if (!hasIncendiary)
-            {
-                player.GiveNamedItem("weapon_incgrenade");
-            }
-        }
 
         private void TryRespawnJoinedPracticeHuman(CCSPlayerController player, int attemptsRemaining)
         {
@@ -4505,6 +4408,10 @@ namespace MatchZy
               ReplyToUserCommand(player, Localizer["matchzy.pm.spectatorbroken"]);
               return false;
             }
+            if (player.TeamNum == (byte)team) return false;
+            if (isPractice && player.PawnIsAlive) {
+                player.PlayerPawn.Value?.CommitSuicide(explode: false, force: true);
+            }
             player.ChangeTeam(team);
             return true;
           }
@@ -4658,6 +4565,13 @@ namespace MatchZy
             return RethrowSpecificNade(player, nadeType);
         }
 
+        private (int R, int G, int B)? GetSmokeColorForRethrow(CCSPlayerController player)
+        {
+            if (!smokeColorEnabled.Value) return null;
+            var color = GetPlayerTeammateColor(player);
+            return (color.R, color.G, color.B);
+        }
+
         public bool RethrowSpecificNade(CCSPlayerController player, string nadeType)
         {
             if (!isPractice || !IsPlayerValid(player) || !player.UserId.HasValue) return false;
@@ -4673,7 +4587,7 @@ namespace MatchZy
             {
                 if (IsPlayerValid(player) && player.UserId == userId)
                 {
-                    grenadeThrown.Throw(player);
+                    grenadeThrown.Throw(player, GetSmokeColorForRethrow(player));
                 }
             });
             return true;
@@ -4737,7 +4651,7 @@ namespace MatchZy
                         {
                             if (IsPlayerValid(player) && player.UserId == userId)
                             {
-                                grenadeThrown.Throw(player);
+                                grenadeThrown.Throw(player, GetSmokeColorForRethrow(player));
                             }
                         });
                         // PrintToPlayerChat(player, $"Throwing grenade of history position: {positionNumber+1}/{lastGrenadesData[userId].Count}");
@@ -4822,7 +4736,7 @@ namespace MatchZy
             {
                 if (IsPlayerValid(validPlayer) && validPlayer.UserId == userId)
                 {
-                    lastGrenade.Throw(validPlayer);
+                    lastGrenade.Throw(validPlayer, GetSmokeColorForRethrow(validPlayer));
                 }
             });
             return true;
