@@ -14,7 +14,7 @@ namespace MatchZy
 
         public override string ModuleName => "MatchZy";
 
-        public override string ModuleVersion => "0.8.15-refined.1.1.11";
+        public override string ModuleVersion => "0.8.15-refined.1.1.12";
 
         public override string ModuleAuthor => "WD- (https://github.com/shobhit-pathak/)";
 
@@ -349,7 +349,11 @@ namespace MatchZy
                 });
             });
 
-            RegisterListener<Listeners.OnMapEnd>(() => CloseAllConfigurationMenus());
+            RegisterListener<Listeners.OnMapEnd>(() =>
+            {
+                CloseAllConfigurationMenus();
+                RemoveBotSpawnMarkers();
+            });
 
             // RegisterListener<Listeners.OnMapEnd>(() => {
             //     Log($"[Listeners.OnMapEnd] Resetting match!");
@@ -510,6 +514,14 @@ namespace MatchZy
                 {
                     HandlePlaceBotsCommand(player, messageCommandArg);
                 }
+                if (messageCommand.Equals(".placenewbot", StringComparison.OrdinalIgnoreCase))
+                {
+                    HandlePlaceNewBotsCommand(player, messageCommandArg);
+                }
+                if (messageCommand.Equals(".showbotspawn", StringComparison.OrdinalIgnoreCase))
+                {
+                    HandleShowBotSpawnsCommand(player, messageCommandArg);
+                }
                 if (messageCommand.Equals(".botshoot", StringComparison.OrdinalIgnoreCase))
                 {
                     HandleBotShootCommand(player, messageCommandArg);
@@ -645,6 +657,7 @@ namespace MatchZy
         {
             CloseAllConfigurationMenus();
             RemoveSpawnMarkers();
+            RemoveBotSpawnMarkers();
         }
     }
 }

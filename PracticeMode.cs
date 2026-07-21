@@ -127,7 +127,9 @@ namespace MatchZy
         Dictionary<int, PlayerPracticeTimer> playerTimers = new();
         Dictionary<int, PlayerLocationData> savedPlayerLocationData = new();
         readonly List<CBeam> spawnMarkerBeams = new();
+        readonly List<CBeam> botSpawnMarkerBeams = new();
         readonly Dictionary<(float X, float Y, float Z), float> spawnMarkerGroundHeights = new();
+        readonly Dictionary<(float X, float Y, float Z), float> botSpawnMarkerGroundHeights = new();
 
         const float SpawnMarkerHalfSize = 18.0f;
         const float SpawnMarkerGroundOffset = 8.0f;
@@ -137,6 +139,7 @@ namespace MatchZy
         const int MinimumCompetitiveSpawnCount = 5;
 
         bool spawnMarkersEnabled;
+        bool botSpawnMarkersEnabled;
 
         public Dictionary<byte, List<Position>> spawnsData = GetEmptySpawnsData();
 
@@ -284,6 +287,7 @@ namespace MatchZy
             Server.ExecuteCommand("mp_ignore_round_win_conditions 1");
             GetSpawns();
             InitializePracticeSpawnMarkers();
+            InitializePracticeBotSpawnMarkers();
             PrintToAllChat($"Practice mode loaded!");
             Server.PrintToChatAll($" {ChatColors.Green}Configuration: {ChatColors.Default}.menu");
             Server.PrintToChatAll($" {ChatColors.Green}Spawns: {ChatColors.Default}.spawn, .ctspawn, .tspawn, .bestspawn, .worstspawn");
@@ -292,6 +296,7 @@ namespace MatchZy
             Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.botjiggle, .botjigglerandom, .botjigglerange <number>, .crouchbot, .boost, .crouchboost");
             Server.PrintToChatAll($" {ChatColors.Green}Bots: {ChatColors.Default}.sbp <name>, .lbp <name>, .dbp <name>, .listbp");
             Server.PrintToChatAll($" {ChatColors.Green}Bot Spawns: {ChatColors.Default}.botspawn <multi-word name>, .delbotspawn <multi-word name>, .listbotspawn, .placebot <number> <multi-word name>");
+            Server.PrintToChatAll($" {ChatColors.Green}Bot Spawns: {ChatColors.Default}.placenewbot <number> <multi-word name>, .showbotspawn");
             Server.PrintToChatAll($" {ChatColors.Green}Nades: {ChatColors.Default}.loadnade, .savenade, .importnade, .listnades");
             Server.PrintToChatAll($" {ChatColors.Green}Nade Throw: {ChatColors.Default}.rethrow, .throwindex, .lastindex, .delay");
             Server.PrintToChatAll($" {ChatColors.Green}Utility & Toggles: {ChatColors.Default}.startround, .ammo, .clear, .fastforward, .last, .back, .solid, .impacts, .traj");
@@ -861,7 +866,7 @@ namespace MatchZy
             }
         }
 
-        private void CreateSpawnMarkerEdge(Vector start, Vector end, Color color)
+        private void CreateSpawnMarkerEdge(Vector start, Vector end, Color color, List<CBeam> markerBeams)
         {
             CBeam? beam = Utilities.CreateEntityByName<CBeam>("beam");
             if (beam == null)
@@ -881,31 +886,37 @@ namespace MatchZy
             beam.Teleport(start, new QAngle(0, 0, 0), new Vector(0, 0, 0));
 
             beam.DispatchSpawn();
-            spawnMarkerBeams.Add(beam);
+            markerBeams.Add(beam);
         }
 
-        public void ShowSpawnMarker(Position spawn, Color color)
+        private void ShowSpawnMarker(
+            Position spawn,
+            Color color,
+            List<CBeam> markerBeams,
+            Dictionary<(float X, float Y, float Z), float> groundHeightCache)
         {
             float centerX = spawn.PlayerPosition.X;
             float centerY = spawn.PlayerPosition.Y;
-            float markerZ = GetSpawnMarkerGroundHeight(spawn) + SpawnMarkerGroundOffset;
+            float markerZ = GetSpawnMarkerGroundHeight(spawn, groundHeightCache) + SpawnMarkerGroundOffset;
 
             Vector northWest = new(centerX - SpawnMarkerHalfSize, centerY + SpawnMarkerHalfSize, markerZ);
             Vector northEast = new(centerX + SpawnMarkerHalfSize, centerY + SpawnMarkerHalfSize, markerZ);
             Vector southEast = new(centerX + SpawnMarkerHalfSize, centerY - SpawnMarkerHalfSize, markerZ);
             Vector southWest = new(centerX - SpawnMarkerHalfSize, centerY - SpawnMarkerHalfSize, markerZ);
 
-            CreateSpawnMarkerEdge(northWest, northEast, color);
-            CreateSpawnMarkerEdge(northEast, southEast, color);
-            CreateSpawnMarkerEdge(southEast, southWest, color);
-            CreateSpawnMarkerEdge(southWest, northWest, color);
+            CreateSpawnMarkerEdge(northWest, northEast, color, markerBeams);
+            CreateSpawnMarkerEdge(northEast, southEast, color, markerBeams);
+            CreateSpawnMarkerEdge(southEast, southWest, color, markerBeams);
+            CreateSpawnMarkerEdge(southWest, northWest, color, markerBeams);
         }
 
-        private float GetSpawnMarkerGroundHeight(Position spawn)
+        private static float GetSpawnMarkerGroundHeight(
+            Position spawn,
+            Dictionary<(float X, float Y, float Z), float> groundHeightCache)
         {
             Vector spawnPosition = spawn.PlayerPosition;
             (float X, float Y, float Z) key = (spawnPosition.X, spawnPosition.Y, spawnPosition.Z);
-            if (spawnMarkerGroundHeights.TryGetValue(key, out float cachedGroundHeight))
+            if (groundHeightCache.TryGetValue(key, out float cachedGroundHeight))
             {
                 return cachedGroundHeight;
             }
@@ -919,7 +930,7 @@ namespace MatchZy
                 groundHeight = navArea.GetClosestPoint(spawnPosition).Z;
             }
 
-            spawnMarkerGroundHeights[key] = groundHeight;
+            groundHeightCache[key] = groundHeight;
             return groundHeight;
         }
 
@@ -929,14 +940,22 @@ namespace MatchZy
             spawnMarkersEnabled = spawnMarkersEnabledByDefault.Value;
         }
 
+        private void InitializePracticeBotSpawnMarkers()
+        {
+            RemoveBotSpawnMarkerEntities();
+            botSpawnMarkerGroundHeights.Clear();
+            botSpawnMarkersEnabled = false;
+        }
+
         private void RefreshPracticeSpawnMarkersAfterRoundStart()
         {
-            if (!isPractice || !spawnMarkersEnabled) return;
+            if (!isPractice || (!spawnMarkersEnabled && !botSpawnMarkersEnabled)) return;
 
             Server.NextFrame(() =>
             {
-                if (!isPractice || !spawnMarkersEnabled) return;
-                ShowSpawnMarkers();
+                if (!isPractice) return;
+                if (spawnMarkersEnabled) ShowSpawnMarkers();
+                if (botSpawnMarkersEnabled) ShowBotSpawnMarkers(out _);
             });
         }
 
@@ -947,30 +966,78 @@ namespace MatchZy
 
             foreach (Position spawn in spawnsData[(byte)CsTeam.CounterTerrorist])
             {
-                ShowSpawnMarker(spawn, Color.Blue);
+                ShowSpawnMarker(spawn, Color.Blue, spawnMarkerBeams, spawnMarkerGroundHeights);
             }
 
             foreach (Position spawn in spawnsData[(byte)CsTeam.Terrorist])
             {
-                ShowSpawnMarker(spawn, Color.Gold);
+                ShowSpawnMarker(spawn, Color.Gold, spawnMarkerBeams, spawnMarkerGroundHeights);
             }
 
         }
 
+        private bool ShowBotSpawnMarkers(out int markerCount)
+        {
+            RemoveBotSpawnMarkerEntities();
+            markerCount = 0;
+
+            try
+            {
+                Dictionary<string, Dictionary<string, List<SavedBotSpawnPoint>>> savedSpawns =
+                    ReadSavedBotSpawns(GetSavedBotSpawnsPath());
+                string? mapKey = FindCaseInsensitiveKey(savedSpawns, Server.MapName);
+                if (mapKey == null) return true;
+
+                foreach (SavedBotSpawnPoint spawnPoint in savedSpawns[mapKey].Values.SelectMany(points => points))
+                {
+                    ShowSpawnMarker(
+                        spawnPoint.ToPosition(),
+                        Color.Green,
+                        botSpawnMarkerBeams,
+                        botSpawnMarkerGroundHeights);
+                    markerCount++;
+                }
+
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                Log($"[ShowBotSpawns] Failed: {ex.Message}");
+                RemoveBotSpawnMarkerEntities();
+                return false;
+            }
+        }
+
         private void RemoveSpawnMarkerEntities()
         {
-            foreach (CBeam beam in spawnMarkerBeams)
+            RemoveMarkerEntities(spawnMarkerBeams);
+        }
+
+        private void RemoveBotSpawnMarkerEntities()
+        {
+            RemoveMarkerEntities(botSpawnMarkerBeams);
+        }
+
+        private static void RemoveMarkerEntities(List<CBeam> markerBeams)
+        {
+            foreach (CBeam beam in markerBeams)
             {
                 if (beam.IsValid) beam.Remove();
             }
 
-            spawnMarkerBeams.Clear();
+            markerBeams.Clear();
         }
 
         public void RemoveSpawnMarkers()
         {
             spawnMarkersEnabled = false;
             RemoveSpawnMarkerEntities();
+        }
+
+        public void RemoveBotSpawnMarkers()
+        {
+            botSpawnMarkersEnabled = false;
+            RemoveBotSpawnMarkerEntities();
         }
 
         public void OnPlayerButtonsChanged(CCSPlayerController player, PlayerButtons pressed, PlayerButtons released)
@@ -994,7 +1061,7 @@ namespace MatchZy
             {
                 foreach (Position spawn in teamSpawns)
                 {
-                    float groundHeight = GetSpawnMarkerGroundHeight(spawn);
+                    float groundHeight = GetSpawnMarkerGroundHeight(spawn, spawnMarkerGroundHeights);
                     float deltaX = playerPosition.X - spawn.PlayerPosition.X;
                     float deltaY = playerPosition.Y - spawn.PlayerPosition.Y;
                     float deltaZ = playerPosition.Z - groundHeight;
@@ -3273,6 +3340,12 @@ namespace MatchZy
             HandlePlaceBotsCommand(player, command.ArgString);
         }
 
+        [ConsoleCommand("css_placenewbot", "Adds up to the requested number of bots at a named bot-spawn set without removing existing bots")]
+        public void OnPlaceNewBotsCommand(CCSPlayerController? player, CommandInfo command)
+        {
+            HandlePlaceNewBotsCommand(player, command.ArgString);
+        }
+
         private void HandleSaveBotSpawnCommand(CCSPlayerController? player, string rawSpawnName)
         {
             if (!IsPlayerValid(player)) return;
@@ -3331,6 +3404,7 @@ namespace MatchZy
 
                 spawnPoints.Add(spawnPoint);
                 WriteSavedBotSpawns(spawnsPath, savedSpawns);
+                if (botSpawnMarkersEnabled) ShowBotSpawnMarkers(out _);
                 ReplyToUserCommand(player, $"Added bot-spawn point {spawnPoints.Count} to '{spawnName}' on {Server.MapName}.");
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -3384,6 +3458,7 @@ namespace MatchZy
                 }
 
                 WriteSavedBotSpawns(spawnsPath, savedSpawns);
+                if (botSpawnMarkersEnabled) ShowBotSpawnMarkers(out _);
                 ReplyToUserCommand(player, $"Deleted bot-spawn set '{spawnName}' with {removedPoints.Count} point(s) from {Server.MapName}.");
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -3395,10 +3470,27 @@ namespace MatchZy
 
         private void HandlePlaceBotsCommand(CCSPlayerController? player, string rawArguments)
         {
+            HandlePlaceBotsCommand(player, rawArguments, preserveExistingBots: false);
+        }
+
+        private void HandlePlaceNewBotsCommand(CCSPlayerController? player, string rawArguments)
+        {
+            HandlePlaceBotsCommand(player, rawArguments, preserveExistingBots: true);
+        }
+
+        private void HandlePlaceBotsCommand(
+            CCSPlayerController? player,
+            string rawArguments,
+            bool preserveExistingBots)
+        {
             if (!IsPlayerValid(player)) return;
             if (!isPractice)
             {
-                ReplyToUserCommand(player, ".placebot is available only in practice mode.");
+                ReplyToUserCommand(
+                    player,
+                    preserveExistingBots
+                        ? ".placenewbot is available only in practice mode."
+                        : ".placebot is available only in practice mode.");
                 return;
             }
 
@@ -3407,7 +3499,11 @@ namespace MatchZy
             if (arguments.Length != 2 || !int.TryParse(arguments[0], out int requestedBotCount) || requestedBotCount <= 0 ||
                 string.IsNullOrWhiteSpace(requestedSpawnName))
             {
-                ReplyToUserCommand(player, "Usage: .placebot <number> <multi-word name>");
+                ReplyToUserCommand(
+                    player,
+                    preserveExistingBots
+                        ? "Usage: .placenewbot <number> <multi-word name>"
+                        : "Usage: .placebot <number> <multi-word name>");
                 return;
             }
 
@@ -3469,12 +3565,28 @@ namespace MatchZy
                     })
                     .ToList();
 
-                int loadGeneration = BeginBotPresetLoad();
-                ReplyToUserCommand(player, $"Placing {botCount} bot(s) from bot-spawn set '{spawnName}'.");
-                AddTimer(
-                    0.5f,
-                    () => WaitForBotPresetCleanup(player, spawnName, botsToPlace, loadGeneration, attempt: 0, isBotSpawnSet: true),
-                    TimerFlags.STOP_ON_MAPCHANGE);
+                if (preserveExistingBots)
+                {
+                    int loadGeneration = BeginAdditionalBotPlacement(out HashSet<int> preservedBotUserIds);
+                    ReplyToUserCommand(player, $"Adding {botCount} bot(s) from bot-spawn set '{spawnName}'.");
+                    RestoreNextSavedBot(
+                        player,
+                        spawnName,
+                        botsToPlace,
+                        0,
+                        loadGeneration,
+                        isBotSpawnSet: true,
+                        preservedBotUserIds);
+                }
+                else
+                {
+                    int loadGeneration = BeginBotPresetLoad();
+                    ReplyToUserCommand(player, $"Placing {botCount} bot(s) from bot-spawn set '{spawnName}'.");
+                    AddTimer(
+                        0.5f,
+                        () => WaitForBotPresetCleanup(player, spawnName, botsToPlace, loadGeneration, attempt: 0, isBotSpawnSet: true),
+                        TimerFlags.STOP_ON_MAPCHANGE);
+                }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
             {
@@ -3702,6 +3814,20 @@ namespace MatchZy
             return loadGeneration;
         }
 
+        private int BeginAdditionalBotPlacement(out HashSet<int> preservedBotUserIds)
+        {
+            int loadGeneration = ++botPresetLoadGeneration;
+            isSpawningBot = true;
+            preservedBotUserIds = Utilities
+                .FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
+                .Where(bot => bot.IsValid && bot.IsBot && !bot.IsHLTV && bot.UserId.HasValue)
+                .Select(bot => bot.UserId!.Value)
+                .ToHashSet();
+            Log($"[PracticeBotCreate] Starting additive placement generation {loadGeneration} while preserving {preservedBotUserIds.Count} existing bot controller(s). {DescribePracticeBotState()}");
+            ApplyBotShootingState();
+            return loadGeneration;
+        }
+
         private void WaitForBotPresetCleanup(
             CCSPlayerController owner,
             string presetName,
@@ -3784,7 +3910,8 @@ namespace MatchZy
             List<SavedBotPosition> savedBots,
             int index,
             int loadGeneration,
-            bool isBotSpawnSet = false)
+            bool isBotSpawnSet = false,
+            HashSet<int>? preservedBotUserIds = null)
         {
             if (loadGeneration != botPresetLoadGeneration) return;
             if (!IsPlayerValid(owner))
@@ -3796,11 +3923,26 @@ namespace MatchZy
 
             if (index >= savedBots.Count)
             {
-                FinishBotPresetLoad(owner, presetName, savedBots.Count, loadGeneration, isBotSpawnSet, cleanupAttempt: 0);
+                FinishBotPresetLoad(
+                    owner,
+                    presetName,
+                    savedBots.Count,
+                    loadGeneration,
+                    isBotSpawnSet,
+                    cleanupAttempt: 0,
+                    preservedBotUserIds);
                 return;
             }
 
-            TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, attempt: 0, isBotSpawnSet);
+            TryPlaceRestoredBot(
+                owner,
+                presetName,
+                savedBots,
+                index,
+                loadGeneration,
+                attempt: 0,
+                isBotSpawnSet,
+                preservedBotUserIds);
         }
 
         private void TryPlaceRestoredBot(
@@ -3810,7 +3952,8 @@ namespace MatchZy
             int index,
             int loadGeneration,
             int attempt,
-            bool isBotSpawnSet = false)
+            bool isBotSpawnSet = false,
+            HashSet<int>? preservedBotUserIds = null)
         {
             if (loadGeneration != botPresetLoadGeneration) return;
             if (!IsPlayerValid(owner))
@@ -3821,7 +3964,7 @@ namespace MatchZy
             }
 
             SavedBotPosition savedBot = savedBots[index];
-            CCSPlayerController? restoredBot = FindUntrackedPracticeBot(savedBot.TeamNum);
+            CCSPlayerController? restoredBot = FindUntrackedPracticeBot(savedBot.TeamNum, preservedBotUserIds);
 
             if (restoredBot == null)
             {
@@ -3836,7 +3979,7 @@ namespace MatchZy
 
                     AddTimer(
                         0.1f,
-                        () => TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, attempt + 1, isBotSpawnSet),
+                        () => TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, attempt + 1, isBotSpawnSet, preservedBotUserIds),
                         TimerFlags.STOP_ON_MAPCHANGE);
                     return;
                 }
@@ -3871,7 +4014,7 @@ namespace MatchZy
                 restoredBot.Respawn();
                 AddTimer(
                     0.1f,
-                    () => TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, attempt + 1, isBotSpawnSet),
+                    () => TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, attempt + 1, isBotSpawnSet, preservedBotUserIds),
                     TimerFlags.STOP_ON_MAPCHANGE);
                 return;
             }
@@ -3882,7 +4025,7 @@ namespace MatchZy
                 restoredBot.CommitSuicide(explode: false, force: true);
                 AddTimer(
                     0.1f,
-                    () => TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, attempt + 1, isBotSpawnSet),
+                    () => TryPlaceRestoredBot(owner, presetName, savedBots, index, loadGeneration, attempt + 1, isBotSpawnSet, preservedBotUserIds),
                     TimerFlags.STOP_ON_MAPCHANGE);
                 return;
             }
@@ -3926,15 +4069,16 @@ namespace MatchZy
 
             AddTimer(
                 0.35f,
-                () => RestoreNextSavedBot(owner, presetName, savedBots, index + 1, loadGeneration, isBotSpawnSet),
+                () => RestoreNextSavedBot(owner, presetName, savedBots, index + 1, loadGeneration, isBotSpawnSet, preservedBotUserIds),
                 TimerFlags.STOP_ON_MAPCHANGE);
         }
 
-        private CCSPlayerController? FindUntrackedPracticeBot(byte teamNum)
+        private CCSPlayerController? FindUntrackedPracticeBot(byte teamNum, HashSet<int>? excludedBotUserIds = null)
         {
             return Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
                 .FirstOrDefault(bot => bot.IsValid && bot.IsBot && !bot.IsHLTV && bot.UserId.HasValue &&
-                    bot.TeamNum == teamNum && !pracUsedBots.ContainsKey(bot.UserId.Value));
+                    bot.TeamNum == teamNum && !pracUsedBots.ContainsKey(bot.UserId.Value) &&
+                    (excludedBotUserIds == null || !excludedBotUserIds.Contains(bot.UserId.Value)));
         }
 
         private static byte GetOppositePracticeTeam(byte teamNum)
@@ -4064,14 +4208,16 @@ namespace MatchZy
             int placedBotCount,
             int loadGeneration,
             bool isBotSpawnSet,
-            int cleanupAttempt)
+            int cleanupAttempt,
+            HashSet<int>? preservedBotUserIds = null)
         {
             if (loadGeneration != botPresetLoadGeneration) return;
 
             List<CCSPlayerController> untrackedBots = Utilities
                 .FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
                 .Where(bot => bot.IsValid && bot.IsBot && !bot.IsHLTV && bot.UserId.HasValue &&
-                    !pracUsedBots.ContainsKey(bot.UserId.Value))
+                    !pracUsedBots.ContainsKey(bot.UserId.Value) &&
+                    (preservedBotUserIds == null || !preservedBotUserIds.Contains(bot.UserId.Value)))
                 .ToList();
             if (untrackedBots.Count > 0 && cleanupAttempt < 50)
             {
@@ -4088,7 +4234,8 @@ namespace MatchZy
                         placedBotCount,
                         loadGeneration,
                         isBotSpawnSet,
-                        cleanupAttempt + 1),
+                        cleanupAttempt + 1,
+                        preservedBotUserIds),
                     TimerFlags.STOP_ON_MAPCHANGE);
                 return;
             }
@@ -4105,7 +4252,9 @@ namespace MatchZy
             ReplyToUserCommand(
                 owner,
                 isBotSpawnSet
-                    ? $"Placed {placedBotCount} bot(s) from bot-spawn set '{presetName}'."
+                    ? preservedBotUserIds != null
+                        ? $"Added {placedBotCount} bot(s) from bot-spawn set '{presetName}'."
+                        : $"Placed {placedBotCount} bot(s) from bot-spawn set '{presetName}'."
                     : $"Loaded {placedBotCount} bot position(s) from '{presetName}'.");
         }
 
@@ -4594,6 +4743,7 @@ namespace MatchZy
 
         public void ExecUnpracCommands() {
             CloseAllConfigurationMenus();
+            RemoveBotSpawnMarkers();
             ResetTurretCombatState();
             ResetPracticeHumanGodModes();
             botShootingEnabled = false;
@@ -5212,6 +5362,45 @@ namespace MatchZy
         public void OnSpawnMarkersCommand(CCSPlayerController? player, CommandInfo? command)
         {
             TogglePracticeSpawnMarkers(player);
+        }
+
+        [ConsoleCommand("css_showbotspawn", "Toggles green markers at saved bot-spawn positions")]
+        public void OnShowBotSpawnsCommand(CCSPlayerController? player, CommandInfo command)
+        {
+            HandleShowBotSpawnsCommand(player, command.ArgString);
+        }
+
+        private void HandleShowBotSpawnsCommand(CCSPlayerController? player, string commandArg)
+        {
+            if (!IsPlayerValid(player)) return;
+            if (!isPractice)
+            {
+                ReplyToUserCommand(player, ".showbotspawn is available only in practice mode.");
+                return;
+            }
+
+            if (!TryResolveBooleanToggle(commandArg, botSpawnMarkersEnabled, out bool enabled))
+            {
+                ReplyToUserCommand(player, "Usage: .showbotspawn [true/false]");
+                return;
+            }
+
+            if (!enabled)
+            {
+                RemoveBotSpawnMarkers();
+                ReplyToUserCommand(player, "Bot-spawn outlines are hidden.");
+                return;
+            }
+
+            botSpawnMarkersEnabled = true;
+            if (!ShowBotSpawnMarkers(out int markerCount))
+            {
+                botSpawnMarkersEnabled = false;
+                ReplyToUserCommand(player, "Unable to show the saved bot-spawn outlines.");
+                return;
+            }
+
+            ReplyToUserCommand(player, $"Bot-spawn outlines shown: {markerCount} green marker(s).");
         }
 
         private bool TogglePracticeSpawnMarkers(CCSPlayerController? player)

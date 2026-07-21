@@ -373,6 +373,7 @@ namespace MatchZy
         {
             try
             {
+                RemoveBotSpawnMarkers();
                 // We stop demo recording if a live match was restarted
                 if (matchStarted && isDemoRecording)
                 {
@@ -766,6 +767,7 @@ namespace MatchZy
 
         private void HandleMatchStart()
         {
+            RemoveBotSpawnMarkers();
             isPractice = false;
             isDryRun = false;
             if (isRoundRestorePending)
@@ -1458,8 +1460,8 @@ namespace MatchZy
                 PrintAvailableCommandCategory(
                     player,
                     "Bot Spawns",
-                    ".botspawn, .delbotspawn, .listbotspawn, .placebot",
-                    ".botspawn <multi-word name>, .delbotspawn <multi-word name>, .listbotspawn, .placebot <number> <multi-word name>");
+                    ".botspawn, .delbotspawn, .listbotspawn, .placebot, .placenewbot, .showbotspawn",
+                    ".botspawn <multi-word name>, .delbotspawn <multi-word name>, .listbotspawn, .placebot <number> <multi-word name>, .placenewbot <number> <multi-word name>, .showbotspawn [true/false]");
                 PrintAvailableCommandCategory(
                     player,
                     "Nades",

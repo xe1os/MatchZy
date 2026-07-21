@@ -14,6 +14,7 @@ namespace MatchZy
         public void StartSleepMode()
         {
             if (matchStarted) return;
+            RemoveBotSpawnMarkers();
             isSleep = true;
             isPractice = false;
             isDryRun = false;
