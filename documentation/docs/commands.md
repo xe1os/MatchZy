@@ -44,7 +44,7 @@ Most of the commands can also be used using ! prefix instead of . (like !ready)
 - `.listbotspawn` Lists current-map bot-spawn pool names and point counts in private chat.
 - `.placebot <number> <name>` Clears existing bots and places up to the requested number at randomized, distinct saved XY positions from the named current-map pool.
 - `.placenewbot <number> <name>` Keeps existing bots and adds up to the requested number at randomized, distinct saved XY positions from the named current-map pool.
-- `.showbotspawn [true/false]` Toggles green ground-aligned squares at every saved bot-spawn point on the current map. It defaults to off in each practice session.
+- `.showbotspawn [true/false]` Toggles green ground-aligned squares at every saved bot-spawn point on the current map. Stand inside a visible green square and press `E` to delete only that point. It defaults to off in each practice session.
 - `.kicklastbot` Removes the newest remaining placed practice bot; repeated uses work backward through placement order.
 - `.liferegon` Toggles health regeneration only for the requesting human player. It defaults to `true` when practice starts and for humans joining active practice. When enabled, an injured living player returns to maximum health on a fixed 100 ms cadence, including while taking continuous damage. Players already at the applicable maximum are ignored. With `.god` enabled, the applicable maximum is the God-mode health target instead of 100 HP. Disabling it stops automatic regeneration for that player until they disconnect or practice restarts, allowing normal deaths unless separately protected by `.god`. An explicit `true` or `false` remains supported.
 - `.crouchbot` Adds a crouched bot on user's current position (Alias: `.cbot`)

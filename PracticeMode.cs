@@ -182,7 +182,7 @@ namespace MatchZy
         private readonly HashSet<int> practiceBotsPendingCleanup = new();
 
         private const int DefaultBotReactionTimeMs = 500;
-        private const int DefaultBotJiggleRangeUnits = 10;
+        private const int DefaultBotJiggleRangeUnits = 17;
         private const int GodModeHealth = int.MaxValue / 2;
         private const float PracticeRespawnDelaySeconds = 0.5f;
         private const float PracticeLifeRegenerationIntervalSeconds = 0.1f;
@@ -1044,15 +1044,21 @@ namespace MatchZy
         {
             HandleConfigurationMenuInput(player, pressed);
 
-            if (!isPractice ||
-                !spawnMarkersEnabled ||
-                !spawnMarkerBeams.Any(beam => beam.IsValid) ||
-                !IsPlayerValid(player)) return;
+            if (!isPractice || !IsPlayerValid(player)) return;
             if ((pressed & PlayerButtons.Use) == 0) return;
 
             CCSPlayerPawn? pawn = player.PlayerPawn.Value;
             Vector? playerPosition = pawn?.CBodyComponent?.SceneNode?.AbsOrigin;
             if (playerPosition == null) return;
+
+            if (botSpawnMarkersEnabled &&
+                botSpawnMarkerBeams.Any(beam => beam.IsValid) &&
+                TryDeleteBotSpawnPointAt(player, playerPosition))
+            {
+                return;
+            }
+
+            if (!spawnMarkersEnabled || !spawnMarkerBeams.Any(beam => beam.IsValid)) return;
 
             Position? selectedSpawn = null;
             float selectedDistanceSquared = float.MaxValue;
@@ -1085,6 +1091,77 @@ namespace MatchZy
             if (selectedSpawn != null)
             {
                 selectedSpawn.Teleport(player);
+            }
+        }
+
+        private bool TryDeleteBotSpawnPointAt(CCSPlayerController player, Vector playerPosition)
+        {
+            try
+            {
+                string spawnsPath = GetSavedBotSpawnsPath();
+                Dictionary<string, Dictionary<string, List<SavedBotSpawnPoint>>> savedSpawns =
+                    ReadSavedBotSpawns(spawnsPath);
+                string? mapKey = FindCaseInsensitiveKey(savedSpawns, Server.MapName);
+                if (mapKey == null) return false;
+
+                Dictionary<string, List<SavedBotSpawnPoint>> mapSpawns = savedSpawns[mapKey];
+                string? selectedSpawnName = null;
+                int selectedPointIndex = -1;
+                float selectedDistanceSquared = float.MaxValue;
+
+                foreach ((string spawnName, List<SavedBotSpawnPoint> spawnPoints) in mapSpawns)
+                {
+                    for (int pointIndex = 0; pointIndex < spawnPoints.Count; pointIndex++)
+                    {
+                        SavedBotSpawnPoint spawnPoint = spawnPoints[pointIndex];
+                        Position spawn = spawnPoint.ToPosition();
+                        float groundHeight = GetSpawnMarkerGroundHeight(spawn, botSpawnMarkerGroundHeights);
+                        float deltaX = playerPosition.X - spawnPoint.PositionX;
+                        float deltaY = playerPosition.Y - spawnPoint.PositionY;
+                        float deltaZ = playerPosition.Z - groundHeight;
+
+                        if (MathF.Abs(deltaX) > SpawnMarkerHalfSize ||
+                            MathF.Abs(deltaY) > SpawnMarkerHalfSize ||
+                            MathF.Abs(deltaZ) > SpawnMarkerVerticalTolerance)
+                        {
+                            continue;
+                        }
+
+                        float distanceSquared = deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
+                        if (distanceSquared < selectedDistanceSquared)
+                        {
+                            selectedDistanceSquared = distanceSquared;
+                            selectedSpawnName = spawnName;
+                            selectedPointIndex = pointIndex;
+                        }
+                    }
+                }
+
+                if (selectedSpawnName == null || selectedPointIndex < 0) return false;
+
+                List<SavedBotSpawnPoint> selectedSpawnPoints = mapSpawns[selectedSpawnName];
+                selectedSpawnPoints.RemoveAt(selectedPointIndex);
+                int remainingPointCount = selectedSpawnPoints.Count;
+                if (remainingPointCount == 0)
+                {
+                    mapSpawns.Remove(selectedSpawnName);
+                    if (mapSpawns.Count == 0) savedSpawns.Remove(mapKey);
+                }
+
+                WriteSavedBotSpawns(spawnsPath, savedSpawns);
+                ShowBotSpawnMarkers(out _);
+                ReplyToUserCommand(
+                    player,
+                    remainingPointCount == 0
+                        ? $"Deleted the bot-spawn point and empty set '{selectedSpawnName}' from {Server.MapName}."
+                        : $"Deleted one bot-spawn point from '{selectedSpawnName}' on {Server.MapName} ({remainingPointCount} remaining).");
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                Log($"[DeleteBotSpawnPoint] Failed: {ex.Message}");
+                ReplyToUserCommand(player, "Unable to delete the bot-spawn point.");
+                return true;
             }
         }
 
