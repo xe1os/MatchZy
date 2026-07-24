@@ -288,6 +288,11 @@ public partial class MatchZy
                 }
 
                 lastGrenadeThrownTime[(int)projectile.Index] = DateTime.Now;
+                if (nadeType == "molotov")
+                {
+                    lastMolotovThrownTime[client] = DateTime.Now;
+                }
+                
                 if (smokeColorEnabled.Value && nadeType == "smoke")
                 {
                     CSmokeGrenadeProjectile smokeProjectile = new(entity.Handle);
@@ -365,14 +370,31 @@ public partial class MatchZy
         return HookResult.Continue;
     }
 
-    public HookResult EventMolotovDetonateHandler(EventMolotovDetonate @event, GameEventInfo info)
+    public HookResult EventInfernoStartburnHandler(EventInfernoStartburn @event, GameEventInfo info)
     {
         if (!isPractice || isDryRun) return HookResult.Continue;
-        CCSPlayerController? player = @event.Userid;
+
+        var inferno = Utilities.GetEntityFromIndex<CInferno>(@event.Entityid);
+        if (inferno == null || !inferno.IsValid) return HookResult.Continue;
+
+        var owner = inferno.OwnerEntity?.Value;
+        if (owner == null || owner.DesignerName != "player") return HookResult.Continue;
+
+        var pawn = new CCSPlayerPawn(owner.Handle);
+        var controller = pawn.Controller?.Value;
+        if (controller == null) return HookResult.Continue;
+
+        var player = new CCSPlayerController(controller.Handle);
         if (!IsPlayerValid(player)) return HookResult.Continue;
-        if(lastGrenadeThrownTime.TryGetValue(@event.Get<int>("entityid"), out var thrownTime)) 
+
+        int client = player.UserId!.Value;
+        if(lastMolotovThrownTime.TryGetValue(client, out var thrownTime)) 
         {
-            PrintToPlayerChat(player!, Localizer["matchzy.pracc.molotov", player!.PlayerName, $"{(DateTime.Now - thrownTime).TotalSeconds:0.00}"]);
+            if (player.TeamNum == (int)CsTeam.CounterTerrorist)
+                PrintToPlayerChat(player!, Localizer["matchzy.pracc.incendiary", player!.PlayerName, $"{(DateTime.Now - thrownTime).TotalSeconds:0.00}"]);
+            else
+                PrintToPlayerChat(player!, Localizer["matchzy.pracc.molotov", player!.PlayerName, $"{(DateTime.Now - thrownTime).TotalSeconds:0.00}"]);
+            lastMolotovThrownTime.Remove(client);
         }
         return HookResult.Continue;
     }

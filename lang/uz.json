@@ -134,6 +134,7 @@
   "matchzy.pracc.flash": "{red}{0}{default} tomonidan otilgan flashning portlashi uchun {green}{1}{default} soniya ketdi",
   "matchzy.pracc.grenade": "{red}{0}{default} tomonidan otilgan granataning portlashi uchun {green}{1}{default} soniya ketdi",
   "matchzy.pracc.molotov": "{red}{0}{default} tomonidan otilgan molotovning portlashi uchun {green}{1}{default} soniya ketdi",
+  "matchzy.pracc.incendiary": "{red}{0}{default} tomonidan otilgan yondiruvchi granataning portlashi uchun {green}{1}{default} soniya ketdi",
   "matchzy.pracc.decoy": "{red}{0}{default} tomonidan otilgan decoyning portlashi uchun {green}{1}{default} soniya ketdi",
   "matchzy.pracc.damage": "{red}{0}{default} damage to {lightblue}{1}{default}({green}{2}{default} health)",
   "matchzy.pracc.blind": "{lightblue}{0}{default} {green}{1}{default} soniyaga oqardi"

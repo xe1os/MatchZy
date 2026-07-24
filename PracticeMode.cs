@@ -122,6 +122,7 @@ namespace MatchZy
         Dictionary<int, List<GrenadeThrownData>> lastGrenadesData = new();
         Dictionary<int, Dictionary<string, GrenadeThrownData>> nadeSpecificLastGrenadeData = new();
         Dictionary<int, DateTime> lastGrenadeThrownTime = new();
+        Dictionary<int, DateTime> lastMolotovThrownTime = new();
         Dictionary<int, DateTime> lastRethrowCommandTime = new();
         Dictionary<int, DateTime> lastGlobalRethrowCommandTime = new();
         Dictionary<int, PlayerPracticeTimer> playerTimers = new();
@@ -4773,6 +4774,8 @@ namespace MatchZy
             {
                 entity?.Remove();
             }
+            lastGrenadeThrownTime.Clear();
+            lastMolotovThrownTime.Clear();
         }
 
         private void RemoveDroppedPracticeEquipment()

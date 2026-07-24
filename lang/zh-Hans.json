@@ -134,6 +134,7 @@
     "matchzy.pracc.flash": "玩家 {red}{0}{default} 扔出的闪光弹耗时 {green}{1}{default}s 后爆开",
     "matchzy.pracc.grenade": "玩家 {red}{0}{default} 扔出的手雷耗时 {green}{1}{default}s 后爆开",
     "matchzy.pracc.molotov": "玩家 {red}{0}{default} 扔出的燃烧弹耗时 {green}{1}{default}s 后爆开",
+    "matchzy.pracc.incendiary": "玩家 {red}{0}{default} 扔出的燃烧弹耗时 {green}{1}{default}s 后爆开",
     "matchzy.pracc.decoy": "玩家 {red}{0}{default} 扔出的诱饵弹耗时 {green}{1}{default}s 后爆开",
     "matchzy.pracc.damage": "对玩家 {lightblue}{1}{default}({green}{2}{default} 造成 {red}{0}{default} 点伤害)",
     "matchzy.pracc.blind": "玩家{lightblue}{0}{default} 被闪光弹致盲 {green}{1}{default}s"
