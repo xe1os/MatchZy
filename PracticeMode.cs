@@ -122,7 +122,7 @@ namespace MatchZy
         Dictionary<int, List<GrenadeThrownData>> lastGrenadesData = new();
         Dictionary<int, Dictionary<string, GrenadeThrownData>> nadeSpecificLastGrenadeData = new();
         Dictionary<int, DateTime> lastGrenadeThrownTime = new();
-        Dictionary<int, DateTime> lastMolotovThrownTime = new();
+        Dictionary<int, Queue<DateTime>> lastMolotovThrownTime = new();
         Dictionary<int, DateTime> lastRethrowCommandTime = new();
         Dictionary<int, DateTime> lastGlobalRethrowCommandTime = new();
         Dictionary<int, PlayerPracticeTimer> playerTimers = new();
@@ -4831,6 +4831,8 @@ namespace MatchZy
             botJiggleRandomEnabled = false;
             botJiggleRangeUnits = DefaultBotJiggleRangeUnits;
             practiceBotsPendingCleanup.Clear();
+            lastGrenadeThrownTime.Clear();
+            lastMolotovThrownTime.Clear();
             botRespawnEnabled = true;
             botLifeRegenerationEnabled = false;
             humanLifeRegenerationEnabled.Clear();

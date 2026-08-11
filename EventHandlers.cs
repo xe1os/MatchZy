@@ -99,6 +99,7 @@ public partial class MatchZy
                 connectedPlayers--;
             }
             playerData.Remove(userId);
+            lastMolotovThrownTime.Remove(userId);
 
             if (matchzyTeam1.coach.Contains(player))
             {
@@ -287,10 +288,17 @@ public partial class MatchZy
                     lastGrenadesData[client].RemoveAt(0);
                 }
 
-                lastGrenadeThrownTime[(int)projectile.Index] = DateTime.Now;
                 if (nadeType == "molotov")
                 {
-                    lastMolotovThrownTime[client] = DateTime.Now;
+                    if (!lastMolotovThrownTime.ContainsKey(client))
+                    {
+                        lastMolotovThrownTime[client] = new Queue<DateTime>();
+                    }
+                    lastMolotovThrownTime[client].Enqueue(DateTime.Now);
+                }
+                else
+                {
+                    lastGrenadeThrownTime[(int)projectile.Index] = DateTime.Now;
                 }
                 
                 if (smokeColorEnabled.Value && nadeType == "smoke")
@@ -388,13 +396,13 @@ public partial class MatchZy
         if (!IsPlayerValid(player)) return HookResult.Continue;
 
         int client = player.UserId!.Value;
-        if(lastMolotovThrownTime.TryGetValue(client, out var thrownTime)) 
+        if(lastMolotovThrownTime.TryGetValue(client, out var queue) && queue.Count > 0) 
         {
-            if (player.TeamNum == (int)CsTeam.CounterTerrorist)
+            var thrownTime = queue.Dequeue();
+            if (inferno.SourceItemDefIndex == 48)
                 PrintToPlayerChat(player!, Localizer["matchzy.pracc.incendiary", player!.PlayerName, $"{(DateTime.Now - thrownTime).TotalSeconds:0.00}"]);
             else
                 PrintToPlayerChat(player!, Localizer["matchzy.pracc.molotov", player!.PlayerName, $"{(DateTime.Now - thrownTime).TotalSeconds:0.00}"]);
-            lastMolotovThrownTime.Remove(client);
         }
         return HookResult.Continue;
     }
