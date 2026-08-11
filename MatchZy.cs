@@ -227,6 +227,7 @@ namespace MatchZy
             RegisterListener<Listeners.OnClientDisconnectPost>(RemoveDisconnectedPracticePawn);
             RegisterListener<Listeners.OnEntitySpawned>(OnEntitySpawnedHandler);
             RegisterListener<Listeners.OnPlayerButtonsChanged>(OnPlayerButtonsChanged);
+            RegisterListener<Listeners.OnEntityDeleted>(OnEntityDeletedHandler);
             RegisterListener<Listeners.OnTick>(ControlPracticeBots);
             RegisterListener<Listeners.OnTick>(DisplayConfigurationMenus);
             RegisterEventHandler<EventPlayerTeam>((@event, info) => {
