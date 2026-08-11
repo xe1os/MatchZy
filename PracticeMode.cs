@@ -121,7 +121,8 @@ namespace MatchZy
         int maxLastGrenadesSavedLimit = 512;
         Dictionary<int, List<GrenadeThrownData>> lastGrenadesData = new();
         Dictionary<int, Dictionary<string, GrenadeThrownData>> nadeSpecificLastGrenadeData = new();
-        Dictionary<int, DateTime> lastGrenadeThrownTime = new();
+        Dictionary<int, (DateTime Time, int Client)> lastGrenadeThrownTime = new();
+        Dictionary<int, (DateTime Time, bool IsIncendiary)> infernoStartTimes = new();
         Dictionary<int, DateTime> lastRethrowCommandTime = new();
         Dictionary<int, DateTime> lastGlobalRethrowCommandTime = new();
         Dictionary<int, PlayerPracticeTimer> playerTimers = new();
@@ -4773,6 +4774,8 @@ namespace MatchZy
             {
                 entity?.Remove();
             }
+            lastGrenadeThrownTime.Clear();
+            infernoStartTimes.Clear();
         }
 
         private void RemoveDroppedPracticeEquipment()
@@ -4828,6 +4831,8 @@ namespace MatchZy
             botJiggleRandomEnabled = false;
             botJiggleRangeUnits = DefaultBotJiggleRangeUnits;
             practiceBotsPendingCleanup.Clear();
+            lastGrenadeThrownTime.Clear();
+            infernoStartTimes.Clear();
             botRespawnEnabled = true;
             botLifeRegenerationEnabled = false;
             humanLifeRegenerationEnabled.Clear();

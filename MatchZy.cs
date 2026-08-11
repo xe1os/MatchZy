@@ -227,6 +227,7 @@ namespace MatchZy
             RegisterListener<Listeners.OnClientDisconnectPost>(RemoveDisconnectedPracticePawn);
             RegisterListener<Listeners.OnEntitySpawned>(OnEntitySpawnedHandler);
             RegisterListener<Listeners.OnPlayerButtonsChanged>(OnPlayerButtonsChanged);
+            RegisterListener<Listeners.OnEntityDeleted>(OnEntityDeletedHandler);
             RegisterListener<Listeners.OnTick>(ControlPracticeBots);
             RegisterListener<Listeners.OnTick>(DisplayConfigurationMenus);
             RegisterEventHandler<EventPlayerTeam>((@event, info) => {
@@ -647,7 +648,7 @@ namespace MatchZy
             RegisterEventHandler<EventSmokegrenadeDetonate>(EventSmokegrenadeDetonateHandler);
             RegisterEventHandler<EventFlashbangDetonate>(EventFlashbangDetonateHandler);
             RegisterEventHandler<EventHegrenadeDetonate>(EventHegrenadeDetonateHandler);
-            RegisterEventHandler<EventMolotovDetonate>(EventMolotovDetonateHandler);
+            RegisterEventHandler<EventInfernoStartburn>(EventInfernoStartburnHandler);
             RegisterEventHandler<EventDecoyStarted>(EventDecoyDetonateHandler);
 
             Console.WriteLine($"[{ModuleName} {ModuleVersion} LOADED] MatchZy by WD- (https://github.com/shobhit-pathak/)");
