@@ -20,6 +20,8 @@ namespace MatchZy
             public int NumMaps = 1;
             public bool SkipVeto = true;
             public bool KnifeRound = true;
+            // "competitive", "wingman", "rush" or "1v1" (MatchGameModes).
+            public string GameMode = "competitive";
             public List<string> SelectedMaps = new();
         }
 
@@ -91,7 +93,7 @@ namespace MatchZy
                         return;
                     activeSetup!.NumMaps = 1;
                     activeSetup.SelectedMaps.Clear();
-                    OpenMapModeMenu(p);
+                    OpenGameModeMenu(p);
                 }
             );
             menu.AddItem(
@@ -103,7 +105,7 @@ namespace MatchZy
                         return;
                     activeSetup!.NumMaps = 2;
                     activeSetup.SelectedMaps.Clear();
-                    OpenMapModeMenu(p);
+                    OpenGameModeMenu(p);
                 }
             );
             menu.AddItem(
@@ -115,7 +117,7 @@ namespace MatchZy
                         return;
                     activeSetup!.NumMaps = 3;
                     activeSetup.SelectedMaps.Clear();
-                    OpenMapModeMenu(p);
+                    OpenGameModeMenu(p);
                 }
             );
             menu.AddItem(
@@ -127,7 +129,7 @@ namespace MatchZy
                         return;
                     activeSetup!.NumMaps = 5;
                     activeSetup.SelectedMaps.Clear();
-                    OpenMapModeMenu(p);
+                    OpenGameModeMenu(p);
                 }
             );
             // Series is the top wizard menu (no PrevMenu), so add an explicit way back to the css_ma
@@ -147,14 +149,60 @@ namespace MatchZy
             menu.Display(player, 0);
         }
 
+        private void OpenGameModeMenu(CCSPlayerController player)
+        {
+            if (!ValidateSetupOwner(player))
+                return;
+            var menu = new WasdMenu($"Match Setup - Game Mode", this);
+            menu.AddItem("« Back", (p, _) => OpenSeriesMenu(p));
+            foreach (var (mode, label) in new[]
+            {
+                ("competitive", "Competitive (5v5)"),
+                ("wingman", "Wingman (2v2)"),
+                ("rush", "Rush (3v3)"),
+                ("1v1", "1v1"),
+            })
+            {
+                string capturedMode = mode;
+                menu.AddItem(
+                    label,
+                    (p, _) =>
+                    {
+                        // The wizard can be reclaimed by another admin; a stale menu must not touch it.
+                        if (!ValidateSetupOwner(p))
+                            return;
+                        activeSetup!.GameMode = capturedMode;
+                        activeSetup.SelectedMaps.Clear();
+                        OpenMapModeMenu(p);
+                    }
+                );
+            }
+            menu.AddItem("Cancel Setup", (p, _) => CancelSetup(p));
+            menu.Display(player, 0);
+        }
+
+        // The maps the wizard offers for the chosen mode: rush only on rush maps (rush_001 when the
+        // rotation has none), the other modes on the rest of the rotation.
+        private List<string> SetupMapPool(MatchSetupState s)
+        {
+            if (s.GameMode == "rush")
+            {
+                var rushMaps = mapRotationList.Where(m => IsRushMap(m)).ToList();
+                return rushMaps.Count > 0 ? rushMaps : new List<string> { "rush_001" };
+            }
+            var maps = mapRotationList.Where(m => !IsRushMap(m)).ToList();
+            return maps.Count > 0 ? maps : new List<string>(mapRotationList);
+        }
+
         private void OpenMapModeMenu(CCSPlayerController player)
         {
             if (!ValidateSetupOwner(player))
                 return;
             var s = activeSetup!;
-            int poolSize = mapRotationList.Count;
+            var pool = SetupMapPool(s);
+            int poolSize = pool.Count;
             var menu = new WasdMenu($"Map Selection (BO{s.NumMaps})", this);
-            menu.AddItem("« Back", (p, _) => OpenSeriesMenu(p));
+            menu.AddItem("« Back", (p, _) => OpenGameModeMenu(p));
             menu.AddItem(
                 $"Pre-pick {s.NumMaps} map(s) - no veto",
                 (p, _) =>
@@ -177,7 +225,7 @@ namespace MatchZy
                         if (!ValidateSetupOwner(p))
                             return;
                         s.SkipVeto = false;
-                        s.SelectedMaps = new List<string>(mapRotationList);
+                        s.SelectedMaps = new List<string>(pool);
                         OpenSidesMenu(p);
                     }
                 );
@@ -192,7 +240,7 @@ namespace MatchZy
                 return;
             var s = activeSetup!;
             var menu = new WasdMenu($"Pick Maps - {s.SelectedMaps.Count}/{s.NumMaps}", this);
-            foreach (var map in mapRotationList)
+            foreach (var map in SetupMapPool(s))
             {
                 int pickIdx = s.SelectedMaps.IndexOf(map);
                 string label = pickIdx >= 0 ? $"[{pickIdx + 1}] {map}" : $"[ ] {map}";
@@ -263,6 +311,7 @@ namespace MatchZy
 
             var menu = new WasdMenu($"Confirm Match", this);
             menu.AddItem($"BO{s.NumMaps} - change", (p, _) => OpenSeriesMenu(p));
+            menu.AddItem($"Mode: {s.GameMode} - change", (p, _) => OpenGameModeMenu(p));
             string mapSummary = s.SkipVeto ? $"Maps ({s.SelectedMaps.Count}/{s.NumMaps}): {string.Join(" → ", s.SelectedMaps)}" : $"Veto pool: {s.SelectedMaps.Count} maps";
             menu.AddItem(mapSummary, (p, _) => OpenMapModeMenu(p));
             menu.AddItem($"Sides: {(s.KnifeRound ? "Knife" : "Team1 CT")} - change", (p, _) => OpenSidesMenu(p));
@@ -314,6 +363,7 @@ namespace MatchZy
                 ["maplist"] = new JArray(s.SelectedMaps),
                 ["skip_veto"] = s.SkipVeto,
                 ["clinch_series"] = true,
+                ["game_mode"] = s.GameMode,
                 ["team1"] = new JObject { ["name"] = team1, ["players"] = new JObject() },
                 ["team2"] = new JObject { ["name"] = team2, ["players"] = new JObject() },
             };

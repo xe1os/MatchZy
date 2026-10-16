@@ -27,6 +27,8 @@ namespace MatchZy
         public string knifeCfgPath => MatchZyCfgRel("knife.cfg");
         public string liveCfgPath => MatchZyCfgRel("live.cfg");
         public string liveWingmanCfgPath => MatchZyCfgRel("live_wingman.cfg");
+        public string liveRushCfgPath => MatchZyCfgRel("live_rush.cfg");
+        public string live1v1CfgPath => MatchZyCfgRel("live_1v1.cfg");
         public string scrimCfgPath => MatchZyCfgRel("scrim.cfg");
         public string hillCfgPath => MatchZyCfgRel("hill.cfg");
 
@@ -129,6 +131,9 @@ namespace MatchZy
         // included), not only where a caller re-applies them.
         private void ExecModeCfg(string cfgPath, string extraCommands = "")
         {
+            // The cfg's bot_quota 0 must not find leftover bots, or the engine's quota sweep can
+            // kick the CSTV bot along with them.
+            KickBotsBeforeQuotaReset();
             foreach (string chunk in ModeDefaultSettings(Path.GetFileName(cfgPath)))
                 Server.ExecuteCommand(chunk);
             Server.ExecuteCommand($"exec {cfgPath};{ModeOverrideExec(cfgPath)}{extraCommands}");
@@ -659,14 +664,55 @@ namespace MatchZy
             // closes; quit already did so from its command listener. Not on a hot reload: the new
             // instance sends server_ready.
             if (!hotReload)
-                AnnounceShutdown("plugin_unload");
+                AnnounceShutdown("plugin_unload", waitForSend: false);
             CloseEventQueue();
             if (_fakeWarmupActive)
             {
-                Server.ExecuteCommand("mp_ignore_round_win_conditions 0; mp_respawn_on_death_ct 0; mp_respawn_on_death_t 0; mp_warmup_start; mp_warmup_pausetimer 1");
+                // Hot reload: the new instance takes the ready phase over, so park the server in a
+                // paused warmup. Plain unload (another mode loads next): don't leave a paused warmup
+                // and the fake warmup's 60-minute rounds behind for it.
+                Server.ExecuteCommand(hotReload
+                    ? "mp_ignore_round_win_conditions 0; mp_respawn_on_death_ct 0; mp_respawn_on_death_t 0; mp_warmup_start; mp_warmup_pausetimer 1"
+                    : "mp_ignore_round_win_conditions 0; mp_respawn_on_death_ct 0; mp_respawn_on_death_t 0; mp_warmup_pausetimer 0; mp_roundtime 1.92; mp_roundtime_defuse 1.92; mp_roundtime_hostage 1.92");
                 _fakeWarmupActive = false;
             }
+            if (!hotReload)
+                LeaveModeOnUnload();
             base.Unload(hotReload);
+        }
+
+        /// <summary>
+        /// css_plugins unload (fshost switches to retakes / deathmatch / prefire): undo what practice and
+        /// warmup changed so the next mode doesn't inherit cheats, infinite ammo, frozen bots or markers.
+        /// Each mode's own cfg still sets its rules; this only removes MatchZy's leftovers.
+        /// </summary>
+        private void LeaveModeOnUnload()
+        {
+            try
+            {
+                KillWarmupBots();
+                RemoveBotTeamBots();
+                RemoveSpawnBeams();
+
+                if (isPractice)
+                {
+                    // ExecUnpracCommands covers sv_cheats, buddha, infinite ammo, default weapons and
+                    // the grenade trajectory; the rest of practice's settings are reset here.
+                    // bot_stop/bot_freeze/bot_zombie are cheat cvars: reset them while sv_cheats is still on,
+                    // before ExecUnpracCommands turns it off.
+                    Server.ExecuteCommand("bot_stop 0; bot_freeze 0; bot_zombie 0");
+                    ExecUnpracCommands();
+                    Server.ExecuteCommand("mp_buy_anywhere 0; mp_maxmoney 16000; mp_startmoney 800; mp_free_armor 0; mp_weapons_allow_typecount 5; mp_solid_teammates 1; mp_autoteambalance 1; mp_limitteams 2");
+                    Server.ExecuteCommand("mp_warmuptime 30; mp_warmup_pausetimer 0; mp_roundtime 1.92; mp_roundtime_defuse 1.92; mp_roundtime_hostage 1.92");
+                    Server.ExecuteCommand("mp_autokick 1; mp_spawnprotectiontime 5; mp_td_dmgtokick 300; mp_td_dmgtowarn 200; mp_td_spawndmgthreshold 50");
+                    KickAllBotsProtectCSTV();
+                    isPractice = false;
+                }
+            }
+            catch (Exception e)
+            {
+                try { Log($"[Unload] Leaving the mode failed: {e.Message}"); } catch { }
+            }
         }
 
         // OnTick: re-send the center HTML panel EVERY tick so the native "WARMUP" HUD (from
@@ -777,7 +823,11 @@ namespace MatchZy
                         // here - remaining=0 makes the round perpetually "expired", so CS2 fires the
                         // running-out-of-time penalty and ends rounds every tick (score climbs, and the
                         // leak on unload is instant). 60 never reaches 0, so the round never times out.
-                        if (_fakeWarmupActive)
+                        // Rewriting it every tick forced a gamerules network update to every client 64 times a
+                        // second for the whole ready phase. Re-pin only once it has drifted half a second (the
+                        // timer still reads 1:00), i.e. about twice a second.
+                        if (_fakeWarmupActive &&
+                            (gr.RoundTime != 60 || Server.CurrentTime - gr.RoundStartTime >= 0.5f || Server.CurrentTime < gr.RoundStartTime))
                         {
                             gr.RoundStartTime = Server.CurrentTime;
                             gr.RoundTime = 60;
@@ -1252,8 +1302,7 @@ namespace MatchZy
                 PrintLocalizedToAll("matchzy.utility.matchlive");
                 PrintLocalizedToAll("matchzy.utility.matchlive");
                 PrintLocalizedToAll("matchzy.utility.matchlive");
-                PrintLocalizedToAll("matchzy.util.tachint");
-                PrintLocalizedToAll("matchzy.util.techhint");
+                PrintPauseHints();
 
                 // Re-announcing LIVE (unpause / resume): report the ACTUAL recording state rather than
                 // tv_enable, which only says GOTV exists on this server.
@@ -1283,6 +1332,7 @@ namespace MatchZy
 
             // Reset advanced stats for new match
             ResetAdvancedStats();
+            ResetSideScores();
 
             // Start auto-pause monitoring for competitive matches
             StartAutoPauseCheck();
@@ -1304,6 +1354,7 @@ namespace MatchZy
 
             // Reset advanced stats for new match
             ResetAdvancedStats();
+            ResetSideScores();
 
             // Start auto-pause monitoring for scrims
             StartAutoPauseCheck();
@@ -1326,6 +1377,7 @@ namespace MatchZy
 
             // Reset advanced stats for new match
             ResetAdvancedStats();
+            ResetSideScores();
 
             // Start auto-pause monitoring for hill mode
             StartAutoPauseCheck();
@@ -1452,8 +1504,7 @@ namespace MatchZy
             PrintLocalizedToAll("matchzy.util.live2");
             PrintLocalizedToAll("matchzy.util.live3");
 
-            PrintLocalizedToAll("matchzy.util.tachint");
-            PrintLocalizedToAll("matchzy.util.techhint");
+            PrintPauseHintsDelayed();
 
             // Only show OT notice for match mode (scrim/hill have OT disabled)
             if (!isPlayOutEnabled && !isPlayOutEnabled2)
@@ -1495,8 +1546,7 @@ namespace MatchZy
             PrintLocalizedToAll("matchzy.util.live2");
             PrintLocalizedToAll("matchzy.util.live3");
 
-            PrintLocalizedToAll("matchzy.util.tachint");
-            PrintLocalizedToAll("matchzy.util.techhint");
+            PrintPauseHintsDelayed();
 
             // "CSTV Recording..." is no longer printed here. tv_enable being 1 only means GOTV exists,
             // not that the demo survived the cfg's mp_restartgame - the announcement now comes from
@@ -1531,8 +1581,7 @@ namespace MatchZy
             PrintLocalizedToAll("matchzy.util.hilllive2");
             PrintLocalizedToAll("matchzy.util.hilllive3");
 
-            PrintLocalizedToAll("matchzy.util.tachint");
-            PrintLocalizedToAll("matchzy.util.techhint");
+            PrintPauseHintsDelayed();
 
             // "CSTV Recording..." is no longer printed here. tv_enable being 1 only means GOTV exists,
             // not that the demo survived the cfg's mp_restartgame - the announcement now comes from
@@ -1665,11 +1714,12 @@ namespace MatchZy
                     });
                 }
 
-                if (matchStarted && isDemoRecording)
-                {
-                    Server.ExecuteCommand($"tv_stoprecord");
-                    isDemoRecording = false;
-                }
+                if (matchStarted)
+                    StopDemoAndAnnounce();
+                // A deferred demo start (going-live fallback or a GOTV restart) must not record
+                // after the match was reset.
+                demoStartPending = false;
+                cstvRestartPending = false;
                 // Reset match data
                 matchStarted = false;
                 matchStartInProgress = false;
@@ -1841,8 +1891,11 @@ namespace MatchZy
 
                     int userId = player.UserId.Value;
 
-                    // Match/whitelist validation
-                    if (isMatchSetup || matchModeOnly)
+                    // Roster validation. Only with a loaded match: without one there is no roster,
+                    // GetPlayerTeam returns None for everyone, and matchModeOnly used to drop every
+                    // player still on the server after a series end out of playerData (a game
+                    // started there then recorded no player stats at all).
+                    if (isMatchSetup)
                     {
                         CsTeam team = GetPlayerTeam(player);
                         if (team == CsTeam.None)
@@ -2059,11 +2112,7 @@ namespace MatchZy
 
             // Validated named map (or a workshop id) - safe to tear down and change now.
             // Stop demo recording before map change to prevent GOTV crash.
-            if (isDemoRecording)
-            {
-                Server.ExecuteCommand("tv_stoprecord");
-                isDemoRecording = false;
-            }
+            StopDemoAndAnnounce();
             KickAllBotsProtectCSTV();
 
             PrintLocalizedToAll("matchzy.utility.changingmap", targetMap);
@@ -2639,8 +2688,8 @@ namespace MatchZy
                 MatchId = liveMatchId,
                 MapNumber = currentMapNumber,
                 Winner = BuildWinner(t1score, t2score),
-                StatsTeam1 = new MatchZyStatsTeam(matchzyTeam1.id, matchzyTeam1.teamName, team1SeriesScore, t1score, 0, 0, playerStatsListTeam1),
-                StatsTeam2 = new MatchZyStatsTeam(matchzyTeam2.id, matchzyTeam2.teamName, team2SeriesScore, t2score, 0, 0, playerStatsListTeam2),
+                StatsTeam1 = BuildStatsTeam(matchzyTeam1, t1score, playerStatsListTeam1),
+                StatsTeam2 = BuildStatsTeam(matchzyTeam2, t2score, playerStatsListTeam2),
                 DemoFilename = demoFilename,
             };
 
@@ -2656,7 +2705,9 @@ namespace MatchZy
             {
                 // Write this round's player stats before exporting the CSV. The round_end task does
                 // the same upsert, but it runs independently and could still be in flight here.
-                await database.UpdatePlayerStatsAsync(matchId, currentMapNumber, playerStatsDictionary.ToDictionary(kvp => (long)kvp.Key, kvp => kvp.Value));
+                // Nothing collected (GetPlayerStatsDict already said why): skip the empty write.
+                if (playerStatsDictionary.Count > 0)
+                    await database.UpdatePlayerStatsAsync(matchId, currentMapNumber, playerStatsDictionary.ToDictionary(kvp => (long)kvp.Key, kvp => kvp.Value));
                 await database.SetMatchEndDataAsync(matchId, currentMapNumber, winnerName, t1score, t2score, seriesOver ? (seriesWinnerName ?? "Draw") : null, team1SeriesScore, team2SeriesScore);
                 await database.WritePlayerStatsToCsvAsync(statsPath, matchId, currentMapNumber);
 
@@ -2764,11 +2815,7 @@ namespace MatchZy
                 () =>
                 {
                     // Ensure demo is stopped before map change to prevent GOTV flush crash
-                    if (isDemoRecording)
-                    {
-                        Server.ExecuteCommand("tv_stoprecord");
-                        isDemoRecording = false;
-                    }
+                    StopDemoAndAnnounce();
 
                     // Prevent engine from racing us with its own map change/restart
                     Server.ExecuteCommand("mp_match_end_changelevel 0");
@@ -2881,8 +2928,6 @@ namespace MatchZy
 
         public void HandlePostRoundStartEvent(EventRoundStart @event)
         {
-            if (isDryRun)
-                RandomizeSpawns();
             if (!matchStarted)
             {
                 // (Re)assert the warmup timer pause here: mp_warmup_start defers the warmup
@@ -2904,22 +2949,6 @@ namespace MatchZy
                 return;
             }
 
-            // Per-stage wall clock for the live path. The whole handler runs on the game thread
-            // inside the round_start tick, so anything slow here is a server stall right as
-            // freezetime ends. Stages over RoundStartStageLogMs are named in the log line; the
-            // line itself only appears when the handler as a whole crossed that budget.
-            long stageStart = Stopwatch.GetTimestamp();
-            long handlerStart = stageStart;
-            StringBuilder? slowStages = null;
-            void Stage(string name)
-            {
-                long now = Stopwatch.GetTimestamp();
-                double ms = (now - stageStart) * 1000.0 / Stopwatch.Frequency;
-                stageStart = now;
-                if (ms >= RoundStartStageLogMs)
-                    (slowStages ??= new StringBuilder()).Append(name).Append('=').Append(ms.ToString("F1")).Append("ms ");
-            }
-
             // Re-apply clinch/overtime convars on round 1 so trophy/clinch UI refreshes
             // immediately rather than waiting for round 2. Runs for ALL match types
             // (scrim/hill/match) - match mode needs it so trophy reappears when
@@ -2939,35 +2968,28 @@ namespace MatchZy
                     Log($"[HandlePostRoundStartEvent playout-reapply] {ex.Message}");
                 }
             }
-            Stage("playout");
 
             playerHasTakenDamage = false;
 
             // Demo start: the going-live cfgs run mp_restartgame after their exec and that restart
             // clobbers a tv_record issued before it, so the start is deferred to here - the first live
-            // round_start once demoStartArmTime has passed. Without the arm-time floor the pending flag
+            // round_start after the restart landed (TryStartPendingDemo), or once demoStartArmTime
+            // has passed when no restart was seen. Without the arm-time floor the pending flag
             // was consumed by the mp_warmup_end round_start that fires just BEFORE the restart, which is
             // exactly the case the deferral was meant to avoid. Only fires once (StartDemoRecording
             // clears the flag).
-            if (demoStartPending && isMatchLive && Server.CurrentTime >= demoStartArmTime)
-                StartDemoRecording();
-            Stage("demo");
+            TryStartPendingDemo();
 
             HandleCoaches();
-            Stage("coaches");
             CreateMatchZyRoundDataBackup();
             // The restored round has started, so the restore is done. Clearing the flag only at the
             // next round end (as before) made a restore of a half's last round skip the halftime
             // side swap, which inverted team1/team2 scores and stats for the whole second half.
             isRoundRestoring = false;
-            Stage("backup");
             InitPlayerDamageInfo();
-            Stage("dmginfo");
             UpdateHostname();
-            Stage("hostname");
             // Set team names immediately
             SetTeamNames();
-            Stage("teamnames");
             // Also set with a delay to handle engine halftime processing that may override our names
             AddTimer(
                 0.5f,
@@ -2981,7 +3003,6 @@ namespace MatchZy
             OnAdvancedStatsRoundStart();
             ResetLiveRoundKillCounters();
             ClearLiveRoundPlayStart();
-            Stage("advstats");
 
             // ── Live scorebot: round_start event ──
             liveRoundNumber = GetRoundNumer();
@@ -2997,17 +3018,9 @@ namespace MatchZy
                 };
                 PublishEvent(roundStartEvent);
             }
-            Stage("remotelog");
 
-            double totalMs = (Stopwatch.GetTimestamp() - handlerStart) * 1000.0 / Stopwatch.Frequency;
-            if (totalMs >= RoundStartStageLogMs)
-                Log($"[round_start perf] {totalMs:F1} ms on the game thread; stages over {RoundStartStageLogMs:F0} ms: {(slowStages?.ToString() ?? "none (cost spread across stages)")}");
         }
 
-        // Budget above which a round_start stage is named in the perf log line. A 64-tick frame is
-        // 15.6 ms and the slow-frame profiler flags anything over 31.2 ms, so 5 ms is the point where
-        // one stage on its own starts to eat a meaningful slice of the tick.
-        private const double RoundStartStageLogMs = 5.0;
 
         private void HandlePostRoundEndEvent(EventRoundEnd @event)
         {
@@ -3025,6 +3038,9 @@ namespace MatchZy
                     // Update advanced stats for this round
                     CsTeam winnerTeam = (CsTeam)@event.Winner;
                     OnAdvancedStatsRoundEnd(winnerTeam);
+                    // The round end a backup load causes is not a played round.
+                    if (!isRoundRestoring)
+                        CountSideScore(@event.Winner, t1score, t2score);
 
                     (Dictionary<ulong, Dictionary<string, object>> playerStatsDictionary, List<StatsPlayer> playerStatsListTeam1, List<StatsPlayer> playerStatsListTeam2) = GetPlayerStatsDict();
 
@@ -3052,17 +3068,21 @@ namespace MatchZy
                         Reason = @event.Reason,
                         RoundTime = LiveRoundTimeMs(),
                         Winner = winner,
-                        StatsTeam1 = new MatchZyStatsTeam(matchzyTeam1.id, matchzyTeam1.teamName, matchzyTeam1.seriesScore, t1score, 0, 0, playerStatsListTeam1),
-                        StatsTeam2 = new MatchZyStatsTeam(matchzyTeam2.id, matchzyTeam2.teamName, matchzyTeam2.seriesScore, t2score, 0, 0, playerStatsListTeam2),
+                        StatsTeam1 = BuildStatsTeam(matchzyTeam1, t1score, playerStatsListTeam1),
+                        StatsTeam2 = BuildStatsTeam(matchzyTeam2, t2score, playerStatsListTeam2),
                     };
 
                     // Queued now, on the game thread, so it is sent in order with the other events.
                     PublishEvent(roundEndEvent);
-                    Task.Run(async () =>
+                    // Nothing collected (GetPlayerStatsDict already said why): skip the empty write.
+                    if (playerStatsDictionary.Count > 0)
                     {
-                        var playerStatsDictInt = playerStatsDictionary.ToDictionary(kvp => (long)kvp.Key, kvp => kvp.Value);
-                        await database.UpdatePlayerStatsAsync(matchId, currentMapNumber, playerStatsDictInt);
-                    });
+                        Task.Run(async () =>
+                        {
+                            var playerStatsDictInt = playerStatsDictionary.ToDictionary(kvp => (long)kvp.Key, kvp => kvp.Value);
+                            await database.UpdatePlayerStatsAsync(matchId, currentMapNumber, playerStatsDictInt);
+                        });
+                    }
 
                     string round = GetRoundNumer().ToString("D2");
                     lastBackupFileName = $"matchzy_{liveMatchId}_{matchConfig.CurrentMapNumber}_round{round}.txt";
@@ -3428,7 +3448,6 @@ namespace MatchZy
             if (matchStarted || (!isPractice && !isSleep && !isDryRun))
                 return;
 
-            // Explicitly set isDryRun to false to prevent RandomizeSpawns from being called
             isDryRun = false;
 
             ResetAllPlayerPracticeSettings(enteringPractice: false);
@@ -3447,7 +3466,6 @@ namespace MatchZy
             if (matchStarted || (!isPractice && !isSleep && !isDryRun))
                 return;
 
-            // Explicitly set isDryRun to false to prevent RandomizeSpawns from being called
             isDryRun = false;
 
             ResetAllPlayerPracticeSettings(enteringPractice: false);
@@ -3466,7 +3484,6 @@ namespace MatchZy
             if (matchStarted || (!isSleep && !isDryRun && !isPractice))
                 return;
 
-            // Explicitly set isDryRun to false to prevent RandomizeSpawns from being called
             isDryRun = false;
 
             ResetAllPlayerPracticeSettings(enteringPractice: false);
@@ -3561,18 +3578,14 @@ namespace MatchZy
         {
             int gameMode = GetGameMode();
 
-            // Backup
-            var cfgPath = liveCfgPath;
-            var absolutePath = Path.Join(Server.GameDirectory + "/csgo/cfg", liveCfgPath);
-
-            if (gameMode == 2)
-            {
-                absolutePath = Path.Join(Server.GameDirectory + "/csgo/cfg", liveWingmanCfgPath);
-                cfgPath = liveWingmanCfgPath;
-            }
+            // live.cfg, live_wingman.cfg, live_rush.cfg or live_1v1.cfg
+            var cfgPath = LiveCfgPathForMode();
+            var absolutePath = Path.Join(Server.GameDirectory + "/csgo/cfg", cfgPath);
 
             // We try to find the CFG in the cfg folder, if it is not there then we execute the default CFG.
-            if (File.Exists(absolutePath))
+            // Rush and 1v1 have no inline fallback below: ExecModeCfg applies their built-in defaults
+            // from the plugin DLL even when the file on disk is missing.
+            if (File.Exists(absolutePath) || (cfgPath != liveCfgPath && cfgPath != liveWingmanCfgPath))
             {
                 // ExecModeCfg applies the match config cvars after the mode cfg and before the
                 // restart, so round 1 already uses them (start money, freeze time, ...).
@@ -3642,8 +3655,8 @@ namespace MatchZy
                 string L(string key, params object[] a) => Localizer.ForPlayer(player!, key, a);
                 player!.PrintToChat($"{chatPrefix} {L("matchzy.help.practice.title")}");
                 player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.spawns"), ".spawn .ctspawn .tspawn .bestspawn .worstspawn"));
-                player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.bots"), ".bot .cbot .boost .nobot .clearbots"));
-                player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.positions"), ".sbp .lbp .listbotpos .delbotpos .showbotpos .botjiggle"));
+                player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.bots"), ".bot .cbot .boost .nobot .clearbots .botshoot .botrespawn .startround .rec .replay .saverec .loadrec"));
+                player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.positions"), ".sbp .lbp .botspawn .placebot .showbotspawn .botjiggle"));
                 player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.nades"), ".savenade .loadnade .listnades .rethrow .throwindex"));
                 player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.utility"), ".clear .ff .god .traj .impacts .break .cam .timer"));
                 player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.teams"), ".ct .t .spec"));
@@ -3656,9 +3669,9 @@ namespace MatchZy
                 // Console output (unchanged - detailed practice docs)
                 player.PrintToConsole("=== Practice Mode Command List ===\n");
                 player.PrintToConsole("\n【Spawn Point Operations】\n" + ".spawn <number>  Teleport to the specified competitive spawn point of your team\n" + ".ctspawn <number>  Teleport to the specified CT competitive spawn point (alias: .cts)\n" + ".tspawn <number>  Teleport to the specified T competitive spawn point (alias: .ts)\n" + ".bestspawn  Teleport to the nearest team spawn point\n" + ".worstspawn  Teleport to the farthest team spawn point\n" + ".bestctspawn  Teleport to the nearest CT spawn point\n" + ".worstctspawn  Teleport to the farthest CT spawn point\n" + ".besttspawn  Teleport to the nearest T spawn point\n" + ".worsttspawn  Teleport to the farthest T spawn point\n" + ".showspawns  Highlight all competitive spawn points\n" + ".hidespawns  Hide highlighted spawn points\n");
-                player.PrintToConsole("\n【Bot Control】\n" + ".bot  Add a bot at the player's current position\n" + ".crouchbot  Add a crouching bot at the player's current position (alias: .cbot)\n" + ".boost  Add a bot at the current position and boost the player on top of it\n" + ".crouchboost  Add a crouching bot and boost the player on top of it\n" + ".nobot  Remove the bot under the crosshair\n" + ".clearbots  Remove all bots\n");
-                player.PrintToConsole("\n【Bot Positions】\n" + ".savebotpos <name>  Save your current spot as a named bot placement for this map (alias: .sbp)\n" + ".loadbotpos <name>  Spawn a bot at that saved spot; no name spawns all saved for this map (alias: .lbp)\n" + ".listbotpos  List saved bot placement names on this map (alias: .listbp)\n" + ".delbotpos <name>  Delete a saved bot placement (alias: .dbp)\n" + ".showbotpos  Toggle in-world markers at every saved bot placement (alias: .showbp)\n" + ".botjiggle  Toggle all practice bots strafing side-to-side (matchzy_botjiggle_range tunes width)\n");
-                player.PrintToConsole("\n【Teams & Modes】\n" + ".ct, .t, .spec  Switch the player to the requested team\n" + ".fas /.watchme  Force all players into spectator mode except the one issuing the command\n" + ".dryrun  Enable Dryrun Mode (alias: .dry)\n" + ".god  Enable God Mode\n");
+                player.PrintToConsole("\n【Bot Control】\n" + ".bot  Add a bot at the player's current position\n" + ".crouchbot  Add a crouching bot at the player's current position (alias: .cbot)\n" + ".boost  Add a bot at the current position and boost the player on top of it\n" + ".crouchboost  Add a crouching bot and boost the player on top of it\n" + ".nobot  Remove the bot under the crosshair\n" + ".clearbots  Remove all bots\n" + ".kicklastbot  Remove the most recently added bot\n" + ".botshoot  Toggle bots shooting back (they stay on their spot)\n" + ".botreactiontime <0-1000>  Delay in ms before a bot fires at you (default 500)\n" + ".botrespawn  Toggle bots respawning after death\n" + ".botlifereg  Toggle bot health regeneration\n" + ".startround  New round: random spawns, bots reset, 5 second freeze\n" + ".rec  Start/stop recording your movement path\n" + ".replay [t|ct] [loop]  A bot replays your last recorded path (.replay stop ends it)\n" + ".saverec <name>  Save your last path on this map\n" + ".loadrec <name>  Load a saved path for .replay\n" + ".listrec  List the saved paths on this map\n" + ".delrec <name>  Delete a saved path\n" + ".showrec  Show/hide your path and throw spots on the map (only you see it)\n");
+                player.PrintToConsole("\n【Bot Positions】\n" + ".savebotpos <name>  Save your current spot as a named bot placement for this map (alias: .sbp)\n" + ".loadbotpos <name>  Spawn a bot at that saved spot; no name spawns all saved for this map (alias: .lbp)\n" + ".listbotpos  List saved bot placement names on this map (alias: .listbp)\n" + ".delbotpos <name>  Delete a saved bot placement (alias: .dbp)\n" + ".showbotpos  Toggle in-world markers at every saved bot placement (alias: .showbp)\n" + ".botjiggle  Toggle all practice bots strafing side-to-side (matchzy_botjiggle_range tunes width)\n" + ".botjigglerange <units>  Set the botjiggle width\n" + ".botjigglerandom  Toggle: only a random half of the bots jiggle\n" + ".botspawn <name>  Add your current spot to a named bot spawn pool\n" + ".placebot <number> <name>  Replace the bots with bots on random spots of a pool\n" + ".placenewbot <number> <name>  Add bots on random spots of a pool\n" + ".listbotspawn  List the bot spawn pools on this map\n" + ".delbotspawn <name>  Delete a bot spawn pool\n" + ".showbotspawn  Toggle green boxes on saved bot spawn spots (stand in one + E deletes it)\n");
+                player.PrintToConsole("\n【Teams & Modes】\n" + ".ct, .t, .spec  Switch the player to the requested team\n" + ".fas /.watchme  Force all players into spectator mode except the one issuing the command\n" + ".dryrun  Enable Dryrun Mode (alias: .dry)\n" + ".god  Enable God Mode\n" + ".liferegon  Toggle your own health regeneration\n" + ".allliferegon <true|false>  Health regeneration for every player\n" + ".slp / .tlp / .dlp  Save / teleport to / delete your saved location (after a death you respawn there)\n");
                 player.PrintToConsole("\n【Grenade Management】\n" + ".savenade <n> <optional description>  Save a grenade crosshair (alias: .sn)\n" + ".loadnade <n>  Load a grenade crosshair (alias: .ln)\n" + ".deletenade <n>  Delete a saved grenade crosshair from file (alias: .dn)\n" + ".importnade <code>  Save a crosshair using a code printed in chat or from savednades.cfg\n" + ".listnades <optional filter>  List all saved crosshairs, filter optional (alias: .lin)\n");
                 player.PrintToConsole("\n【Grenade Throwing】\n" + ".rethrow  Re-throw your last thrown grenade (alias: .rt)\n" + ".last  Teleport to where you threw your last grenade\n" + ".back <number>  Teleport to a specific grenade history position\n" + ".delay <delay_in_seconds>  Set delay on last grenade (used with .rethrow or .throwindex)\n" + ".throwindex <index> <optional index> <optional index>  Throw grenade(s) from specific history index(es)\n" + ".lastindex  Print the index of your last thrown grenade\n" + ".rethrowsmoke  Throw your last smoke grenade\n" + ".rethrownade  Throw your last HE grenade\n" + ".rethrowflash  Throw your last flashbang\n" + ".rethrowmolotov  Throw your last molotov/incendiary\n" + ".rethrowdecoy  Throw your last decoy\n");
                 player.PrintToConsole("\n【Utilities】\n" + ".clear  Clear all active smokes, molotovs, and incendiaries\n" + ".fastforward  Fast forward server time by 10 seconds (alias: .ff)\n" + ".noflash  Toggle flash immunity (players without noflash still get blinded, alias: .noblind)\n" + ".timer  Start a timer immediately; use .timer again to stop and show duration\n" + ".break  Break all breakable entities (windows, wooden doors, vents, etc.)\n" + ".nobreak  Restore all breakable entities ");
@@ -3697,7 +3710,7 @@ namespace MatchZy
                 player.PrintToChat(H("matchzy.help.mode", ".prac", H("matchzy.help.mode.prac")));
                 player.PrintToChat(H("matchzy.help.mode", ".dry", H("matchzy.help.mode.dry")));
                 if (isAdmin)
-                    player.PrintToChat(H("matchzy.help.line", H("matchzy.help.label.available"), ".start, .knife, .playout, .coach <side>, .endmatch"));
+                    player.PrintToChat(H("matchzy.help.adminline", H("matchzy.help.label.admin"), ".start .knife .endmatch"));
                 return;
             }
 
@@ -3717,10 +3730,19 @@ namespace MatchZy
 
                 player!.PrintToChat($"{chatPrefix} {H(isScrim ? "matchzy.help.title.scrim" : "matchzy.help.title.match")}");
                 player.PrintToChat(H("matchzy.help.status", knife, demorec, playout));
-                string cmds = isScrim
-                    ? ".start, .playout, .coach <side>, .endmatch"
-                    : ".start, .knife, .playout, .coach <side>, .endmatch";
-                player.PrintToChat(H("matchzy.help.line", H("matchzy.help.label.available"), cmds));
+                player.PrintToChat(H("matchzy.help.line", H("matchzy.help.label.ready"), ".ready .unready .coach <side>"));
+                // No timeout numbers here: the live cfg has not run yet, so mp_team_timeout_* still
+                // holds the warmup values. The real numbers are printed when the match goes live.
+                player.PrintToChat(H("matchzy.help.line", H("matchzy.help.label.pauselive"), ".tac .tech"));
+                if (isAdmin)
+                {
+                    // .scrim and .playout are the same command (switch to scrim mode); name both so
+                    // neither looks missing. In scrim, .match switches back.
+                    string adminCmds = isScrim
+                        ? ".start .match .endmatch"
+                        : ".start .knife .scrim / .playout .endmatch";
+                    player.PrintToChat(H("matchzy.help.adminline", H("matchzy.help.label.admin"), adminCmds));
+                }
                 return;
             }
 
@@ -3750,7 +3772,16 @@ namespace MatchZy
             if (matchStarted && isMatchLive)
             {
                 player!.PrintToChat($"{chatPrefix} {H("matchzy.help.live.title")}");
-                player.PrintToChat(H("matchzy.help.line", H("matchzy.help.label.pause"), ".pause .tac .tech"));
+                // Show the team's own tactical timeouts left (engine counter: includes overtime
+                // additions and restored backups).
+                string tac = ".tac";
+                var helpRules = GetGameRules();
+                if (helpRules != null && (player!.Team == CsTeam.Terrorist || player.Team == CsTeam.CounterTerrorist))
+                {
+                    int tacLeft = player.Team == CsTeam.Terrorist ? helpRules.TerroristTimeOuts : helpRules.CTTimeOuts;
+                    tac = H("matchzy.help.tacleft", tacLeft);
+                }
+                player!.PrintToChat(H("matchzy.help.line", H("matchzy.help.label.pause"), $".pause {tac} .tech"));
                 if (isStopCommandAvailable)
                 {
                     player.PrintToChat(H("matchzy.help.line", H("matchzy.help.label.round"), H("matchzy.help.live.round")));
@@ -4379,6 +4410,9 @@ namespace MatchZy
             }
         }
 
+        // Last "no player stats" reason logged, so it is logged once per match, map and reason.
+        private string lastNoStatsLogKey = "";
+
         public (Dictionary<ulong, Dictionary<string, object>>, List<StatsPlayer>, List<StatsPlayer>) GetPlayerStatsDict()
         {
             Dictionary<ulong, Dictionary<string, object>> playerStatsDictionary = new Dictionary<ulong, Dictionary<string, object>>();
@@ -4528,15 +4562,28 @@ namespace MatchZy
             // normal, so the database looked healthy while every player row was missing. Name the
             // likely cause instead - an empty playerData means GetPlayerTeam rejected every
             // player, which is a match-config / side-mapping problem, not a database one.
+            // Said once per match and map, not every round: the cause does not change between rounds.
             if (playerStatsDictionary.Count == 0 && isMatchLive)
             {
+                // Coaches never get a stats row (see StatsPlayers), so a match with only a coach as
+                // human (bots playing) is the normal "nothing to record" case, not a broken roster.
+                int coaches = playerData.Values.Count(p => p != null && p.IsValid && IsMatchCoach(p));
+                int humans = playerData.Count - coaches;
                 int botsInPlay = Utilities.GetPlayers().Count(p => p is { IsValid: true, IsBot: true, IsHLTV: false } && p.TeamNum is 2 or 3);
-                if (playerData.Count == 0 && botsInPlay > 0 && !statsIncludeBots.Value && !HasBotTeam())
-                    Log($"[GetPlayerStatsDict] No human players in play, only {botsInPlay} bot(s), so no player stats are recorded. Set matchzy_stats_include_bots true to record bots.");
+                string message;
+                // Only bots and/or coaches: nothing to record is the expected outcome, not worth a line.
+                if (humans == 0 && (coaches > 0 || (botsInPlay > 0 && !statsIncludeBots.Value && !HasBotTeam())))
+                    message = "";
                 else if (playerData.Count == 0)
-                    Log("[GetPlayerStatsDict] WARNING: playerData is empty during a live round, so no player stats will be recorded. Every connected player resolved to CsTeam.None - check the team rosters in the match config and the CT/T side mapping.");
+                    message = "[GetPlayerStatsDict] WARNING: playerData is empty during a live round, so no player stats will be recorded. Every connected player resolved to CsTeam.None - check the team rosters in the match config and the CT/T side mapping.";
                 else
-                    Log($"[GetPlayerStatsDict] WARNING: no player stats collected from {playerData.Count} playerData entries - none were valid or had ActionTrackingServices.");
+                    message = $"[GetPlayerStatsDict] WARNING: no player stats collected from {humans} player(s) in playerData - none were valid or had ActionTrackingServices.";
+                string key = $"{liveMatchId}_{matchConfig.CurrentMapNumber}_{message}";
+                if (message.Length > 0 && key != lastNoStatsLogKey)
+                {
+                    lastNoStatsLogKey = key;
+                    Log(message);
+                }
             }
 
             return (playerStatsDictionary, playerStatsListTeam1, playerStatsListTeam2);
@@ -4704,15 +4751,78 @@ namespace MatchZy
             return -1;
         }
 
+        // game_mode values of the classic game type (game_type 0), from Valve's gamemodes.txt.
+        public const int GameModeCompetitive = 1;
+        public const int GameModeWingman = 2;
+        public const int GameModeRush = 6;
+
+        public static readonly string[] MatchGameModes = { "competitive", "wingman", "rush", "1v1" };
+
+        // The loaded match's mode: its "game_mode", else "wingman" when "wingman" is set (configs and
+        // backups from before "game_mode" existed), else competitive.
+        public string MatchGameMode()
+        {
+            if (!string.IsNullOrEmpty(matchConfig.GameMode))
+                return matchConfig.GameMode;
+            return matchConfig.Wingman ? "wingman" : "competitive";
+        }
+
+        // 1v1 has no game mode of its own in CS2: it runs in competitive (any map) with live_1v1.cfg.
+        public static int GameModeValue(string mode) => mode switch
+        {
+            "wingman" => GameModeWingman,
+            "rush" => GameModeRush,
+            _ => GameModeCompetitive,
+        };
+
+        // Players per side when the match config does not set players_per_team.
+        public static int DefaultPlayersPerTeam(string mode) => mode switch
+        {
+            "1v1" => 1,
+            "wingman" => 2,
+            "rush" => 3,
+            _ => 5,
+        };
+
+        // Rush maps: Valve's rush_001 and other rush_ maps, plus aim_rush. Workshop specs
+        // ("workshop/<id>/<name>") are matched on the map name.
+        public static bool IsRushMap(string? map)
+        {
+            if (string.IsNullOrEmpty(map))
+                return false;
+            string name = map.Trim().Replace('\\', '/');
+            int slash = name.LastIndexOf('/');
+            if (slash >= 0)
+                name = name.Substring(slash + 1);
+            return name.StartsWith("rush_", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("aim_rush", StringComparison.OrdinalIgnoreCase);
+        }
+
+        // The live cfg for the mode being played: live_1v1.cfg for a 1v1 match, then by the server's
+        // game_mode (a pug runs in whatever mode the server is in). Without a mode from a match
+        // config, a rush map also gets live_rush.cfg.
+        public string LiveCfgPathForMode()
+        {
+            if (MatchGameMode() == "1v1")
+                return live1v1CfgPath;
+            int gameMode = GetGameMode();
+            bool modeFromConfig = !string.IsNullOrEmpty(matchConfig.GameMode) || matchConfig.Wingman;
+            if (gameMode == GameModeRush || (!modeFromConfig && gameMode != GameModeWingman && IsRushMap(Server.MapName)))
+                return liveRushCfgPath;
+            if (gameMode == GameModeWingman)
+                return liveWingmanCfgPath;
+            return liveCfgPath;
+        }
+
         public void SetCorrectGameMode()
         {
-            ConVar.Find("game_mode")!.SetValue(matchConfig.Wingman ? 2 : 1);
+            ConVar.Find("game_mode")!.SetValue(GameModeValue(MatchGameMode()));
             ConVar.Find("game_type")!.SetValue(0); // Classic GameType
         }
 
-        public bool IsMapReloadRequiredForGameMode(bool wingman)
+        public bool IsMapReloadRequiredForGameMode()
         {
-            int expectedMode = wingman ? 2 : 1;
+            int expectedMode = GameModeValue(MatchGameMode());
             if (GetGameMode() != expectedMode || GetGameType() != 0)
             {
                 return true;
@@ -4723,7 +4833,7 @@ namespace MatchZy
 
         public bool IsWingmanMode()
         {
-            if (GetGameMode() == 2 && GetGameType() == 0)
+            if (GetGameMode() == GameModeWingman && GetGameType() == 0)
                 return true;
             return false;
         }
@@ -5220,8 +5330,38 @@ namespace MatchZy
 
         // Kicks on the next frame, off the event/command dispatch stack. Re-validates across
         // the frame boundary: the player may already have disconnected.
+        /// <summary>
+        /// matchzy_kick_when_no_match_loaded: after a series ends (also on a forfeit) nobody may stay
+        /// on the server without a loaded match, as in Get5. The connect kick alone left everyone
+        /// who was already connected free to ready up into an unloaded game whose events and stats
+        /// no panel ever received. Admins stay, like on connect. Run after ResetMatch, so a match
+        /// the panel loaded during the reset delay keeps its players.
+        /// </summary>
+        private void KickPlayersWithNoMatch()
+        {
+            if (!matchModeOnly || isMatchSetup)
+                return;
+            // Not IsHumanPlayerValid: a spectator has no pawn and must go as well.
+            foreach (var player in Utilities.GetPlayers())
+            {
+                if (player is not { IsValid: true, IsBot: false, IsHLTV: false, UserId: int userId }
+                    || player.Connected != PlayerConnectedState.Connected
+                    || IsPlayerAdmin(player, "", "@css/config"))
+                    continue;
+                Log($"[KickPlayersWithNoMatch] Kicking {player.PlayerName} ({player.SteamID}): the series is over and no match is loaded.");
+                PrintLocalizedToAll("matchzy.cmd.kicknotinmatch", player.PlayerName);
+                Server.NextFrame(() => Server.ExecuteCommand($"kickid {userId}"));
+            }
+        }
+
+        // Userids kicked by the connect gate (whitelist / not in the match). They never got a
+        // player_connect, so their disconnect is not sent either. Removed on disconnect.
+        private readonly HashSet<int> gateKickedUserIds = new();
+
         public void KickPlayerDeferred(CCSPlayerController player)
         {
+            if (player.UserId.HasValue)
+                gateKickedUserIds.Add(player.UserId.Value);
             Server.NextFrame(() =>
             {
                 if (!IsPlayerValid(player) || !player.UserId.HasValue)
@@ -5434,49 +5574,6 @@ namespace MatchZy
             {
                 player.PlayerPawn.Value!.WeaponServices!.ActiveWeapon.Raw = matchedWeapon.Raw;
                 player.DropActiveWeapon();
-            }
-        }
-
-        // Dryrun-only: scatters players across all enabled spawns each dryrun round. Live
-        // matches never call this (the matchzy_random_spawns convar and the 0.8.65 coach
-        // auto-scatter were removed in 0.8.67 - competitive rounds always use engine spawns
-        // plus the coach reseat in EnforceCompetitiveSpawns).
-        public void RandomizeSpawns()
-        {
-            // Build per-team pools from ALL enabled spawn entities (GetTopCompetitiveSpawns with a
-            // large cap), NOT the min-priority spawnsData set. spawnsData only holds the lowest-priority
-            // spawns (e.g. Dust2 T = 5 of 10), so randomizing over it still reused the same 5 - the
-            // "spawns are always the same" complaint. Fall back to spawnsData if the live scan fails.
-            Dictionary<byte, List<Position>> teamSpawns = new();
-            foreach (byte side in new[] { (byte)CsTeam.CounterTerrorist, (byte)CsTeam.Terrorist })
-            {
-                List<Position> pool = GetTopCompetitiveSpawns(side, 32);
-                if (pool.Count == 0 && spawnsData.TryGetValue(side, out List<Position>? fallback))
-                    pool = fallback.Select(p => new Position(p)).ToList();
-                teamSpawns[side] = pool;
-            }
-
-
-            // Exclude coaches: they are placed at their own viewing spot by the coach system and
-            // must NOT be teleported onto a competitive spawn (that both mis-seats the coach and eats
-            // a spawn a real player needs). So a CT with 5 players + 1 coach still shuffles only the 5.
-            HashSet<CCSPlayerController> coaches = GetAllCoaches();
-            Random random = new();
-            int moved = 0, skipped = 0;
-            foreach (var player in Utilities.GetPlayers())
-            {
-                if (!IsPlayerValid(player) || coaches.Contains(player))
-                    continue;
-                if (!teamSpawns.TryGetValue(player.TeamNum, out List<Position>? pool) || pool.Count == 0)
-                {
-                    skipped++;
-                    continue;
-                }
-                int randomIndex = random.Next(pool.Count);
-                Position spawnPosition = pool[randomIndex];
-                pool.RemoveAt(randomIndex); // claim so no two players share a spawn
-                spawnPosition.Teleport(player);
-                moved++;
             }
         }
     }

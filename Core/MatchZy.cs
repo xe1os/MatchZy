@@ -16,7 +16,7 @@ namespace MatchZy
     public partial class MatchZy : BasePlugin
     {
         public override string ModuleName => "MatchZy";
-        public override string ModuleVersion => "1.0.8";
+        public override string ModuleVersion => "1.0.9";
         public override string ModuleAuthor => "Miksen/mrc4tt (based on MatchZy by WD-)";
         public override string ModuleDescription => "A plugin for running and managing CS2 practice/pugs/scrims/matches!";
         public string chatPrefix = $"{ChatColors.Green}[MatchZy]{ChatColors.Default}";
@@ -320,7 +320,22 @@ namespace MatchZy
                 }
             });
             // Pre-pay the first live round_start's serializer/JIT costs off the game thread.
-            WarmRoundStartPaths();
+            //
+            // On a hot reload (css_plugins reload, players on the server) config.cfg is exec'd only once
+            // its matchzy_* / get5_* handlers are compiled: queued right away, the exec raced the
+            // background JIT and the game thread compiled them itself, one ~130 ms "Input Handling"
+            // frame. The 0.5 s timer caps the wait if the warm-up is slow; AutoStart reads the cfg
+            // values at 1.0 s, so the exec still lands first. A cold load keeps the immediate exec:
+            // NextFrame and timers do not run while an empty server hibernates, which would hold the
+            // whole config back until the first player joins.
+            string? pendingConfigExec = null;
+            int configExecDone = 0;
+            void ExecConfigOnce()
+            {
+                if (pendingConfigExec != null && Interlocked.Exchange(ref configExecDone, 1) == 0)
+                    Server.ExecuteCommand(pendingConfigExec);
+            }
+            WarmRoundStartPaths(() => { if (hotReload) Server.NextFrame(ExecConfigOnce); });
             // Wrap startup config/ConVar/AutoStart init in try/catch. A throw anywhere
             // here (missing/locked cfg file, transient I/O error, null ConVar) would
             // otherwise propagate out of Load() and make CSS abort the plugin load -
@@ -332,8 +347,9 @@ namespace MatchZy
 
                 //Loads CFGs from ConfigFiles.cs (Source Code)
                 var configManager = new ConfigManager();
-                configManager.InitializeConfigs();
+                configManager.InitializeConfigs(ConfigManager.CollectRegisteredNames(this));
                 mapRotationList = configManager.LoadMapRotation();
+                EnsureLevelLoadBotQuota();
 
                 // Load MatchZy admins (admins.json). Was never called before, so
                 // loadedAdmins stayed empty and IsPlayerAdmin ignored the file.
@@ -349,7 +365,11 @@ namespace MatchZy
                 var configPath = Path.Combine(matchzyCfgDir, ConfigFiles.Paths.Config);
                 if (File.Exists(configPath))
                 {
-                    Server.ExecuteCommand($"execifexists {cfgFolderName}/{ConfigFiles.Paths.Config}");
+                    pendingConfigExec = $"execifexists {cfgFolderName}/{ConfigFiles.Paths.Config}";
+                    if (hotReload)
+                        AddTimer(0.5f, ExecConfigOnce);
+                    else
+                        ExecConfigOnce();
                 }
 
                 // Detect a dedicated map plugin (CS2-SimpleAdmin / CS2MapChange) now - folder scan,
@@ -368,11 +388,9 @@ namespace MatchZy
                 {
                     if (!mapConsoleCommandEnabled.Value)
                         return;
+                    // A dedicated map plugin (e.g. CS2-SimpleAdmin) owns css_map and .map.
                     if (_conflictingMapPlugin != null)
-                    {
-                        Log($"[css_map] '{_conflictingMapPlugin}' detected - MatchZy is not registering css_map or handling .map (that plugin owns the map command).");
                         return;
-                    }
                     AddCommand("css_map", "Changes the map (map name or workshop id)", (p, c) => OnMapCommand(p, c));
                     // Registered dynamically, so it carries no [ConsoleCommand] attribute for the
                     // reflection sweep in DetectDotChatTrigger to find. Add it by hand.
@@ -392,6 +410,7 @@ namespace MatchZy
 
                 autoStartModeCvar.ValueChanged += OnAutoStartModeCvarChanged;
 
+                _loadedMidMap = !hotReload && AreServerGlobalsReady();
                 if (!hotReload)
                 {
                     // Initial autostart for the already-running map. OnMapStart does not
@@ -407,7 +426,16 @@ namespace MatchZy
                             // AutoStart reads matchzy_autostart_mode live from its ConVar, so any
                             // cfg that set it (mapchange/exec scripts) is already reflected here.
                             RefreshTeamEntities();
+                            // css_plugins load mid-map (fshost mode switch): players already on the
+                            // server never send player_connect_full again, so register them here or
+                            // the ready-up counts 0/0 and the match never starts.
+                            UpdatePlayersMap();
+                            _readyStatusDirty = true;
                             AutoStart();
+                            // OnAllPluginsLoaded (which sends server_ready) only runs at server
+                            // start; a runtime load has to announce itself.
+                            if (_loadedMidMap)
+                                ScheduleServerReady(hotReload: false);
                         }
                     );
                 }
@@ -659,6 +687,11 @@ namespace MatchZy
                 return HookResult.Continue;
             }, HookMode.Post);
             RegisterEventHandler<EventPlayerGivenC4>(EventPlayerGivenC4);
+            RegisterEventHandler<EventBombPickup>(OnCoachBombPickup);
+            RegisterEventHandler<EventBombDropped>(OnCoachBombDropped);
+            RegisterEventHandler<EventPlayerDeath>(OnCoachDeathBombCheck, HookMode.Post);
+            // Created once for the plugin's lifetime (no map-change flag), so it is never stacked.
+            AddTimer(0.5f, CheckStuckBomb, TimerFlags.REPEAT);
             RegisterEventHandler<EventPlayerDeath>(EventPlayerDeathPreHandler, hookMode: HookMode.Pre);
             RegisterEventHandler<EventPlayerPing>(EventPlayerPingHandler);
             //RegisterEventHandler<EventCsIntermission>(OnEventCsIntermissionPost);
@@ -749,6 +782,9 @@ namespace MatchZy
 
             // Botjiggle: strafes practice bots side-to-side each tick. No-op unless .botjiggle is on.
             RegisterListener<Listeners.OnTick>(OnBotJiggleTick);
+
+            // Practice extras: .botshoot tick, .showbotspawn USE handler, respawn hooks.
+            RegisterPracticeExtras();
 
 
             RegisterEventHandler<EventPlayerTeam>(
@@ -1661,6 +1697,10 @@ namespace MatchZy
                     // ".banana" ran .ban. A trailing space in the old prefix meant "argument
                     // required"; that is kept as an explicit non-empty argument check.
                     string cmdWord = messageCommand.ToLowerInvariant();
+
+                    // Practice extras (.botshoot, .startround, .placebot, .slp, ...): bare and argument forms.
+                    if (HandlePracticeExtraChatCommand(player, cmdWord, messageCommandArg))
+                        return HookResult.Continue;
 
                     if (cmdWord == ".addreadytime")
                     {

@@ -71,4 +71,26 @@
     <Copy Condition="Exists('$(OutDir)runtimes/linux-x64/native/libe_sqlite3.so')" SourceFiles="$(_PatchedSqlite)" DestinationFiles="$(OutDir)runtimes/linux-x64/native/libe_sqlite3.so" OverwriteReadOnlyFiles="true" SkipUnchangedFiles="false" />
     <Copy Condition="'$(PublishDir)' != '' And Exists('$(PublishDir)runtimes/linux-x64/native/libe_sqlite3.so')" SourceFiles="$(_PatchedSqlite)" DestinationFiles="$(PublishDir)runtimes/linux-x64/native/libe_sqlite3.so" OverwriteReadOnlyFiles="true" SkipUnchangedFiles="false" />
   </Target>
+
+  <!-- Manual `dotnet publish` also produces bin/MatchZy-<ModuleVersion>.zip with the same layout
+       as the release zip (addons/counterstrikesharp/plugins/MatchZy + gamedata/matchzy.json), ready
+       to extract into game/csgo/. Skipped in CI (GitHub sets CI=true), where release.yml builds its
+       own zip. Disable locally with -p:MatchZyZip=false. -->
+  <Target Name="PackageMatchZyZip" AfterTargets="Publish" DependsOnTargets="OverridePatchedSqliteNative" Condition="'$(MatchZyZip)' != 'false' And '$(CI)' != 'true'">
+    <PropertyGroup>
+      <_MzSource>$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)/Core/MatchZy.cs'))</_MzSource>
+      <_MzVersion>$([System.Text.RegularExpressions.Regex]::Match($(_MzSource), '(?&lt;=ModuleVersion\s*=&gt;\s*")[^"]+'))</_MzVersion>
+      <_MzStage>$(BaseIntermediateOutputPath)package/</_MzStage>
+      <_MzZip>$(MSBuildProjectDirectory)/bin/MatchZy-$(_MzVersion).zip</_MzZip>
+    </PropertyGroup>
+    <Error Condition="'$(_MzVersion)' == ''" Text="Could not read ModuleVersion from Core/MatchZy.cs." />
+    <ItemGroup>
+      <_MzPublishFiles Include="$(PublishDir)**/*" />
+    </ItemGroup>
+    <RemoveDir Directories="$(_MzStage)" />
+    <Copy SourceFiles="@(_MzPublishFiles)" DestinationFolder="$(_MzStage)addons/counterstrikesharp/plugins/MatchZy/%(RecursiveDir)" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)/gamedata/matchzy.json" DestinationFolder="$(_MzStage)addons/counterstrikesharp/gamedata/" />
+    <ZipDirectory SourceDirectory="$(_MzStage)" DestinationFile="$(_MzZip)" Overwrite="true" />
+    <Message Importance="high" Text="MatchZy -> $(_MzZip)" />
+  </Target>
 </Project>

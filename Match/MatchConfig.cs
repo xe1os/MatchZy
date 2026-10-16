@@ -76,6 +76,11 @@ namespace MatchZy
         [JsonPropertyName("wingman")]
         public bool Wingman { get; set; } = false;
 
+        // "competitive", "wingman", "rush" or "1v1". Empty: not set by the match config, then
+        // "wingman" decides (see MatchGameMode).
+        [JsonPropertyName("game_mode")]
+        public string GameMode { get; set; } = "";
+
         [JsonPropertyName("match_side_type")]
         public string MatchSideType { get; set; } = "standard";
 

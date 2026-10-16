@@ -400,6 +400,8 @@ namespace MatchZy
         [ConsoleCommand("css_tech", "Pause the match")]
         public void OnTechCommand(CCSPlayerController? player, CommandInfo? command)
         {
+            if (ReplyPauseInReadyPhase(player))
+                return;
             TechPause(player, command);
         }
 
@@ -407,6 +409,8 @@ namespace MatchZy
         [ConsoleCommand("css_p", "Pause the match")]
         public void OnPauseCommand(CCSPlayerController? player, CommandInfo? command)
         {
+            if (ReplyPauseInReadyPhase(player))
+                return;
             if (!allowPauseCommand.Value)
             {
                 if (player != null)
@@ -595,6 +599,8 @@ namespace MatchZy
         {
             if (player == null)
                 return;
+            if (ReplyPauseInReadyPhase(player))
+                return;
 
             if (matchStarted && isMatchLive)
             {
@@ -614,7 +620,11 @@ namespace MatchZy
                 {
                     if (gameRules.TerroristTimeOuts > 0)
                     {
+                        bool alreadyActive = gameRules.TerroristTimeOutActive;
+                        int left = gameRules.TerroristTimeOuts - 1;
                         Server.ExecuteCommand("timeout_terrorist_start");
+                        if (!alreadyActive)
+                            PrintLocalizedToAll("matchzy.pause.tacleft", GetTacTeamName(player), left);
                     }
                     else
                     {
@@ -625,7 +635,11 @@ namespace MatchZy
                 {
                     if (gameRules.CTTimeOuts > 0)
                     {
+                        bool alreadyActive = gameRules.CTTimeOutActive;
+                        int left = gameRules.CTTimeOuts - 1;
                         Server.ExecuteCommand("timeout_ct_start");
+                        if (!alreadyActive)
+                            PrintLocalizedToAll("matchzy.pause.tacleft", GetTacTeamName(player), left);
                     }
                     else
                     {
@@ -633,6 +647,11 @@ namespace MatchZy
                     }
                 }
             }
+        }
+
+        private string GetTacTeamName(CCSPlayerController player)
+        {
+            return player.Team == CsTeam.CounterTerrorist ? reverseTeamSides["CT"].teamName : reverseTeamSides["TERRORIST"].teamName;
         }
 
         [ConsoleCommand("css_skipveto", "Skips the current veto phase")]
@@ -675,33 +694,32 @@ namespace MatchZy
             }
         }
 
-        [ConsoleCommand("css_roundknife", "Toggles knife round for the match")]
-        [ConsoleCommand("css_rk", "Toggles knife round for the match")]
-        [ConsoleCommand("css_kr", "Toggles knife round for the match")]
-        [ConsoleCommand("css_kniferound", "Toggles knife round for the match")]
+        [ConsoleCommand("css_roundknife", "Toggles knife round for the match.")]
+        [ConsoleCommand("css_rk", "Toggles knife round for the match.")]
+        [ConsoleCommand("css_kr", "Toggles knife round for the match.")]
+        [ConsoleCommand("css_kniferound", "Toggles knife round for the match.")]
+        [ConsoleCommand("css_knife", "Toggles knife round for the match.")]
         public void OnKnifeCommand(CCSPlayerController? player, CommandInfo? command)
         {
-            if (player == null)
-                return;
-
-            if (IsPlayerAdmin(player, "css_roundknife", "@css/config"))
+            // player == null is the server console / panel console (rcon). It used to return
+            // here, so the knife round could only be toggled in game.
+            if (!IsPlayerAdmin(player, "css_roundknife", "@css/config"))
             {
-                isKnifeRequired = !isKnifeRequired;
-                string knifeStatus = isKnifeRequired ? Localizer.ForPlayer(player, "matchzy.cc.enabled") : Localizer.ForPlayer(player, "matchzy.cc.disabled");
-                if (player == null)
-                {
-                    // ReplyToUserCommand(player, $"Knife round is now {knifeStatus}!");
-                    ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.cc.roundknife", knifeStatus));
-                }
-                else
-                {
-                    // player.PrintToChat($"{chatPrefix} Knife round is now {ChatColors.Green}{knifeStatus}{ChatColors.Default}!");
-                    PrintToPlayerChat(player, Localizer.ForPlayer(player, "matchzy.cc.roundknife", knifeStatus));
-                }
+                SendPlayerNotAdminMessage(player);
+                return;
+            }
+
+            isKnifeRequired = !isKnifeRequired;
+
+            if (player == null)
+            {
+                // Plain text: the console does not render chat color tokens.
+                Server.PrintToConsole($"[MatchZy] Knife round is now {(isKnifeRequired ? "on" : "off")}.");
             }
             else
             {
-                SendPlayerNotAdminMessage(player);
+                string knifeStatus = isKnifeRequired ? Localizer.ForPlayer(player, "matchzy.cc.enabled") : Localizer.ForPlayer(player, "matchzy.cc.disabled");
+                PrintToPlayerChat(player, Localizer.ForPlayer(player, "matchzy.cc.roundknife", knifeStatus));
             }
         }
 
@@ -786,7 +804,7 @@ namespace MatchZy
                     {
                         Team winTeam = winnerArg == "team1" ? matchzyTeam1 : matchzyTeam2;
                         PrintLocalizedToAll("matchzy.cmd.adminendedmatchwinner", winTeam.teamName);
-                        EndSeriesWithWinner(winTeam);
+                        EndSeriesWithWinner(winTeam, kickPlayers: false);
                     }
                     else
                     {
@@ -912,11 +930,7 @@ namespace MatchZy
             string currentMapName = Server.MapName;
 
             // Stop demo recording before map change to prevent GOTV crash
-            if (isDemoRecording)
-            {
-                Server.ExecuteCommand("tv_stoprecord");
-                isDemoRecording = false;
-            }
+            StopDemoAndAnnounce();
 
             KickAllBotsProtectCSTV();
 

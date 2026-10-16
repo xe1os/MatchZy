@@ -308,6 +308,14 @@ namespace MatchZy
 
                         break;
 
+                    case "game_mode":
+                        if (!MatchGameModes.Contains(jsonData[field]!.ToString().Trim().ToLowerInvariant()))
+                        {
+                            return $"{field} should be \"competitive\", \"wingman\", \"rush\" or \"1v1\"!";
+                        }
+
+                        break;
+
                     case "skip_veto":
                     case "clinch_series":
                     case "wingman":
@@ -523,7 +531,7 @@ namespace MatchZy
                 string currentMapName = Server.MapName;
                 string mapName = matchConfig.Maplist[0].ToString();
 
-                if (!skipMapChange && (IsMapReloadRequiredForGameMode(matchConfig.Wingman) || mapReloadRequired || !IsSameMap(mapName, currentMapName)))
+                if (!skipMapChange && (IsMapReloadRequiredForGameMode() || mapReloadRequired || !IsSameMap(mapName, currentMapName)))
                 {
                     SetCorrectGameMode();
                     // The match needs a different map than the one we're on. Finishing setup here is
@@ -550,6 +558,9 @@ namespace MatchZy
 
             StartWarmup();
             isMatchSetup = true;
+            // A shutdown scheduled by the previous series must not close the server on this match.
+            _seriesEndShutdownTimer?.Kill();
+            _seriesEndShutdownTimer = null;
             // StartWarmup ran just before isMatchSetup was set, so start the no-show timer here.
             MarkReadyPhaseStarted();
 
@@ -709,6 +720,8 @@ namespace MatchZy
                 matchData["skip_veto"] = matchConfig.SkipVeto;
                 matchData["clinch_series"] = matchConfig.SeriesCanClinch;
                 matchData["wingman"] = matchConfig.Wingman;
+                if (!string.IsNullOrEmpty(matchConfig.GameMode))
+                    matchData["game_mode"] = matchConfig.GameMode;
 
                 var team1Data = new JObject();
                 team1Data["id"] = matchzyTeam1.id;
@@ -1000,6 +1013,22 @@ namespace MatchZy
                 matchConfig.Wingman = ParseCvarBool(jsonDataObject["wingman"]!.ToString(), matchConfig.Wingman);
             }
 
+            if (jsonDataObject["game_mode"] != null)
+            {
+                matchConfig.GameMode = jsonDataObject["game_mode"]!.ToString().Trim().ToLowerInvariant();
+            }
+            else if (!matchConfig.Wingman && matchConfig.MapsPool.Count > 0 && matchConfig.MapsPool.All(IsRushMap))
+            {
+                // Rush maps only play in the rush game mode.
+                matchConfig.GameMode = "rush";
+            }
+            matchConfig.Wingman = MatchGameMode() == "wingman";
+
+            if (jsonDataObject["players_per_team"] == null)
+            {
+                matchConfig.PlayersPerTeam = DefaultPlayersPerTeam(MatchGameMode());
+            }
+
             if (jsonDataObject["veto_mode"] != null)
             {
                 matchConfig.MapBanOrder = jsonDataObject["veto_mode"]!.ToObject<List<string>>()!;
@@ -1219,7 +1248,7 @@ namespace MatchZy
         // is no map in progress, so ending the series then must not write end data for a map row.
         private bool currentMapFinished = false;
 
-        public void EndSeries(string? winnerName, int restartDelay, int t1score, int t2score, bool writeEndData = true, bool noWinner = false)
+        public void EndSeries(string? winnerName, int restartDelay, int t1score, int t2score, bool writeEndData = true, bool noWinner = false, bool kickPlayers = true)
         {
             if (seriesEnded)
             {
@@ -1259,6 +1288,8 @@ namespace MatchZy
             // Queued now, on the game thread: the event queue sends it after the map_result queued
             // before it (it used to wait for that task plus 500 ms on a background thread).
             PublishEvent(seriesResultEvent);
+            // Before the reset below: it needs this match's remote log URL.
+            ScheduleSeriesEndShutdown(matchId);
             int currentMapNumber = currentMapFinished ? -1 : matchConfig.CurrentMapNumber;
             Task.Run(async () =>
             {
@@ -1318,6 +1349,8 @@ namespace MatchZy
                     () =>
                     {
                         ResetMatch(false);
+                        if (kickPlayers)
+                            KickPlayersWithNoMatch();
                     }
                 );
                 return;
@@ -1336,6 +1369,8 @@ namespace MatchZy
                     () =>
                     {
                         ResetMatch(false);
+                        if (kickPlayers)
+                            KickPlayersWithNoMatch();
                     }
                 );
                 return;
@@ -1357,6 +1392,8 @@ namespace MatchZy
                 {
                     // Reset match state FIRST, then change map - serialized to avoid race condition
                     ResetMatch(false);
+                    if (kickPlayers)
+                        KickPlayersWithNoMatch();
 
                     // Use the appropriate command based on map type
                     ChangeMapFromRotation(nextMap);
@@ -1369,11 +1406,7 @@ namespace MatchZy
         private void ChangeMapFromRotation(string mapName)
         {
             // Ensure demo is stopped before map change to prevent GOTV flush crash
-            if (isDemoRecording)
-            {
-                Server.ExecuteCommand("tv_stoprecord");
-                isDemoRecording = false;
-            }
+            StopDemoAndAnnounce();
 
             // Prevent engine from racing us with its own map change
             Server.ExecuteCommand("mp_match_end_changelevel 0");
@@ -1415,7 +1448,7 @@ namespace MatchZy
                 return;
             }
 
-            var absoluteCfgPath = Path.Join(Server.GameDirectory + "/csgo/cfg", GetGameMode() == 1 ? liveCfgPath : liveWingmanCfgPath);
+            var absoluteCfgPath = Path.Join(Server.GameDirectory + "/csgo/cfg", LiveCfgPathForMode());
             string? matchCanClinch = GetConvarValueFromCFGFile(absoluteCfgPath, "mp_match_can_clinch");
             string? overtimeEnabled = GetConvarValueFromCFGFile(absoluteCfgPath, "mp_overtime_enable");
             if (!fromMatchConfig("mp_match_can_clinch"))

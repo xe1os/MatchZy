@@ -48,6 +48,7 @@ Workshop-baner virker alle steder, hvor et banenavn gør: `workshop/<id>`, `ws/<
 | Indstilling | Hvad den gør |
 |---|---|
 | `matchzy_forfeit_ready_timeout 600` | Et hold, der ikke er klar 10 minutter efter ready-fasen startede, taber på walkover. |
+| `matchzy_forfeit_join_grace_seconds 60` | En tilmeldt spiller, der joiner i sidste øjeblik, får stadig op til 60 sekunder til at blive ready, før holdet taber på walkover (standard `60`). |
 | `matchzy_forfeit_veto_ready_timeout 300` | Det samme for ready-up før map-vetoet (`-1` = samme som ovenfor, `0` = ingen grænse). |
 | `matchzy_forfeit_leave_timeout 300` | Et hold uden nogen på serveren i 5 minutter under en live-bane taber på walkover. |
 | `matchzy_veto_step_timeout 60` | En kaptajn, der ikke banner, picker eller vælger side inden for 60 sekunder, får et tilfældigt valg. |
@@ -60,7 +61,7 @@ Alle tre er slået fra (`0`) som standard. En walkover afslutter serien med det 
 
 | Indstilling | Effekt |
 |---|---|
-| `matchzy_kick_when_no_match_loaded true` | Spillere, der ikke er på den loadede kamps hold, kickes, når de joiner. Alle kickes, når ingen kamp er loadet. Admins er undtaget. |
+| `matchzy_kick_when_no_match_loaded true` | Spillere, der ikke er på den loadede kamps hold, kickes, når de joiner. Alle kickes, når ingen kamp er loadet, også dem der stadig er på serveren, når en serie slutter (fx efter forfeit). Admins er undtaget. |
 | `matchzy_whitelist_enabled_default true` | Kun SteamID'er i `whitelist.cfg` må joine. |
 
 ## Spillere mod bots

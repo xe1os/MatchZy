@@ -104,7 +104,7 @@ Before a match goes live, players ready up. How many must be ready is explained 
 | `.addreadytime <seconds>` | Config | Gives the teams more time before the ready-up time limit (`matchzy_forfeit_ready_timeout`) runs out. Never above the full limit. |
 | `.start` `.force` `.forcestart` | Config | Starts the match now, skipping the ready check. Not in practice or dryrun. |
 | `.readyrequired [n]` `.teamsize [n]` | Config | Sets how many ready players are needed (0 to 32). `0` = everyone connected. Without a number it shows the current value. |
-| `.knife` `.rk` `.kr` `.kniferound` | Config | Turns the knife round on or off for this match. Also `!roundknife`. |
+| `.knife` `.rk` `.kr` `.kniferound` | Config | Turns the knife round on or off for this match. Also `!roundknife`. From the server or panel console: `css_knife` toggles it (also `css_rk`, `css_kr`, `css_kniferound`, `css_roundknife`). |
 | `.friendlyfire` `.ffire` `.ff` | Config | Turns friendly fire on or off for the coming match, scrim or hill, before it starts. Kept for every map of the series. In practice mode `.ff` is fast-forward instead. |
 | `.team1 <name>` `.ctname <name>` | Config | Sets the name of the team currently on CT. |
 | `.team2 <name>` `.tname <name>` | Config | Sets the name of the team currently on T. |
@@ -168,7 +168,7 @@ Runs after a match config with `"skip_veto": false` is loaded. MatchZy picks one
 | `.pause` `.p` | Player | Pauses the match in the next freeze time (also in the knife round). Unpausing needs both teams. |
 | `.unpause` `.up` | Player | Your team's vote to unpause. The game resumes when both teams have voted. A pause called by an admin can only be lifted by an admin. `.r` also works during a pause. |
 | `.tech` | Player | Technical pause for connection or hardware trouble. Each team gets `matchzy_max_tech_pauses_allowed` per map. |
-| `.tac` | Player | Tactical timeout from your team's timeout budget. |
+| `.tac` | Player | Tactical timeout from your team's timeout budget. The chat shows how many your team has left. |
 | `.stop` | Player | Vote to replay the current round from its start. A player from each team must type it within 30 seconds. |
 | `!gg` | Player | Surrender vote. Your team must be 6 or more rounds behind and all but one of its players must vote (all of them in a team of 2 or fewer). Single-map matches only. |
 
@@ -243,9 +243,10 @@ Everything here works **only in practice mode** (`.prac`). No admin rights neede
 | `.fas` `.watchme` | Moves every other player to spectator so they can watch you. Map/prac admins only. |
 | `.spawn <n>` `.sp <n>` | Teleports you to your team's competitive spawn number N. `.ctspawn <n>` (`.cts`) / `.tspawn <n>` (`.ts`) pick the side. |
 | `.bestspawn` / `.worstspawn` | Teleports you to the spawn nearest to / furthest from where you stand. Side variants: `.bestctspawn`, `.besttspawn`, `.worstctspawn`, `.worsttspawn`. |
-| `.showspawns` / `.hidespawns` | Draws markers on all competitive spawns. Aim at one and press ++e++ to teleport to it. |
+| `.showspawns` / `.hidespawns` | Draws a numbered box on the floor at every competitive spawn. Aim at one and press ++e++ to teleport to it. |
 | `.savepos [name]` / `.loadpos [name]` | Saves your position and view, and teleports you back. Without a name it uses one default slot; with a name you get up to 32 slots. Names keep letters, digits, `_` and `-`. |
 | `.listpos` / `.delpos <name>` | Lists / deletes your named positions. |
+| `.slp` / `.tlp` / `.dlp` | Saves / teleports to / deletes your saved location (the same slot as `.savepos` / `.loadpos` without a name). After a death you respawn at this location. |
 
 ### Bots
 
@@ -262,6 +263,19 @@ Everything here works **only in practice mode** (`.prac`). No admin rights neede
 | `.delbotpos <name>` `.dbp <name>` | Deletes a saved bot spot. |
 | `.showbotpos` `.showbp` | Shows markers for saved bot spots. |
 | `.botjiggle` | Bots strafe left and right, for peek and aim practice. Run again to stop. Width: `matchzy_botjiggle_range`. |
+| `.botjigglerange <units>` | Sets the `.botjiggle` width (1-200) without editing the cfg. |
+| `.botjigglerandom` | Only a random half of the bots jiggle; the rest stand still. A new pick on every `.startround`. |
+| `.kicklastbot` | Removes the bot that was added last. |
+| `.botshoot` | Bots shoot back: they stay on their spot, turn to the nearest enemy they can see and fire after the reaction time. Smokes block their view. Bots lose their grenades while this is on. Run again to stop. |
+| `.botreactiontime <0-1000>` | Milliseconds between a bot seeing you and firing. Default 500. |
+| `.botrespawn` | Turns bot respawning off / on (on by default). With it off, a dead bot stays dead until `.startround` or `.botrespawn`. |
+| `.botlifereg` | Bots heal back to 100 HP. Off by default. |
+| `.botspawn <name>` | Adds the spot where you stand (side, view direction, crouch) to a named bot spawn pool for this map. Run it on several spots with the same name. |
+| `.placebot <number> <name>` | Removes the current bots and places that many bots on random, different spots of the pool. |
+| `.placenewbot <number> <name>` | Same, but keeps the bots you already have. |
+| `.listbotspawn` / `.delbotspawn <name>` | Lists / deletes the bot spawn pools on this map. |
+| `.showbotspawn` | Green boxes on every saved pool spot. Stand in a box and press ++e++ to delete that spot. Run again to hide. |
+| `.startround` | A fresh round for retake and execute reps: clears thrown utility, respawns the dead, puts every player on a different random spawn of their side, puts the bots back on their spot with full health, then a 5 second freeze with a countdown. |
 
 ### Grenade history and rethrow
 
@@ -304,7 +318,7 @@ The per-type rethrow commands also work as `.rethrowsmoke`, `.rethrowflash`, `.r
 
 | Command | What it does |
 |---|---|
-| `.cleanup` `.clear` | Removes all utility on the map: smokes, fires and flying grenades. |
+| `.cleanup` `.clear` | Removes all utility on the map: smokes, fires and flying grenades. Also clears blood and bullet holes for everyone. |
 | `.autoclear` | Each new detonation removes the older utility, so you only see the latest result. |
 | `.landmarker` `.lm` | Marks the spot where each grenade detonated. |
 | `.arc` `.traceline` | Draws the flight path of thrown grenades in the world. |
@@ -314,6 +328,8 @@ The per-type rethrow commands also work as `.rethrowsmoke`, `.rethrowflash`, `.r
 | `.flashtest` `.ft` | Prints how long you were blinded each time you get flashed. |
 | `.blind` | Throws a flashbang at your face, for pop-flash reaction practice. |
 | `.god` | You take no damage. Type again to turn it off. |
+| `.liferegon` | Turns your own health regeneration off / on. On by default, so you cannot die; turn it off to practice against `.botshoot` bots. |
+| `.allliferegon <true\|false>` | Health regeneration for every player, also players who join later. |
 | `.solid` | Toggles whether teammates block each other. |
 | `.ff` `.fastforward` | Speeds up time for 10 seconds (wait out smokes and fires). Players are frozen meanwhile. Outside practice `.ff` toggles friendly fire instead (see `.friendlyfire`). |
 | `.break` | Breaks all breakable glass, doors and props. |

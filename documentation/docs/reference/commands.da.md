@@ -104,7 +104,7 @@ Før en kamp går live, gør spillerne sig klar. Hvor mange der skal være klar,
 | `.addreadytime <sekunder>` | Config | Giver holdene mere tid, før tidsgrænsen for ready-up (`matchzy_forfeit_ready_timeout`) udløber. Aldrig over den fulde grænse. |
 | `.start` `.force` `.forcestart` | Config | Starter kampen nu og springer ready-check over. Ikke i practice eller dryrun. |
 | `.readyrequired [n]` `.teamsize [n]` | Config | Sætter, hvor mange klare spillere der skal til (0 til 32). `0` = alle på serveren. Uden et tal vises den nuværende værdi. |
-| `.knife` `.rk` `.kr` `.kniferound` | Config | Slår knife-runden til eller fra for denne kamp. Også `!roundknife`. |
+| `.knife` `.rk` `.kr` `.kniferound` | Config | Slår knife-runden til eller fra for denne kamp. Også `!roundknife`. Fra server- eller panelkonsollen: `css_knife` skifter den (også `css_rk`, `css_kr`, `css_kniferound`, `css_roundknife`). |
 | `.friendlyfire` `.ffire` `.ff` | Config | Slår friendly fire til eller fra for den kommende kamp, scrim eller hill, før den starter. Gælder alle baner i serien. I practice mode er `.ff` i stedet fast-forward. |
 | `.team1 <navn>` `.ctname <navn>` | Config | Sætter navnet på holdet, der lige nu er CT. |
 | `.team2 <navn>` `.tname <navn>` | Config | Sætter navnet på holdet, der lige nu er T. |
@@ -168,7 +168,7 @@ Kører, når en match config med `"skip_veto": false` er loadet. MatchZy vælger
 | `.pause` `.p` | Player | Pauser kampen i næste freeze time (også i knife-runden). Begge hold skal genoptage. |
 | `.unpause` `.up` | Player | Dit holds stemme for at genoptage. Spillet fortsætter, når begge hold har stemt. En pause, en admin har startet, kan kun hæves af en admin. `.r` virker også under en pause. |
 | `.tech` | Player | Teknisk pause ved forbindelses- eller hardwareproblemer. Hvert hold får `matchzy_max_tech_pauses_allowed` pr. bane. |
-| `.tac` | Player | Taktisk timeout fra dit holds timeout-budget. |
+| `.tac` | Player | Taktisk timeout fra dit holds timeout-budget. Chatten viser, hvor mange dit hold har tilbage. |
 | `.stop` | Player | Stem for at spille den nuværende runde om fra start. En spiller fra hvert hold skal skrive den inden for 30 sekunder. |
 | `!gg` | Player | Stem for at give op. Dit hold skal være mindst 6 runder bagud, og alle på holdet undtagen én skal stemme (alle på et hold med 2 eller færre). Kun kampe med én bane. |
 
@@ -243,9 +243,10 @@ Alt her virker **kun i practice mode** (`.prac`). Ingen admin-rettigheder kræve
 | `.fas` `.watchme` | Flytter alle andre spillere til spectator, så de kan se dig. Kun Map/prac-admins. |
 | `.spawn <n>` `.sp <n>` | Teleporterer dig til dit holds konkurrence-spawn nummer N. `.ctspawn <n>` (`.cts`) / `.tspawn <n>` (`.ts`) vælger siden. |
 | `.bestspawn` / `.worstspawn` | Teleporterer dig til spawnet nærmest / længst fra, hvor du står. Varianter pr. side: `.bestctspawn`, `.besttspawn`, `.worstctspawn`, `.worsttspawn`. |
-| `.showspawns` / `.hidespawns` | Tegner markører på alle konkurrence-spawns. Sigt på en og tryk ++e++ for at teleportere dertil. |
+| `.showspawns` / `.hidespawns` | Tegner en nummereret boks på gulvet ved hver konkurrence-spawn. Sigt på en og tryk ++e++ for at teleportere dertil. |
 | `.savepos [navn]` / `.loadpos [navn]` | Gemmer din position og synsvinkel og teleporterer dig tilbage. Uden navn bruges én standardplads; med navn får du op til 32 pladser. Navne beholder bogstaver, tal, `_` og `-`. |
 | `.listpos` / `.delpos <navn>` | Viser / sletter dine navngivne positioner. |
+| `.slp` / `.tlp` / `.dlp` | Gemmer / teleporterer til / sletter din gemte position (samme plads som `.savepos` / `.loadpos` uden navn). Efter en død respawner du på denne position. |
 
 ### Bots { #bots }
 
@@ -262,6 +263,19 @@ Alt her virker **kun i practice mode** (`.prac`). Ingen admin-rettigheder kræve
 | `.delbotpos <navn>` `.dbp <navn>` | Sletter et gemt bot-spot. |
 | `.showbotpos` `.showbp` | Viser markører for gemte bot-spots. |
 | `.botjiggle` | Bots strafer til venstre og højre, til peek- og aim-træning. Kør igen for at stoppe. Bredde: `matchzy_botjiggle_range`. |
+| `.botjigglerange <units>` | Sætter bredden for `.botjiggle` (1-200) uden at rette i cfg'en. |
+| `.botjigglerandom` | Kun en tilfældig halvdel af bots jiggler; resten står stille. Nyt valg ved hver `.startround`. |
+| `.kicklastbot` | Fjerner den senest tilføjede bot. |
+| `.botshoot` | Bots skyder igen: de bliver på deres plads, vender sig mod den nærmeste fjende de kan se og skyder efter reaktionstiden. Smokes blokerer deres udsyn. Bots mister deres granater, mens det er slået til. Kør igen for at stoppe. |
+| `.botreactiontime <0-1000>` | Millisekunder fra en bot ser dig, til den skyder. Standard 500. |
+| `.botrespawn` | Slår bot-respawn fra / til (til som standard). Når det er slået fra, forbliver en død bot død indtil `.startround` eller `.botrespawn`. |
+| `.botlifereg` | Bots heler tilbage til 100 HP. Fra som standard. |
+| `.botspawn <navn>` | Tilføjer pladsen, du står på (side, synsretning, hug), til en navngivet bot-spawn-pulje for denne bane. Kør den på flere pladser med samme navn. |
+| `.placebot <antal> <navn>` | Fjerner de nuværende bots og placerer så mange bots på tilfældige, forskellige pladser fra puljen. |
+| `.placenewbot <antal> <navn>` | Samme, men beholder de bots, du allerede har. |
+| `.listbotspawn` / `.delbotspawn <navn>` | Viser / sletter bot-spawn-puljerne på denne bane. |
+| `.showbotspawn` | Grønne bokse på alle gemte pladser i puljerne. Stil dig i en boks og tryk ++e++ for at slette pladsen. Kør igen for at skjule. |
+| `.startround` | En frisk runde til retake- og execute-træning: rydder kastet utility, respawner de døde, sætter hver spiller på en anden tilfældig spawn på sin side, sætter bots tilbage på deres plads med fuldt liv og fryser alle i 5 sekunder med nedtælling. |
 
 ### Granathistorik og rethrow { #grenade-history-and-rethrow }
 
@@ -304,7 +318,7 @@ Kommandoerne til rethrow pr. type virker også som `.rethrowsmoke`, `.rethrowfla
 
 | Kommando | Hvad den gør |
 |---|---|
-| `.cleanup` `.clear` | Fjerner al utility på banen: smokes, ild og granater i luften. |
+| `.cleanup` `.clear` | Fjerner al utility på banen: smokes, ild og granater i luften. Fjerner også blod og skudhuller for alle. |
 | `.autoclear` | Hver ny detonation fjerner den ældre utility, så du kun ser det seneste resultat. |
 | `.landmarker` `.lm` | Markerer stedet, hvor hver granat detonerede. |
 | `.arc` `.traceline` | Tegner flyvebanen for kastede granater i verden. |
@@ -314,6 +328,8 @@ Kommandoerne til rethrow pr. type virker også som `.rethrowsmoke`, `.rethrowfla
 | `.flashtest` `.ft` | Skriver, hvor længe du var blændet, hver gang du bliver flashet. |
 | `.blind` | Kaster en flashbang i hovedet på dig, til træning af reaktion på pop-flashes. |
 | `.god` | Du tager ingen skade. Skriv igen for at slå det fra. |
+| `.liferegon` | Slår din egen livsregenerering fra / til. Til som standard, så du ikke kan dø; slå den fra for at træne mod `.botshoot`-bots. |
+| `.allliferegon <true\|false>` | Livsregenerering for alle spillere, også dem der kommer senere. |
 | `.solid` | Skifter, om holdkammerater blokerer hinanden. |
 | `.ff` `.fastforward` | Spoler tiden frem i 10 sekunder (vent smokes og ild af). Spillerne er frosset imens. Uden for practice slår `.ff` i stedet friendly fire til/fra (se `.friendlyfire`). |
 | `.break` | Smadrer alt glas, døre og objekter, der kan gå i stykker. |

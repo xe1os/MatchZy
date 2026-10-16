@@ -574,4 +574,64 @@ public partial class MatchZy
             pausedStateTimer = null;
         }
     }
+
+    // Delay before the going-live pause hints are printed. The mode cfg (live/scrim/hill) is run
+    // through Server.ExecuteCommand, which only queues it, so mp_team_timeout_* still holds the
+    // previous mode's value on the tick that announces LIVE.
+    private const float PauseHintDelaySeconds = 2.0f;
+    private CounterStrikeSharp.API.Modules.Timers.Timer? pauseHintTimer = null;
+
+    // Prints the .tac / .tech hints. The tactical line takes its numbers from the engine
+    // (mp_team_timeout_max / mp_team_timeout_time), so it matches whatever cfg is running.
+    private void PrintPauseHints()
+    {
+        int? max = ReadIntCvar("mp_team_timeout_max");
+        int? seconds = ReadIntCvar("mp_team_timeout_time");
+        if (max == null || seconds == null)
+            PrintLocalizedToAll("matchzy.util.tachintplain");
+        else if (max.Value <= 0)
+            PrintLocalizedToAll("matchzy.util.tachintoff");
+        else
+            PrintLocalizedToAll("matchzy.util.tachint", max.Value, seconds.Value);
+        PrintLocalizedToAll("matchzy.util.techhint");
+    }
+
+    private void PrintPauseHintsDelayed()
+    {
+        pauseHintTimer?.Kill();
+        pauseHintTimer = AddTimer(PauseHintDelaySeconds, () =>
+        {
+            pauseHintTimer = null;
+            if (!isMatchLive)
+                return;
+            PrintPauseHints();
+        }, TimerFlags.STOP_ON_MAPCHANGE);
+    }
+
+    // Reads an integer-like engine convar regardless of its native type. GetPrimitiveValue<T>
+    // throws when T does not match the convar's type exactly.
+    private static int? ReadIntCvar(string name)
+    {
+        try
+        {
+            var cvar = ConVar.Find(name);
+            if (cvar == null)
+                return null;
+            return cvar.Type switch
+            {
+                ConVarType.Int32 => cvar.GetPrimitiveValue<int>(),
+                ConVarType.UInt32 => (int)cvar.GetPrimitiveValue<uint>(),
+                ConVarType.Int16 => cvar.GetPrimitiveValue<short>(),
+                ConVarType.UInt16 => cvar.GetPrimitiveValue<ushort>(),
+                ConVarType.Int64 => (int)cvar.GetPrimitiveValue<long>(),
+                ConVarType.UInt64 => (int)cvar.GetPrimitiveValue<ulong>(),
+                ConVarType.Float32 or ConVarType.Float64 => (int)Math.Round(cvar.GetPrimitiveValue<float>()),
+                _ => null,
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }

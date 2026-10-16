@@ -69,15 +69,22 @@ namespace MatchZy
             return string.Join("\n", filtered);
         }
 
+        // CS2 writes and loads round backup files only when the server was started with
+        // -allow_round_backup_files; without it it prints "Round backup files are disabled" and
+        // every .restore fails.
+        private bool RoundBackupFilesAllowed() => HasLaunchOption("-allow_round_backup_files");
+
+        private bool roundBackupFlagWarned;
+
         public void SetupRoundBackupFile()
         {
-            // The engine resolves a relative mp_backup_round_file prefix against the first Game search path
-            // in gameinfo.gi, which is csgo/addons/metamod on Metamod servers. An absolute prefix keeps the
-            // round files in csgo/, where the backup and restore code reads them.
-            string backupFilePrefix = Path.Join(Server.GameDirectory, "csgo", $"matchzy_{liveMatchId}_{matchConfig.CurrentMapNumber}").Replace('\\', '/');
-            // Always quoted: the console tokenizer splits an unquoted argument at a space and at the
-            // ':' of a Windows drive letter (C:/...).
-            string prefixArg = $"\"{backupFilePrefix}\"";
+            if (!roundBackupFlagWarned && !RoundBackupFilesAllowed())
+            {
+                roundBackupFlagWarned = true;
+                Log("[RoundBackup] WARNING: the server was started without -allow_round_backup_files. CS2 writes no round backup files and .restore cannot work. Add -allow_round_backup_files to the server's launch options.");
+            }
+            // Absolute so it is not resolved under csgo/addons/metamod; drive letter dropped on Windows.
+            string prefixArg = CsgoPathArg($"matchzy_{liveMatchId}_{matchConfig.CurrentMapNumber}");
             Server.ExecuteCommand($"mp_backup_round_file {prefixArg}");
         }
 
@@ -406,6 +413,15 @@ namespace MatchZy
                 ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.backup.restoretacticaltimeout"));
                 return false;
             }
+            // The engine refuses mp_backup_restore_load_file without the launch option ("Round backup
+            // files are disabled"), so the restore could only fail after pausing the match and
+            // rolling the scoreboard back. Say why up front instead.
+            if (!RoundBackupFilesAllowed())
+            {
+                Log("[RestoreRoundBackup] The server was started without -allow_round_backup_files, so CS2 cannot load round backups.");
+                ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.backupmsg.flagmissing"));
+                return false;
+            }
             string backupFolder = Path.Combine(Server.GameDirectory, "csgo", "MatchZyDataBackup");
 
             string filePath = Path.Combine(backupFolder, fileName);
@@ -602,7 +618,7 @@ namespace MatchZy
                 {
                     backupData.TryGetValue("valve_backup", out var valveBackup);
 
-                    string csgoDir = Path.Combine(Server.GameDirectory, "csgo");
+                    string csgoDir = EngineCsgoDirectory();
                     // The .txt the engine itself wrote for this round, if it is still around. Two names
                     // can point at it: the one built from the current match id, and the one carried by
                     // the JSON backup's own file name (they differ once the match id changed since).
@@ -704,6 +720,13 @@ namespace MatchZy
                     // Scoreboard state belonging to the restored round, applied once the engine is done.
                     string scoreboardJson = backupData.GetValueOrDefault("scoreboard", "");
                     string advancedStatsJson = backupData.GetValueOrDefault("advanced_stats", "");
+                    var restoredSideScores = ReadSideScoresFromBackup(backupData);
+                    // Going live again (liveSetupRequired) reset the side scores to this round's sides.
+                    // Put the backup's back right away: the cfg restart's round start writes a round
+                    // backup before the load below runs.
+                    bool keepStartingSide = sameMatchAndMap && !liveSetupRequired;
+                    if (liveSetupRequired)
+                        ApplySideScores(restoredSideScores, keepStartingSide);
                     int restoredRoundsPlayed = 0;
                     if (backupData.TryGetValue("round", out var restoredRound))
                     {
@@ -721,6 +744,7 @@ namespace MatchZy
                             }
 
                             int preRoundsPlayed = rules.TotalRoundsPlayed;
+                            SideScores preSideScores = sideScores;
                             (int preTeam1Score, int preTeam2Score) = GetTeamsScore();
                             string loadFileName = Path.GetFileName(tempFilePath);
 
@@ -740,6 +764,7 @@ namespace MatchZy
                             // Put the advanced stats back to the start of the restored round (also undoes
                             // the reset that setting the match live again does).
                             RestoreAdvancedStatsSnapshot(advancedStatsJson);
+                            ApplySideScores(restoredSideScores, keepStartingSide);
                             Server.ExecuteCommand($"mp_teamname_1 {TeamNameArg(matchzyTeam1.teamName)}");
                             Server.ExecuteCommand($"mp_teamname_2 {TeamNameArg(matchzyTeam2.teamName)}");
                             // Settle the pause state after the load, not before it: the live cfgs set
@@ -751,7 +776,7 @@ namespace MatchZy
                             // load can land between the two.
                             AddTimer(1.2f, () => RestoreScoreboardState(scoreboardJson, restoredRoundsPlayed));
                             AddTimer(3.0f, () => RestoreScoreboardState(scoreboardJson, restoredRoundsPlayed));
-                            AddTimer(3.5f, () => VerifyRoundRestore(player, fileName, restoredRoundsPlayed, preRoundsPlayed, preTeam1Score, preTeam2Score));
+                            AddTimer(3.5f, () => VerifyRoundRestore(player, fileName, restoredRoundsPlayed, preRoundsPlayed, preTeam1Score, preTeam2Score, preSideScores));
                         }
                     );
                 }
@@ -783,7 +808,7 @@ namespace MatchZy
             string tempFileName = fileName.Replace(".json", ".txt");
             if (backupData.TryGetValue("round", out var roundNumber))
                 tempFileName = $"matchzy_{matchId}_{mapNumber}_round{roundNumber}.txt";
-            return FindValveRoundBackupOnDisk(Path.Combine(Server.GameDirectory, "csgo"), tempFileName, fileName) != null;
+            return FindValveRoundBackupOnDisk(EngineCsgoDirectory(), tempFileName, fileName) != null;
         }
 
         // Locates the round file the engine wrote itself (mp_backup_round_auto) for a MatchZy JSON backup
@@ -873,7 +898,7 @@ namespace MatchZy
         // exactly as it was while MatchZy has already announced a restore and paused the match, which
         // looks to everyone like "the command did nothing". Compare the round counter against what the
         // backup said it should be and report what actually happened.
-        private void VerifyRoundRestore(CCSPlayerController? player, string fileName, int expectedRoundsPlayed, int preRoundsPlayed, int preTeam1Score, int preTeam2Score)
+        private void VerifyRoundRestore(CCSPlayerController? player, string fileName, int expectedRoundsPlayed, int preRoundsPlayed, int preTeam1Score, int preTeam2Score, SideScores preSideScores)
         {
             var rules = GetGameRules();
             if (rules == null)
@@ -901,6 +926,8 @@ namespace MatchZy
             // backup_loaded / round_start were already sent for this load; let the next real round
             // start through.
             roundStartSentByRestore = false;
+            // The round is still the one before the load, so are its side scores.
+            sideScores = preSideScores;
             Log($"[RestoreRoundBackup FATAL] Engine did not load {fileName}. Rounds played is still {roundsPlayed}, expected {expectedRoundsPlayed}.");
             PrintLocalizedToAll("matchzy.backupmsg.restorefailed", fileName);
             if (IsPlayerValid(player))
@@ -1188,8 +1215,7 @@ namespace MatchZy
                 string matchZyBackupFileName = $"matchzy_{liveMatchId}_{matchConfig.CurrentMapNumber}_round{round}.json";
                 string filePath = Path.Combine(Server.GameDirectory, "csgo", "MatchZyDataBackup", matchZyBackupFileName);
                 string lastBackupFilePath = Path.Combine(
-                    Server.GameDirectory,
-                    "csgo",
+                    EngineCsgoDirectory(),
                     $"matchzy_{liveMatchId}_{matchConfig.CurrentMapNumber}_round{round}.txt"
                 );
 
@@ -1243,6 +1269,7 @@ namespace MatchZy
                     // Advanced stats (rating, KAST, opening duels, clutches) at the start of this round.
                     { "advanced_stats", CaptureAdvancedStatsSnapshot() },
                 };
+                AddSideScoresToBackup(roundData);
                 List<ScoreboardSnapshot> scoreboard = CaptureScoreboardSnapshot();
                 MatchConfig configSnapshot = matchConfig.SnapshotForBackup();
                 Team team1Snapshot = matchzyTeam1.SnapshotForBackup();

@@ -1,10 +1,13 @@
 using System;
 using System.IO;
+using System.Linq;
+using System.Collections.Generic;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Core.Translations;
 using CounterStrikeSharp.API.Modules.Commands;
+using CounterStrikeSharp.API.Modules.Utils;
 using CS2MenuManager.API.Class;
 using CS2MenuManager.API.Menu;
 
@@ -108,10 +111,112 @@ namespace MatchZy
             // Restore the current round from its backup. OnRestartRoundCommand is the practice-only
             // .rs and did nothing in a match.
             menu.AddItem("Restart Round", (p, _) => OnRestoreCurrentRoundCommand(p, null));
+            menu.AddItem("Restore Round...", (p, _) => OpenRestoreRoundMenu(p, menu));
             menu.AddItem("Restart Match", (p, _) => OnRestartMatchCommand(p, null));
             menu.AddItem("Force End Match", (p, _) => OnEndMatchCommand(p, null));
             menu.AddItem("Stop Match", (p, _) => OnStopMatchCommand(p, null));
             menu.Display(player, 0);
+        }
+
+        // One restorable backup in the restore menu.
+        private sealed record BackupMenuEntry(string FileName, string Label);
+
+        // .ma -> Match Control -> Restore Round: pick a round from a list instead of typing
+        // !restore <round> / !loadbackup <file>. In a live match the list is this map's round
+        // backups (newest round first); with no live match (after a crash or restart) it is the
+        // newest backup files on disk across all matches, like .backup. Every pick asks for a
+        // confirmation, and the restore itself is the same RestoreRoundBackup the commands use.
+        private void OpenRestoreRoundMenu(CCSPlayerController player, WasdMenu parent)
+        {
+            if (!IsPlayerAdmin(player, "css_restore", "@css/config"))
+            {
+                SendPlayerNotAdminMessage(player);
+                return;
+            }
+            bool live = isMatchLive;
+            List<BackupMenuEntry> entries = live ? LiveBackupMenuEntries(player) : DiskBackupMenuEntries(player);
+            if (entries.Count == 0)
+            {
+                ReplyToUserCommand(player, Localizer.ForPlayer(player, live ? "matchzy.backupmsg.nobackupsformatch" : "matchzy.backupmsg.nobackups"));
+                return;
+            }
+
+            var menu = new WasdMenu(live ? "Restore Round" : "Restore Backup", this) { PrevMenu = parent };
+            if (live && !string.IsNullOrEmpty(lastMatchZyBackupFileName))
+                menu.AddItem("Previous round", (p, _) => OpenRestoreConfirmMenu(p, menu, new BackupMenuEntry(lastMatchZyBackupFileName, "previous round"), true));
+            foreach (var entry in entries)
+                menu.AddItem(entry.Label, (p, _) => OpenRestoreConfirmMenu(p, menu, entry, live));
+            menu.Display(player, 0);
+        }
+
+        private void OpenRestoreConfirmMenu(CCSPlayerController player, WasdMenu parent, BackupMenuEntry entry, bool live)
+        {
+            var menu = new WasdMenu($"Restore {entry.Label}?", this) { PrevMenu = parent };
+            menu.AddItem($"{ChatColors.Green}Yes, restore", (p, o) =>
+            {
+                o.PostSelectAction = CS2MenuManager.API.Enum.PostSelectAction.Close;
+                // The menu can sit open while the match moves on: re-check before restoring.
+                if (!IsPlayerAdmin(p, "css_restore", "@css/config"))
+                {
+                    SendPlayerNotAdminMessage(p);
+                    return;
+                }
+                if (live && !isMatchLive)
+                {
+                    ReplyToUserCommand(p, Localizer.ForPlayer(p, "matchzy.backupmsg.matchnotlive"));
+                    return;
+                }
+                Log($"[RestoreMenu] {p.PlayerName} restores {entry.FileName}");
+                RestoreRoundBackup(p, entry.FileName);
+            });
+            menu.AddItem("No", (p, _) => parent.Display(p, 0));
+            menu.Display(player, 0);
+        }
+
+        // This map's round backups of the live match, newest round first.
+        private List<BackupMenuEntry> LiveBackupMenuEntries(CCSPlayerController player)
+        {
+            var entries = new List<BackupMenuEntry>();
+            string prefix = $"matchzy_{liveMatchId}_{matchConfig.CurrentMapNumber}_round";
+            var rounds = GetBackups(liveMatchId.ToString())
+                .Select(path => Path.GetFileName(path))
+                .Where(name => name.StartsWith(prefix, StringComparison.Ordinal) && name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                .Select(name => (name, ok: int.TryParse(name[prefix.Length..^5], out int round), round))
+                .Where(x => x.ok)
+                .OrderByDescending(x => x.round)
+                .Take(15);
+            string backupDir = Path.Combine(Server.GameDirectory, "csgo", "MatchZyDataBackup");
+            foreach (var (name, _, round) in rounds)
+            {
+                var data = ParseBackupFile(Path.Combine(backupDir, name));
+                string score = data == null ? "" : $" | {data.GetValueOrDefault("team1_score", "0")}-{data.GetValueOrDefault("team2_score", "0")}";
+                string ago = data != null && DateTime.TryParse(data.GetValueOrDefault("timestamp", ""), out var t) ? $" | {BackupTimeAgo(player, DateTime.Now - t, false)}" : "";
+                entries.Add(new BackupMenuEntry(name, $"Round {round}{score}{ago}"));
+            }
+            return entries;
+        }
+
+        // No live match: the newest backup files on disk, across all matches (crash recovery).
+        private List<BackupMenuEntry> DiskBackupMenuEntries(CCSPlayerController player)
+        {
+            var entries = new List<BackupMenuEntry>();
+            string backupDir = Path.Combine(Server.GameDirectory, "csgo", "MatchZyDataBackup");
+            if (!Directory.Exists(backupDir))
+                return entries;
+            var files = new DirectoryInfo(backupDir).GetFiles("matchzy_*.json")
+                .OrderByDescending(f => f.LastWriteTime)
+                .Take(10);
+            foreach (var file in files)
+            {
+                var data = ParseBackupFile(file.FullName);
+                if (data == null)
+                    continue;
+                string ago = DateTime.TryParse(data.GetValueOrDefault("timestamp", ""), out var t) ? $" | {BackupTimeAgo(player, DateTime.Now - t, true)}" : "";
+                entries.Add(new BackupMenuEntry(file.Name,
+                    $"#{data.GetValueOrDefault("matchid", "?")} {data.GetValueOrDefault("map_name", "?")} R{data.GetValueOrDefault("round", "?")}" +
+                    $" | {data.GetValueOrDefault("team1_score", "0")}-{data.GetValueOrDefault("team2_score", "0")}{ago}"));
+            }
+            return entries;
         }
 
         private void OpenPauseMenu(CCSPlayerController player, WasdMenu parent)

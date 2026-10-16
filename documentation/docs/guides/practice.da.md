@@ -38,13 +38,16 @@ Hjælp, mens du lærer:
 
 - `.bot` placerer en bot, hvor du står, og kigger samme vej som dig. `.crouchbot`, `.boost` og `.crouchboost` til andre opstillinger.
 - `.savebotpos <navn>` gemmer et bot-spot; `.loadbotpos` uden navn spawner alle gemte spots på banen og genskaber en hel opstilling med det samme.
-- `.showbotpos` viser de gemte spots; `.botjiggle` får bots til at strafe, til peek-træning.
+- `.showbotpos` viser de gemte spots; `.botjiggle` får bots til at strafe, til peek-træning (`.botjigglerange`, `.botjigglerandom`).
+- `.botspawn <navn>` bygger en pulje af pladser; `.placebot <antal> <navn>` sætter bots på tilfældige pladser fra den, så hver gentagelse får en ny opstilling. `.showbotspawn` viser pladserne (stil dig i en + ++e++ sletter den).
+- `.botshoot` får bots til at skyde igen fra deres plads efter `.botreactiontime` (standard 500 ms). Slå din livsregenerering fra med `.liferegon` (eller `.allliferegon false` for alle), så deres skud tæller. `.botrespawn` og `.botlifereg` styrer, hvad der sker, når du rammer dem.
+- `.startround` nulstiller gentagelsen: utility ryddet, tilfældige spawns til alle spillere, bots tilbage på deres plads, 5 sekunders frys.
 - Bot-kommandoerne respekterer `-nobots` og tager aldrig CSTV-pladsen, så en practice-session kan ikke stoppe en kørende GOTV.
 
 ## Positioner og spawns { #positions-and-spawns }
 
-- `.savepos <navn>` / `.loadpos <navn>`: op til 32 navngivne positioner.
-- `.showspawns`: markører på alle konkurrence-spawns; sigt + ++e++ teleporterer dig dertil.
+- `.savepos <navn>` / `.loadpos <navn>`: op til 32 navngivne positioner. `.slp` / `.tlp` / `.dlp` bruger pladsen uden navn, og efter en død respawner du der.
+- `.showspawns`: en nummereret boks på gulvet ved hver konkurrence-spawn (blå CT, orange T); sigt på en boks (den bliver grøn) eller stil dig i en og tryk ++e++ for at teleportere dertil. Nummeret er det, `.spawn <n>` bruger.
 - `.spawn <n>`, `.bestspawn`, `.worstspawn` til at øve timings, der afhænger af spawnet.
 
 ## Skift hold { #team-switching }

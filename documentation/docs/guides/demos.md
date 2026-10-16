@@ -11,13 +11,14 @@ When GOTV is enabled (`tv_enable 1`, from the launch options or any cfg), MatchZ
 
 Demo recording in CS2 fails silently in several ways (a `mp_restartgame` killing the recording, another plugin changing map, dynamic CSTV removing the bot). This fork guards against them:
 
-- Recording starts after the go-live restart has settled, in match, scrim and hill.
+- Recording starts on the first round after the go-live restart, in match, scrim and hill (about a second after LIVE).
 - The file is checked to be **growing** on disk, not just to exist, and it is watched for the whole map. A stalled recording is restarted into a new file (up to three attempts).
 - A restarted recording never overwrites an earlier file: it gets `_part2`, `_part3`, ... and every part of the map is uploaded.
 - `tv_record_immediate` is used, so a demo survives a server crash.
 - `tv_enable_dynamic 0` is set so the CSTV bot is not removed while nobody spectates.
 - Practice bots never take the CSTV slot.
-- "CSTV Recording..." is only shown in chat once the file exists. If recording fails, chat says so.
+- "CSTV is recording this match." is only shown in chat once the file exists. If recording fails, chat says so.
+- When the map ends, chat says the recording is finished, with the demo file name, and whether it will be uploaded. It also says so when the recording stops early (`.endmatch`, a reset or a map change).
 - Every start, confirmation, retry and stop is written to the server log.
 
 ## Uploading

@@ -17,7 +17,7 @@ Legend: **cfg** = present in the generated `config.cfg`.
 | `matchzy_everyone_is_admin` | `false` | Y | Every player gets MatchZy admin rights. For private practice servers. |
 | `matchzy_autostart_mode` | `1` | Y | Mode on map load: `0` none (sleep), `1` match/warmup, `2` practice. Mode commands (`css_prac`, `css_match`, ...) also write it, so a chosen mode survives a map change. |
 | `matchzy_whitelist_enabled_default` | `false` | Y | Enforce `whitelist.cfg` on connect. Admins can toggle with `.whitelist`. |
-| `matchzy_kick_when_no_match_loaded` | `false` | Y | Kick players who are not on the loaded match's roster (everyone if no match is loaded). Admins are exempt. |
+| `matchzy_kick_when_no_match_loaded` | `false` | Y | Kick players who are not on the loaded match's roster (everyone if no match is loaded). Also kicks the players left on the server when a series ends (not after `get5_endmatch`), unless a new match is loaded within the reset delay. Admins are exempt. |
 | `matchzy_hostname_format` | `""` | Y | Hostname template, e.g. `MatchZy \| {TEAM1} vs {TEAM2}`. Empty keeps your hostname. |
 | `matchzy_map_console_command_enabled` | `true` | Y | Register `css_map` / `!map`. Set `false` when another plugin owns it. `.map` always works. |
 | `matchzy_asay_console_enabled` | `true` | Y | Register `css_asay` / `!asay`. Set `false` when another plugin owns it. |
@@ -86,6 +86,10 @@ Tactical timeouts in overtime are set in `live.cfg` (`mp_team_timeout_ot_add_onc
 | `matchzy_match_start_message` | `""` | Y | Chat message at match start. `$$$` = new line. Supports `{TIME}`, `{MATCH_ID}`, `{MAP}`, `{MAPNUMBER}`, `{TEAM1}`, `{TEAM2}` and color tags. |
 | `matchzy_match_end_auto_changelevel` | `true` | Y | Change map automatically after a match ends. Disable for panel-driven servers (G5API). |
 | `matchzy_empty_shutdown_seconds` | `0` | Y | Close the server (`quit`) after it has had no players for this many seconds. `0` = off. |
+| `matchzy_series_end_shutdown_seconds` | `0` | Y | Close the server (`quit`) this many seconds after a series ends, also after a forfeit, `.gg` or `get5_endmatch`. A match loaded within the delay cancels it. `0` = off. |
+
+!!! note "`matchzy_series_end_shutdown_seconds`"
+    Before closing, MatchZy sends `server_shutdown` with `reason` `series_end` and the match id, to the server's remote log URL and to the match's own, and waits for demo and backup uploads. Keep it above `tv_delay` so CSTV viewers see the end of the match.
 
 !!! note "`matchzy_empty_shutdown_seconds`"
     Bots and CSTV do not count as players, and the empty time is also counted from server start. Before closing, MatchZy sends `server_shutdown` with `reason` `empty` and waits for demo and backup uploads. It can be set per match in the match config's `cvars`.
@@ -95,13 +99,14 @@ Tactical timeouts in overtime are set in `live.cfg` (`mp_team_timeout_ot_add_onc
 | Setting | Default | cfg | Description |
 |---|---|---|---|
 | `matchzy_forfeit_ready_timeout` | `0` | Y | Loaded matches: seconds after a map's ready phase begins before a team that is not ready forfeits the series. `0` = off. |
+| `matchzy_forfeit_join_grace_seconds` | `60` | Y | When the ready time runs out while a registered player of the team that is not ready joined in the last this many seconds, the forfeit waits up to this long for them. Once per player per ready phase. `0` = off. |
 | `matchzy_forfeit_veto_ready_timeout` | `-1` | Y | The same for the ready-up before the map veto. `-1` = same as `matchzy_forfeit_ready_timeout`, `0` = no limit. |
 | `matchzy_ready_mode` | `0` | Y | Loaded matches: `0` = players type `.ready`. `1` = join mode (see below). |
 | `matchzy_join_start_delay` | `10` | Y | Join mode: seconds between everyone having joined and the match starting. |
 | `matchzy_forfeit_leave_timeout` | `0` | Y | Loaded matches: seconds a team may have nobody on its side during a live map before it forfeits the series. `0` = off. |
 | `matchzy_veto_step_timeout` | `0` | Y | Seconds a veto captain has per ban, pick or side choice; then it is made at random (side: CT). `0` = off. |
 
-- **`matchzy_forfeit_ready_timeout`**: if neither team is ready when the time runs out, the series ends in a tie.
+- **`matchzy_forfeit_ready_timeout`**: if neither team is ready when the time runs out, the series ends in a tie. The reminders name the registered players a team is still missing. `.tech`, `.pause` and `.tac` do not stop the ready time; before the match is live they answer with the time left.
 - **`matchzy_ready_mode 1`** (join mode): a team is ready once `min_players_to_ready` of its players are on its side, and the match starts `matchzy_join_start_delay` seconds later.
 
 ## Demos (GOTV)
@@ -165,6 +170,7 @@ Database connection settings are in [`database.json`](files.md#databasejson), no
 | `matchzy_max_saved_last_grenades` | `512` | Y | Grenade history per player per map. `0` disables. |
 | `matchzy_smoke_color_enabled` | `false` | Y | Player-colored smokes. |
 | `matchzy_botjiggle_range` | `30` | N | Strafe width for `.botjiggle`. |
+| `matchzy_spawn_markers_enabled_default` | `false` | Y | Show the `.showspawns` markers automatically when practice starts. |
 | `matchzy_grenadelibrary_labels` | `true` | N | Text labels above `.shownades` markers. |
 | `matchzy_grenadelibrary_label_scale` | `0.2` | N | Size of those labels. |
 | `matchzy_prac_disable_magazine_drop` | `true` | N | Keep leftover ammo on reload in practice. |

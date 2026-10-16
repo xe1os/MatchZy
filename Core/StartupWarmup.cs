@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -91,12 +90,12 @@ namespace MatchZy
         /// calls with throwaway data here means the real round finds them warm. Touches nothing
         /// in the engine, so it is safe off the game thread.
         /// </summary>
-        private void WarmRoundStartPaths()
+        /// <param name="configHandlersReady">Runs on the background thread as soon as the config.cfg
+        /// handlers are compiled (also when that step failed), so Load can queue the exec then.</param>
+        private void WarmRoundStartPaths(Action configHandlersReady)
         {
             _ = Task.Run(() =>
             {
-                Stopwatch sw = Stopwatch.StartNew();
-                int prepared = 0;
                 try
                 {
                     // First, because Load() queues config.cfg right after this starts and the exec runs
@@ -106,7 +105,14 @@ namespace MatchZy
                     // handler the game thread reaches while it is still being compiled here just waits
                     // for that compile instead of doing it twice. Only these prefixes: menu commands
                     // must stay cold (CS2MenuManager is an optional, lazily resolved dependency).
-                    prepared += PrepareConfigCommandHandlers();
+                    try
+                    {
+                        PrepareConfigCommandHandlers();
+                    }
+                    finally
+                    {
+                        configHandlersReady();
+                    }
 
                     // Newtonsoft: contract cache for the two types the round backup serializes.
                     Newtonsoft.Json.JsonConvert.SerializeObject(new MatchConfig());
@@ -131,19 +137,18 @@ namespace MatchZy
                         .GetMethod("DispatchSpawn", Type.EmptyTypes);
                     foreach (var method in new[] { throwMethod, throwInternalMethod, createMethod, spawnMethod })
                     {
-                        if (method != null && PrepareMethodLogged(method))
-                            prepared++;
+                        if (method != null)
+                            PrepareMethodLogged(method);
                     }
 
                     // JIT the round_start methods themselves. PrepareMethod compiles without
                     // running anything.
-                    prepared += PrepareMatchingMethods(method => Array.IndexOf(RoundStartWarmMethods, method.Name) >= 0);
+                    PrepareMatchingMethods(method => Array.IndexOf(RoundStartWarmMethods, method.Name) >= 0);
                 }
                 catch (Exception e)
                 {
                     Log($"[Warmup] round_start warm-up failed: {e.GetType().Name}: {e.Message}");
                 }
-                Log($"[Warmup] round_start path warmed in {sw.ElapsedMilliseconds} ms on a background thread ({prepared} methods prepared).");
             });
         }
     }

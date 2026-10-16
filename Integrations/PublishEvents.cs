@@ -60,6 +60,13 @@ namespace MatchZy
         // The scorebot's per-action events (legacy classes ending in LiveEvent, and their Get5-format
         // counterparts starting with Get5) are many per round and only useful in real time;
         // everything else, pauses included, is a match event that must arrive.
+        // The events a panel needs to record a result. Their delivery is logged (success too), so a
+        // missing result can be traced in the server log instead of only in the panel's.
+        private static readonly HashSet<string> DeliveryLoggedEvents = new(StringComparer.Ordinal)
+        {
+            "series_start", "going_live", "map_result", "series_end", "demo_upload_ended", "server_shutdown",
+        };
+
         private static bool IsHighVolumeLiveEvent(MatchZyEvent e)
         {
             string name = e.GetType().Name;
@@ -152,10 +159,16 @@ namespace MatchZy
         {
             try
             {
-                if (string.IsNullOrEmpty(target.Url))
-                    return true;
-
                 long eventMatchId = @event is MatchZyMatchEvent matchEvent ? matchEvent.MatchId : currentMatchId;
+                bool logDelivery = DeliveryLoggedEvents.Contains(@event.EventName);
+
+                if (string.IsNullOrEmpty(target.Url))
+                {
+                    // A panel that never got series_end or map_result can be told why.
+                    if (logDelivery && eventMatchId != -1)
+                        Log($"[SendEventAsync] {@event.EventName} (match {eventMatchId}) not sent: no remote log URL is set.");
+                    return true;
+                }
 
                 // Never send match events with an invalid matchId. Server lifecycle events
                 // (server_ready, map_change, server_shutdown) are not about a match.
@@ -183,9 +196,11 @@ namespace MatchZy
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    Log($"[SendEventAsync] {@event.EventName} to {RedactUrl(target.Url)} failed: {response.StatusCode}");
+                    Log($"[SendEventAsync] {@event.EventName} (match {eventMatchId}) to {RedactUrl(target.Url)} failed: {(int)response.StatusCode} {response.StatusCode}");
                     return false;
                 }
+                if (logDelivery)
+                    Log($"[SendEventAsync] {@event.EventName} (match {eventMatchId}) delivered to {RedactUrl(target.Url)}: {(int)response.StatusCode}");
                 return true;
             }
             catch (OperationCanceledException) when (shutdown.IsCancellationRequested)

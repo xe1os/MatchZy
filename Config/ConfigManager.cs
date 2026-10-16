@@ -1,8 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Reflection;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
+using CounterStrikeSharp.API.Core.Attributes.Registration;
+using CounterStrikeSharp.API.Modules.Cvars;
 using CounterStrikeSharp.API.Modules.Memory;
 using CounterStrikeSharp.API.Modules.Utils;
 
@@ -88,7 +92,33 @@ namespace MatchZy
         /// </summary>
         public static string? ReadDefaultCfg(string fileName) => ReadResource(CfgResourcePrefix + fileName);
 
-        public void InitializeConfigs()
+        /// <summary>
+        /// Every console name the plugin registers: FakeConVar fields and [ConsoleCommand] methods.
+        /// The config.cfg merge prunes matchzy_* lines that are not in this set (removed from the
+        /// source), so a retired setting does not stay behind as "Unknown command" on old servers.
+        /// </summary>
+        public static HashSet<string> CollectRegisteredNames(object plugin)
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+            Type type = plugin.GetType();
+            foreach (FieldInfo field in type.GetFields(flags))
+            {
+                if (!field.FieldType.IsGenericType || field.FieldType.GetGenericTypeDefinition() != typeof(FakeConVar<>))
+                    continue;
+                object? cvar = field.GetValue(field.IsStatic ? null : plugin);
+                if (cvar?.GetType().GetProperty("Name")?.GetValue(cvar) is string name)
+                    names.Add(name);
+            }
+            foreach (MethodInfo method in type.GetMethods(flags))
+            {
+                foreach (ConsoleCommandAttribute attr in method.GetCustomAttributes<ConsoleCommandAttribute>())
+                    names.Add(attr.Command);
+            }
+            return names;
+        }
+
+        public void InitializeConfigs(ISet<string>? registeredNames = null)
         {
             // The default cfgs are the files in the repo's cfg/ folder, embedded in the plugin DLL
             // (MatchZy.csproj) - one source of truth. They used to be duplicated here as strings and
@@ -97,7 +127,8 @@ namespace MatchZy
             foreach (string fileName in new[]
             {
                 ConfigFiles.Paths.Config, ConfigFiles.Paths.Dryrun, ConfigFiles.Paths.Knife, ConfigFiles.Paths.Hill,
-                ConfigFiles.Paths.Live, ConfigFiles.Paths.LiveWingman, ConfigFiles.Paths.Practice,
+                ConfigFiles.Paths.Live, ConfigFiles.Paths.LiveWingman, ConfigFiles.Paths.LiveRush,
+                ConfigFiles.Paths.Live1v1, ConfigFiles.Paths.Practice,
                 ConfigFiles.Paths.Scrim, ConfigFiles.Paths.Sleep, ConfigFiles.Paths.Warmup,
             })
             {
@@ -114,7 +145,7 @@ namespace MatchZy
 
             // Append any cvars missing from an existing config.cfg (preserves user edits)
             if (configs.TryGetValue(ConfigFiles.Paths.Config, out string? configTemplate))
-                MergeMissingConfigCvars(configTemplate);
+                MergeMissingConfigCvars(configTemplate, registeredNames);
 
             // Create matchzymaps.cfg separately with default map rotation
             CreateMapRotationFile();
@@ -162,8 +193,9 @@ Instead of editing warmup.cfg (or any other mode cfg), you can put only the
 lines you want to change in a file named after it with "_override" added,
 for example warmup_override.cfg, one folder up. MatchZy runs it right after
 warmup.cfg, so its values win. MatchZy never creates or changes these files.
-Works for warmup, knife, live, live_wingman, scrim, hill, prac, dryrun and
-sleep. Settings from a loaded match config's "cvars" block still apply on top.
+Works for warmup, knife, live, live_wingman, live_rush, live_1v1, scrim, hill,
+prac, dryrun and sleep. Settings from a loaded match config's "cvars" block
+still apply on top.
 
 config.cfg
 ----------
@@ -255,7 +287,7 @@ to compare with.
             File.WriteAllText(path, content);
         }
 
-        private void MergeMissingConfigCvars(string templateContent)
+        private void MergeMissingConfigCvars(string templateContent, ISet<string>? registeredNames)
         {
             try
             {
@@ -359,33 +391,58 @@ to compare with.
 
                 // Prune retired cvars: a convar that was renamed/removed leaves a dead line in old
                 // config.cfg files that spams "Unknown command '<name>'!" every time config.cfg execs.
-                // Remove the setting line (or a commented-out one) plus a directly-preceding help
-                // comment. Only EXACT retired names are touched; the current replacement (if any) is
-                // appended by the missing-cvar pass above, so this migrates the file cleanly.
+                // Remove the active setting line only; comment lines stay. Only matchzy_* names are touched: the listed ones, plus any the plugin no longer
+                // registers (see autoPrune). The current replacement (if any) is appended by the
+                // missing-cvar pass above, so this migrates the file cleanly.
                 var retiredCvars = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                 {
                     "matchzy_ready_hint_suppress_warmup", // renamed -> matchzy_ready_hide_warmup_hud (itself now retired)
                     "matchzy_ready_hide_warmup_hud",      // folded into matchzy_ready_hint_style modes 1/2
                     "matchzy_ready_block_warmup_announce",// removed: experimental warmup-announce block (dead end)
+                    "matchzy_random_spawns",              // removed with the old random-spawn option
                 };
-                bool removedRetired = false;
-                for (int i = lines.Count - 1; i >= 0; i--)
+
+                // Automatic pruning: a matchzy_* name that the plugin no longer registers (no
+                // FakeConVar, no [ConsoleCommand]) and that is not in the template was removed from
+                // the source, so it is pruned like the names above without having to be listed.
+                // Only trusted when every template cvar resolved to a registered name - if the
+                // reflection scan came back incomplete, it would otherwise delete live settings.
+                var templateNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var rawLine in templateContent.Split('\n'))
                 {
-                    var t = lines[i].Trim();
+                    var t = rawLine.Trim();
                     if (t.Length == 0)
                         continue;
                     string first = t.StartsWith("//")
                         ? t.TrimStart('/').Trim().Split(new[] { ' ', '\t' }, 2)[0]
                         : t.Split(new[] { ' ', '\t' }, 2)[0];
-                    if (!retiredCvars.Contains(first))
+                    if (first.StartsWith("matchzy_", StringComparison.OrdinalIgnoreCase))
+                        templateNames.Add(first);
+                }
+                bool autoPrune = registeredNames != null && registeredNames.Count > 0 && templateNames.All(registeredNames.Contains);
+                if (registeredNames != null && !autoPrune)
+                    Console.WriteLine($"[MatchZy] Skipped pruning removed cvars from {ConfigFiles.Paths.Config}: the registered cvar list is incomplete.");
+                bool IsRetired(string name) =>
+                    retiredCvars.Contains(name)
+                    || (autoPrune
+                        && name.StartsWith("matchzy_", StringComparison.OrdinalIgnoreCase)
+                        && !templateNames.Contains(name)
+                        && !registeredNames!.Contains(name));
+                var removedNames = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+                bool removedRetired = false;
+                for (int i = lines.Count - 1; i >= 0; i--)
+                {
+                    var t = lines[i].Trim();
+                    // Comment lines are never touched: help text, the admin's own notes and
+                    // commented-out settings are harmless (only an active line prints
+                    // "Unknown command"), and help text often spans several lines.
+                    if (t.Length == 0 || t.StartsWith("//"))
                         continue;
+                    string first = t.Split(new[] { ' ', '\t' }, 2)[0];
+                    if (!IsRetired(first))
+                        continue;
+                    removedNames.Add(first);
                     lines.RemoveAt(i);
-                    // Also drop a single directly-preceding help comment (not the update header).
-                    // Never an admin's commented-out setting ("// matchzy_x 0"): dropping it would make
-                    // the merge append that setting again as an active default.
-                    if (i - 1 >= 0 && lines[i - 1].Trim().StartsWith("//") && lines[i - 1].Trim() != header
-                        && !lines[i - 1].Trim().TrimStart('/').Trim().StartsWith("matchzy_", StringComparison.OrdinalIgnoreCase))
-                        lines.RemoveAt(i - 1);
                     removedRetired = true;
                 }
 
@@ -420,7 +477,7 @@ to compare with.
                 if (removedDuplicateHeaders)
                     Console.WriteLine($"[MatchZy] Collapsed duplicate update headers in {ConfigFiles.Paths.Config}.");
                 if (removedRetired)
-                    Console.WriteLine($"[MatchZy] Removed retired cvar line(s) from {ConfigFiles.Paths.Config}.");
+                    Console.WriteLine($"[MatchZy] Removed cvar(s) no longer in MatchZy from {ConfigFiles.Paths.Config}: {string.Join(", ", removedNames)}");
             }
             catch (Exception ex)
             {

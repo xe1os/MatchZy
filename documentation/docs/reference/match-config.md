@@ -71,12 +71,13 @@ Prefer an in-game flow? Admins can build the same config with the [`.matchsetup`
 | `veto_first` | string | - | `team1`, `team2` or `random`: who starts a generated veto. |
 | `veto_mode` | string[] | generated | Veto order using `team1_ban`, `team2_ban`, `team1_pick`, `team2_pick`. Generated if omitted. |
 | `map_sides` | string[] | `knife` | Per map: `team1_ct`, `team1_t`, `team2_ct`, `team2_t` or `knife`. A fixed side means no knife round on that map. |
-| `players_per_team` | integer | `5` | Players per side at a time. Extra roster players (substitutes) wait on Spectator while their side is full. Also the number of bots on a bot team. A team whose `players` roster has fewer players readies up with that many: 4 players listed in a 5v5 means the team is ready once those 4 have typed `.ready`, no `.forceready` needed. |
+| `players_per_team` | integer | by mode | Players per side at a time. Defaults to 5 for competitive, 2 for wingman, 3 for rush and 1 for 1v1. Extra roster players (substitutes) wait on Spectator while their side is full. Also the number of bots on a bot team. A team whose `players` roster has fewer players readies up with that many: 4 players listed in a 5v5 means the team is ready once those 4 have typed `.ready`, no `.forceready` needed. |
 | `min_players_to_ready` | integer | `1` | Players a team needs before `.forceready` can ready the whole team. Never fewer than `players_per_team` minus `matchzy_forceready_max_missing` (default: at most one player short, so 4 in a 5v5); a higher value here makes it stricter. In join ready mode, the players a team needs on its side (default: the team's roster size, at most `players_per_team`). |
 | `min_spectators_to_ready` | integer | `0` | Ready spectators needed. |
 | `spectators` | object | `{}` | `{ "players": { "<steamid64>": "<name>" } }`. |
 | `clinch_series` | bool | `true` | End the series once a team has won the majority of maps. |
-| `wingman` | bool | `false` | Wingman game mode, uses `live_wingman.cfg`. |
+| `game_mode` | string | `competitive` | `competitive` (`live.cfg`), `wingman` (`live_wingman.cfg`), `rush` (`game_mode 6`, `live_rush.cfg`) or `1v1` (competitive game mode, `live_1v1.cfg`). The server switches `game_mode` before the map loads. If omitted, a maplist with only rush maps (`rush_001` and other `rush_` maps, `aim_rush`) plays as rush. |
+| `wingman` | bool | `false` | Same as `"game_mode": "wingman"`. `game_mode` wins when both are set. |
 | `cvars` | object | - | Cvars applied when the match loads and before each map goes live, e.g. `{ "mp_overtime_enable": "1" }`. See below. |
 
 !!! note "`cvars`"

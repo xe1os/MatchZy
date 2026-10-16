@@ -11,6 +11,7 @@ using CounterStrikeSharp.API.Modules.Memory;
 using CounterStrikeSharp.API.Modules.Memory.DynamicFunctions;
 using CounterStrikeSharp.API.Modules.Timers;
 using CounterStrikeSharp.API.Modules.Utils;
+using CounterStrikeSharp.API.Modules.UserMessages;
 
 namespace MatchZy
 {
@@ -339,6 +340,10 @@ namespace MatchZy
             // round's team-damage penalties (kick / warn). Disable them in practice regardless of which
             // cfg branch ran above.
             Server.ExecuteCommand("mp_autokick 0; mp_spawnprotectiontime 0; mp_td_dmgtokick 0; mp_td_dmgtowarn 0; mp_td_spawndmgthreshold 0; mp_tkpunish 0");
+            // No cash awards in practice (money is maxed anyway). A kicked or self-killed practice
+            // bot on the other team otherwise printed "+$300 ... compensation for the suicide of"
+            // to every player. Every mode cfg sets both back to 1.
+            Server.ExecuteCommand("mp_playercashawards 0; mp_teamcashawards 0");
 
             // Clear leftover bots ourselves (by name, CSTV-safe) - the cfg templates no longer run a
             // bare bot_kick, which could also take out the CSTV bot and kill GOTV.
@@ -360,11 +365,13 @@ namespace MatchZy
 
             // Resolve the grenade factory signatures now, while practice is switching modes anyway,
             // instead of on the first .rt / .throw of each grenade type (a long stall mid-practice).
-            long prewarmStart = System.Diagnostics.Stopwatch.GetTimestamp();
-            int factories = GrenadeFunctions.Prewarm();
-            Log($"[Practice] Grenade factories resolved: {factories}/4 in {System.Diagnostics.Stopwatch.GetElapsedTime(prewarmStart).TotalMilliseconds:0.0} ms.");
+            GrenadeFunctions.Prewarm();
 
             GetSpawns();
+            ResetPracticeExtras();
+            AddTimer(1.5f, () => { if (isPractice) WarmSpawnFloorCache(); }, TimerFlags.STOP_ON_MAPCHANGE);
+            if (spawnMarkersEnabledDefault.Value)
+                AddTimer(2.0f, () => { if (isPractice) ShowAllSpawnMarkers(); }, TimerFlags.STOP_ON_MAPCHANGE);
             string[] practiceHelpKeys =
             {
                 "matchzy.prac.help.spawns", "matchzy.prac.help.bots", "matchzy.prac.help.botpositions",
@@ -1066,49 +1073,289 @@ namespace MatchZy
             }
         }
 
-        public void ShowSpawnBeam(Position spawn, Color color)
+        // Spawn marker = a flat square outline on the floor (4 beams) plus the spawn number floating
+        // above it, so the number to use with .spawn / css_spawn is visible in the world.
+        const float spawnMarkerHalfSize = 16.0f;   // 32u box = player hull footprint
+        // Lift the box +8u off the floor (issue MatchZy-Enhanced#11): at +0 the marker sinks under
+        // shallow water (e.g. de_ancient) and is invisible.
+        const float spawnMarkerFloorLift = 8.0f;
+        const float spawnMarkerLabelHeight = 40.0f;
+        // Floor lookup: nav mesh point within this range of the spawn, and no further than
+        // spawnMarkerMaxFloorDrop below/above it (a different floor level is not this spawn's floor).
+        const float spawnMarkerNavSearchDistance = 128.0f;
+        const float spawnMarkerMaxFloorDrop = 32.0f;
+        // Standing inside a box (this far up from its floor) + USE snaps onto that spawn.
+        const float spawnMarkerStandInHeight = 36.0f;
+
+        // Per drawn marker, indexed like activeSpawnMarkers: the entities to recolor on hover.
+        sealed class SpawnMarkerVisual
         {
-            CBeam? beam = Utilities.CreateEntityByName<CBeam>("beam");
-            if (beam == null)
+            public required string Side;
+            public required int Number;
+            public required Color BaseColor;
+            public readonly List<uint> Edges = new();
+            public uint Label;
+            public bool Highlighted;
+            public float FloorZ;
+        }
+        readonly List<SpawnMarkerVisual> spawnMarkerVisuals = new();
+        static readonly Color spawnMarkerHoverColor = Color.Lime;
+
+        public void ShowSpawnMarker(Position spawn, Color color, int number, string side)
+        {
+            var visual = new SpawnMarkerVisual { Side = side, Number = number, BaseColor = color };
+            spawnMarkerVisuals.Add(visual);
+            Vector p = spawn.PlayerPosition;
+            visual.FloorZ = SpawnMarkerFloorZ(p);
+            float z = visual.FloorZ + spawnMarkerFloorLift;
+            foreach (uint raw in DrawFloorBox(p.X, p.Y, z, spawnMarkerHalfSize, color))
             {
-                Log($"Failed to create beam for the spawn");
-                return;
+                spawnMarkerEntities.Add(raw);
+                visual.Edges.Add(raw);
             }
 
-            beam.LifeState = 1;
-            beam.Width = 5;
-            beam.Render = color;
-
-            // Lift the beam base +8u off the floor (issue MatchZy-Enhanced#11): at +0 the
-            // marker sinks under shallow water (e.g. de_ancient) and is invisible.
-            Vector basePos = new Vector(spawn.PlayerPosition.X, spawn.PlayerPosition.Y, spawn.PlayerPosition.Z + 8.0f);
-
-            beam.EndPos.X = basePos.X;
-            beam.EndPos.Y = basePos.Y;
-            beam.EndPos.Z = spawn.PlayerPosition.Z + 100.0f;
-
-            beam.Teleport(basePos, new QAngle(0, 0, 0), new Vector(0, 0, 0));
-
-            beam.DispatchSpawn();
-            spawnMarkerBeams.Add(beam.EntityHandle.Raw);
+            var text = Utilities.CreateEntityByName<CPointWorldText>("point_worldtext");
+            if (text == null)
+                return;
+            text.MessageText = number.ToString();
+            text.Color = color;
+            text.FontName = "Arial Bold";
+            // The wrapper properties are get-only and default to off/0 (invisible label): schema-set them.
+            Schema.SetSchemaValue(text.Handle, "CPointWorldText", "m_bEnabled", true);
+            Schema.SetSchemaValue(text.Handle, "CPointWorldText", "m_flFontSize", 80.0f);
+            Schema.SetSchemaValue(text.Handle, "CPointWorldText", "m_flWorldUnitsPerPx", 0.25f);
+            Schema.SetSchemaValue(text.Handle, "CPointWorldText", "m_bFullbright", true);
+            Schema.SetSchemaValue(text.Handle, "CPointWorldText", "m_nJustifyHorizontal", 1);
+            Schema.SetSchemaValue(text.Handle, "CPointWorldText", "m_nJustifyVertical", 1);
+            // Billboard + roll 90 = upright and facing every viewer, never mirrored.
+            Schema.SetSchemaValue(text.Handle, "CPointWorldText", "m_nReorientMode", 1);
+            Vector labelPos = new Vector(p.X, p.Y, visual.FloorZ + spawnMarkerLabelHeight);
+            text.Teleport(labelPos, new QAngle(0, 0, 90), new Vector(0, 0, 0));
+            text.DispatchSpawn();
+            spawnMarkerEntities.Add(text.EntityHandle.Raw);
+            visual.Label = text.EntityHandle.Raw;
         }
 
-        // Only the beams ShowSpawnBeam drew. Bot-position, coach-spawn, grenade-arc and landing
+        // A flat square outline (4 beams) centered on (cx, cy) at height z. Returns the raw entity
+        // handles so the caller can track and remove them. Shared by .showspawns and .showbotspawn.
+        private List<uint> DrawFloorBox(float cx, float cy, float z, float halfSize, Color color)
+        {
+            var handles = new List<uint>(4);
+            float h = halfSize;
+            // Corners in order, each edge runs from corner i to corner i+1.
+            var corners = new (float X, float Y)[]
+            {
+                (cx - h, cy - h), (cx + h, cy - h), (cx + h, cy + h), (cx - h, cy + h),
+            };
+            for (int i = 0; i < 4; i++)
+            {
+                var a = corners[i];
+                var b = corners[(i + 1) % 4];
+                CBeam? beam = Utilities.CreateEntityByName<CBeam>("beam");
+                if (beam == null)
+                {
+                    Log($"Failed to create beam for a floor marker");
+                    break;
+                }
+                beam.LifeState = 1;
+                beam.Width = 4.0f;
+                beam.Render = color;
+                beam.EndPos.X = b.X;
+                beam.EndPos.Y = b.Y;
+                beam.EndPos.Z = z;
+                beam.Teleport(new Vector(a.X, a.Y, z), new QAngle(0, 0, 0), new Vector(0, 0, 0));
+                beam.DispatchSpawn();
+                handles.Add(beam.EntityHandle.Raw);
+            }
+            return handles;
+        }
+
+        // Spawn entities often sit a few units above the floor, so a box drawn at the spawn origin
+        // floated. Use the nav mesh floor under the spawn instead; fall back to the spawn origin
+        // when there is no nav mesh, the nearest nav point is on another level, or the running
+        // CounterStrikeSharp build has no nav API (older stock builds).
+        //
+        // Cost: CCSNavArea.GetClosestNavArea rebuilds the area list and allocates two native
+        // Vectors (Min/Max) per area on EVERY call. Once per spawn inside .showspawns that took
+        // ~570 ms and the client was dropped (NETWORK_DISCONNECT_OVERFLOW). So the area bounds are
+        // read once per map into plain floats, the floor height is cached per position, and the
+        // cache is warmed when practice starts.
+        private readonly record struct NavBounds(float MinX, float MinY, float MinZ, float MaxX, float MaxY, float MaxZ, IntPtr Area);
+        private static List<NavBounds>? navBoundsCache;
+        private static readonly Dictionary<(float X, float Y, float Z), float> spawnFloorZCache = new();
+
+        private static float SpawnMarkerFloorZ(Vector spawn)
+        {
+            var key = (spawn.X, spawn.Y, spawn.Z);
+            if (spawnFloorZCache.TryGetValue(key, out float cached))
+                return cached;
+            float floorZ = spawn.Z;
+            try
+            {
+                float? navZ = NavFloorZ(spawn.X, spawn.Y, spawn.Z);
+                if (navZ.HasValue && Math.Abs(navZ.Value - spawn.Z) <= spawnMarkerMaxFloorDrop)
+                    floorZ = navZ.Value;
+            }
+            catch
+            {
+                // Missing nav API or no nav mesh: keep the spawn origin.
+            }
+            spawnFloorZCache[key] = floorZ;
+            return floorZ;
+        }
+
+        // Map change: the nav mesh and the spawn positions are the new map's.
+        private static void ForgetNavFloorCache()
+        {
+            navBoundsCache = null;
+            spawnFloorZCache.Clear();
+        }
+
+        // Fill the floor cache for every competitive spawn. Called a moment after practice starts,
+        // so .showspawns itself only does dictionary lookups.
+        private void WarmSpawnFloorCache()
+        {
+            foreach (var list in spawnsData.Values)
+                foreach (var spawn in list)
+                    SpawnMarkerFloorZ(spawn.PlayerPosition);
+        }
+
+        // Own NoInlining methods so a CounterStrikeSharp build without CCSNavArea only fails here,
+        // inside the caller's try, instead of when the caller is JIT-compiled.
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private static float? NavFloorZ(float x, float y, float z)
+        {
+            var bounds = navBoundsCache ??= ReadNavBounds();
+            float maxDistSq = spawnMarkerNavSearchDistance * spawnMarkerNavSearchDistance;
+            float bestDistSq = float.MaxValue;
+            IntPtr best = IntPtr.Zero;
+            foreach (var b in bounds)
+            {
+                // Distance from the point to the area's bounding box (0 inside).
+                float dx = Math.Max(Math.Max(b.MinX - x, 0.0f), x - b.MaxX);
+                float dy = Math.Max(Math.Max(b.MinY - y, 0.0f), y - b.MaxY);
+                float dz = Math.Max(Math.Max(b.MinZ - z, 0.0f), z - b.MaxZ);
+                float distSq = dx * dx + dy * dy + dz * dz;
+                if (distSq > maxDistSq || distSq >= bestDistSq)
+                    continue;
+                bestDistSq = distSq;
+                best = b.Area;
+            }
+            if (best == IntPtr.Zero)
+                return null;
+            return new CCSNavArea(best).GetClosestPoint(new Vector(x, y, z)).Z;
+        }
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private static List<NavBounds> ReadNavBounds()
+        {
+            var areas = CCSNavArea.GetAllNavAreas();
+            var result = new List<NavBounds>(areas.Count);
+            foreach (var area in areas)
+            {
+                Vector min = area.Min, max = area.Max;
+                result.Add(new NavBounds(min.X, min.Y, min.Z, max.X, max.Y, max.Z, area.Handle));
+            }
+            return result;
+        }
+
+        // Recolor one marker's box and number (hover highlight). Shared entities, so every player
+        // sees it; in practice that only shows where someone is aiming.
+        private void SetSpawnMarkerHighlight(SpawnMarkerVisual visual, bool on)
+        {
+            if (visual.Highlighted == on)
+                return;
+            visual.Highlighted = on;
+            Color color = on ? spawnMarkerHoverColor : visual.BaseColor;
+            foreach (uint raw in visual.Edges)
+            {
+                var beam = new CHandle<CBeam>(raw).Value;
+                if (beam == null || !beam.IsValid)
+                    continue;
+                beam.Render = color;
+                beam.Width = on ? 6.0f : 4.0f;
+                Utilities.SetStateChanged(beam, "CBaseModelEntity", "m_clrRender");
+                Utilities.SetStateChanged(beam, "CBeam", "m_fWidth");
+            }
+            var label = new CHandle<CPointWorldText>(visual.Label).Value;
+            if (label != null && label.IsValid)
+            {
+                label.Color = color;
+                Utilities.SetStateChanged(label, "CPointWorldText", "m_Color");
+            }
+        }
+
+        // While markers are shown: highlight the marker each player aims at and print which spawn
+        // USE would take them to. 0.1s poll, only alive while markers are drawn.
+        CounterStrikeSharp.API.Modules.Timers.Timer? spawnMarkerHoverTimer = null;
+        readonly Dictionary<int, int> spawnMarkerAimedByPlayer = new();
+
+        private void StartSpawnMarkerHover()
+        {
+            spawnMarkerHoverTimer?.Kill();
+            spawnMarkerHoverTimer = AddTimer(0.1f, SpawnMarkerHoverTick, TimerFlags.REPEAT | TimerFlags.STOP_ON_MAPCHANGE);
+        }
+
+        private void StopSpawnMarkerHover()
+        {
+            spawnMarkerHoverTimer?.Kill();
+            spawnMarkerHoverTimer = null;
+            spawnMarkerAimedByPlayer.Clear();
+        }
+
+        private void SpawnMarkerHoverTick()
+        {
+            try
+            {
+                if (!spawnMarkersActive || !isPractice)
+                    return;
+                var hovered = new HashSet<int>();
+                foreach (var player in Utilities.GetPlayers())
+                {
+                    if (!IsHumanPlayerValid(player) || !player.UserId.HasValue)
+                        continue;
+                    int uid = player.UserId.Value;
+                    int index = TargetSpawnMarkerIndex(player);
+                    if (index >= 0)
+                        hovered.Add(index);
+                    spawnMarkerAimedByPlayer.TryGetValue(uid, out int previous);
+                    // Stored +1 so a missing entry (0) means "aiming at nothing".
+                    if (previous == index + 1)
+                        continue;
+                    spawnMarkerAimedByPlayer[uid] = index + 1;
+                    if (index >= 0 && index < spawnMarkerVisuals.Count)
+                    {
+                        var v = spawnMarkerVisuals[index];
+                        player.PrintToCenter(Localizer.ForPlayer(player, "matchzy.pm.spawnmarkeraim", v.Side, v.Number));
+                    }
+                }
+                for (int i = 0; i < spawnMarkerVisuals.Count; i++)
+                    SetSpawnMarkerHighlight(spawnMarkerVisuals[i], hovered.Contains(i));
+            }
+            catch (Exception e)
+            {
+                Log($"[SpawnMarkerHover] {e.Message}");
+            }
+        }
+
+        // Only the entities ShowSpawnMarker drew. Bot-position, coach-spawn, grenade-arc and landing
         // markers share the "beam" designer name but have their own owners/toggles, so a
         // designer-wide sweep here left those toggles on with dead entity refs. Stored as raw
         // entity handles (index + serial) so a stale entry after a map change resolves to null
         // instead of a dangling pointer.
-        readonly List<uint> spawnMarkerBeams = new();
+        readonly List<uint> spawnMarkerEntities = new();
 
         public void RemoveSpawnBeams()
         {
-            foreach (uint raw in spawnMarkerBeams)
+            foreach (uint raw in spawnMarkerEntities)
             {
-                var beam = new CHandle<CBeam>(raw).Value;
-                if (beam != null && beam.IsValid)
-                    SafeRemoveEntity(beam, "spawnbeam");
+                var ent = new CHandle<CBaseEntity>(raw).Value;
+                if (ent != null && ent.IsValid)
+                    SafeRemoveEntity(ent, "spawnmarker");
             }
-            spawnMarkerBeams.Clear();
+            spawnMarkerEntities.Clear();
+            spawnMarkerVisuals.Clear();
+            StopSpawnMarkerHover();
             // Full teardown: also disarm the +use interaction. Every mode-transition path
             // (match start, prac restart, sleep, map change) already calls RemoveSpawnBeams,
             // so folding the flag/list reset here disarms interaction on all of them.
@@ -1430,6 +1677,19 @@ namespace MatchZy
             }
 
             return noBotsFlag.Value;
+        }
+
+        /// <summary>
+        /// Every mode cfg sets bot_quota 0. With bot_quota_mode normal and bots still in the game
+        /// (practice bots, bots added with bot_add from the console), the engine's quota sweep then
+        /// kicks fake clients until the count fits, and it counts the CSTV bot too: "CSTV kicked by
+        /// Console" right after exec scrim.cfg, and GOTV was gone for the whole match. Kicking the
+        /// real bots by userid first leaves the sweep nothing to remove.
+        /// </summary>
+        public void KickBotsBeforeQuotaReset()
+        {
+            if (Utilities.GetPlayers().Any(p => p?.IsValid == true && p.IsBot && !p.IsHLTV))
+                KickAllBotsProtectCSTV();
         }
 
         /// <summary>
@@ -1946,12 +2206,19 @@ namespace MatchZy
                                 if (strayBot == null || !strayBot.IsValid || !strayBot.IsBot || strayBot.IsHLTV
                                     || strayBot.UserId != strayUserId)
                                     return;
+                                int trackedBotCount;
                                 lock (_botsDictLock)
                                 {
                                     // Claimed as a practice bot since: keep it.
                                     if (pracUsedBots.ContainsKey(strayUserId))
                                         return;
+                                    // A SpawnBot in flight has a bot that is not claimed yet: count it,
+                                    // else the pin is one short and the engine drops that bot.
+                                    trackedBotCount = pracUsedBots.Count + (isSpawningBot ? 1 : 0);
                                 }
+                                // Pin the quota to the tracked bots first, else bot_quota_mode normal
+                                // refills the kicked slot and the next stray is kicked 2.5 s later, forever.
+                                Server.ExecuteCommand($"bot_quota {trackedBotCount}");
                                 Server.ExecuteCommand($"kickid {strayUserId}");
                             }
                         );
@@ -2621,17 +2888,27 @@ namespace MatchZy
                     // Re-validate before kicking
                     if (closestBot.IsValid && closestBot.PlayerPawn?.IsValid == true && closestBot.Connected == PlayerConnectedState.Connected)
                     {
+                        // Untrack the bot and pin bot_quota to what is left BEFORE the kick. With
+                        // bot_quota_mode normal a bare kick left the quota one too high, the engine
+                        // refilled the slot with a new bot, the stray-bot check kicked that one 2.5 s
+                        // later, and the refill/kick cycle ran until the next quota change.
+                        int remainingBots;
+                        lock (_botsDictLock)
+                        {
+                            pracUsedBots.Remove(botUserId);
+                            remainingBots = pracUsedBots.Count;
+                        }
+                        Server.ExecuteCommand($"bot_quota {remainingBots}");
                         // kickid by the captured userid, not bot_kick <name> (names can repeat).
                         Server.ExecuteCommand($"kickid {botUserId}");
 
-                        // Clean up tracking after small delay
+                        // Release the processing mark after a small delay
                         AddTimer(
                             0.1f,
                             () =>
                             {
                                 lock (_botsDictLock)
                                 {
-                                    pracUsedBots.Remove(botUserId);
                                     _botsBeingProcessed.Remove(botUserId);
                                 }
                             }
@@ -2692,7 +2969,8 @@ namespace MatchZy
                 return;
             // Drop the quota to 0 BEFORE kicking, else bot_quota_mode normal refills the kicked bots.
             KickAllBotsProtectCSTV();
-            pracUsedBots = new Dictionary<int, Dictionary<string, object>>();
+            lock (_botsDictLock)
+                pracUsedBots = new Dictionary<int, Dictionary<string, object>>();
             CleanupAllCollisionTimers();
         }
 
@@ -2777,6 +3055,7 @@ namespace MatchZy
         public void OnClearAllCommand(CCSPlayerController? player, CommandInfo? command)
         {
             RemoveGrenadeEntities();
+            ClearDecalsForAll();
         }
 
         [ConsoleCommand("css_cleanup", "Clears all utility currently on the map")]
@@ -2787,6 +3066,7 @@ namespace MatchZy
             if (player == null)
                 return;
             RemoveGrenadeEntities();
+            ClearDecalsForAll();
             PrintToPlayerChat(player, Localizer.ForPlayer(player, "matchzy.pm.utilitycleared"));
         }
 
@@ -2896,6 +3176,38 @@ namespace MatchZy
             // Reset the no-arg .back cursor: a new throw restarts stepping from the newest nade
             // (issue MatchZy-Enhanced#7), and avoids a stale index after the history trim.
             lastGrenadeBackCursor.Remove(client);
+
+            AddThrowToPathRecording(client, data);
+        }
+
+        // Every beam is a networked entity that all clients draw. One arc used one beam per sampled tick
+        // (up to ~160), so a few players throwing in practice put hundreds of beams on everyone's screen.
+        // Cap each arc at MaxArcSegments (the curve still reads fine) and the live total at MaxArcBeams,
+        // dropping the oldest arcs first.
+        private const int MaxArcSegments = 32;
+        private const int MaxArcBeams = 256;
+        private readonly Queue<List<CBeam>> _liveArcs = new();
+        private int _liveArcBeamCount;
+
+        private static List<Vector> DownsampleArc(List<Vector> pts)
+        {
+            if (pts.Count - 1 <= MaxArcSegments)
+                return pts;
+
+            var step = (pts.Count - 1 + MaxArcSegments - 1) / MaxArcSegments;
+            var sampled = new List<Vector>(MaxArcSegments + 2);
+            for (int i = 0; i < pts.Count - 1; i += step)
+                sampled.Add(pts[i]);
+            sampled.Add(pts[^1]);
+            return sampled;
+        }
+
+        private void RemoveArc(List<CBeam> beams)
+        {
+            foreach (var b in beams)
+                if (b != null && b.IsValid)
+                    SafeRemoveEntity(b, "arc");
+            beams.Clear();
         }
 
         // Draw a sampled arc as a chain of CBeams, auto-removed after a few seconds.
@@ -2903,6 +3215,7 @@ namespace MatchZy
         {
             if (pts.Count < 2)
                 return;
+            pts = DownsampleArc(pts);
             long startedAt = System.Diagnostics.Stopwatch.GetTimestamp();
             var beams = new List<CBeam>(pts.Count - 1);
             for (int i = 0; i < pts.Count - 1; i++)
@@ -2920,11 +3233,22 @@ namespace MatchZy
                 b.DispatchSpawn();
                 beams.Add(b);
             }
+            // Arcs expire in throw order, so already-removed (empty) ones sit at the head.
+            while (_liveArcs.Count > 0 && _liveArcs.Peek().Count == 0)
+                _liveArcs.Dequeue();
+            _liveArcs.Enqueue(beams);
+            _liveArcBeamCount += beams.Count;
+            while (_liveArcBeamCount > MaxArcBeams && _liveArcs.Count > 1)
+            {
+                var oldest = _liveArcs.Dequeue();
+                _liveArcBeamCount -= oldest.Count;
+                RemoveArc(oldest);
+            }
+
             AddTimer(10.0f, () =>
             {
-                foreach (var b in beams)
-                    if (b != null && b.IsValid)
-                        SafeRemoveEntity(b, "arc");
+                _liveArcBeamCount -= beams.Count;
+                RemoveArc(beams);
             }, TimerFlags.STOP_ON_MAPCHANGE);
             double elapsedMs = System.Diagnostics.Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds;
             if (elapsedMs >= 5.0)
@@ -3442,6 +3766,31 @@ namespace MatchZy
             return unique;
         }
 
+        // Wipes blood and bullet-hole decals on every client. Decals are client-side, so nothing on
+        // the server can remove them; the engine's own GE_ClearWorldDecalsEvent (202, world: walls,
+        // floors) and GE_ClearEntityDecalsEvent (203, props and other entities) tell each client to
+        // drop them. flagstoclear is a decal-type mask: all bits set clears every type.
+        public void ClearDecalsForAll()
+        {
+            if (!isPractice)
+                return;
+            foreach (int id in new[] { 202, 203 })
+            {
+                try
+                {
+                    var msg = UserMessage.FromId(id);
+                    msg.SetUInt("flagstoclear", uint.MaxValue);
+                    var recipients = new RecipientFilter();
+                    recipients.AddAllPlayers();
+                    msg.Send(recipients);
+                }
+                catch (Exception ex)
+                {
+                    Log($"[ClearDecals] Could not send decal clear message {id}: {ex.Message}");
+                }
+            }
+        }
+
         // RemoveGrenadeEntities SAFE
         public void RemoveGrenadeEntities()
         {
@@ -3584,6 +3933,7 @@ namespace MatchZy
             // used to start with bots already jiggling.
             _botJiggleOn = false;
             ClearBotPosViz();
+            ResetPracticeExtras();
 
             // A .ff still running when practice ends would leave the server at 5x (and players
             // frozen) until its 10 s timer fired; end it now.
@@ -4481,22 +4831,41 @@ namespace MatchZy
                 return;
             if (!IsPlayerValid(player))
                 return;
+            // Next frame: creating ~100 entities is too much work for the client's command
+            // processing (the engine drops a client whose commands take too long).
+            Server.NextFrame(() =>
+            {
+                if (!isPractice || !IsPlayerValid(player))
+                    return;
+                ShowAllSpawnMarkers();
+                PrintToPlayerChat(player!, Localizer.ForPlayer(player, "matchzy.pm.spawnmarkerson"));
+            });
+        }
+
+        // Draws the numbered box at every competitive spawn and arms the USE teleport. Also used at
+        // practice start when matchzy_spawn_markers_enabled_default is on.
+        public void ShowAllSpawnMarkers()
+        {
             RemoveSpawnBeams();   // clears the flag + list too
             if (spawnsData.Values.Any(list => list.Count == 0))
                 GetSpawns();
-            foreach (Position spawn in spawnsData[(byte)CsTeam.CounterTerrorist])
+            // Numbered like .spawn / .ctspawn / .tspawn: 1-based index into the team's list.
+            var ctSpawns = spawnsData[(byte)CsTeam.CounterTerrorist];
+            for (int i = 0; i < ctSpawns.Count; i++)
             {
-                ShowSpawnBeam(spawn, Color.Blue);
-                activeSpawnMarkers.Add(spawn);
+                ShowSpawnMarker(ctSpawns[i], Color.DeepSkyBlue, i + 1, "CT");
+                activeSpawnMarkers.Add(ctSpawns[i]);
             }
-            foreach (Position spawn in spawnsData[(byte)CsTeam.Terrorist])
+            var tSpawns = spawnsData[(byte)CsTeam.Terrorist];
+            for (int i = 0; i < tSpawns.Count; i++)
             {
-                ShowSpawnBeam(spawn, Color.Orange);
-                activeSpawnMarkers.Add(spawn);
+                ShowSpawnMarker(tSpawns[i], Color.Orange, i + 1, "T");
+                activeSpawnMarkers.Add(tSpawns[i]);
             }
             // Arm the +use teleport now that markers are drawn.
             spawnMarkersActive = activeSpawnMarkers.Count > 0;
-            PrintToPlayerChat(player!, Localizer.ForPlayer(player, "matchzy.pm.spawnmarkerson"));
+            if (spawnMarkersActive)
+                StartSpawnMarkerHover();
         }
 
         // +use onto a drawn spawn marker teleports to that spawn (issue MatchZy-Enhanced#9).
@@ -4511,16 +4880,38 @@ namespace MatchZy
                 return;
             if (!IsPlayerValid(player) || player.IsBot || !player.UserId.HasValue)
                 return;
-            if (player.TeamNum != (byte)CsTeam.CounterTerrorist && player.TeamNum != (byte)CsTeam.Terrorist)
-                return;
-            var pawn = player.PlayerPawn.Value;
-            if (pawn == null || pawn.AbsOrigin == null)
-                return;
 
             int uid = player.UserId.Value;
             float now = Server.CurrentTime;
             if (lastSpawnMarkerUseTime.TryGetValue(uid, out float last) && now - last < spawnMarkerUseCooldown)
                 return;
+
+            int bestIndex = TargetSpawnMarkerIndex(player);
+            if (bestIndex < 0)
+                return;
+
+            lastSpawnMarkerUseTime[uid] = now;
+            Position target = activeSpawnMarkers[bestIndex];
+            // Defer off the input callback and re-validate (rules #4 / #7): teleport upright so a
+            // steep spawn angle doesn't tilt the model.
+            Server.NextFrame(() =>
+            {
+                if (!IsPlayerValid(player))
+                    return;
+                TeleportUpright(player, target.PlayerPosition, target.PlayerAngle);
+            });
+        }
+
+        // The marker USE would teleport to, or -1: the one the player aims at, else the box they
+        // stand in. Shared by the USE handler and the hover highlight so the highlighted marker is
+        // always the one E picks.
+        private int TargetSpawnMarkerIndex(CCSPlayerController player)
+        {
+            if (player.TeamNum != (byte)CsTeam.CounterTerrorist && player.TeamNum != (byte)CsTeam.Terrorist)
+                return -1;
+            var pawn = player.PlayerPawn.Value;
+            if (pawn == null || pawn.AbsOrigin == null)
+                return -1;
 
             // Eye position + forward unit vector from the view angles.
             Vector origin = pawn.AbsOrigin;
@@ -4542,13 +4933,12 @@ namespace MatchZy
                 float hdx = sp.X - origin.X, hdy = sp.Y - origin.Y, vdz = sp.Z - origin.Z;
                 if (hdx * hdx + hdy * hdy <= spawnMarkerStandRadiusSq && Math.Abs(vdz) <= spawnMarkerStandHeight)
                     continue;
-                // Aim at ~mid-beam (spawn + 40z) so looking at the visible beam registers, and
-                // pick the marker with the tightest aim cone (largest dot with the view forward).
-                float tx = sp.X - eye.X, ty = sp.Y - eye.Y, tz = (sp.Z + 40.0f) - eye.Z;
-                float dist = (float)Math.Sqrt(tx * tx + ty * ty + tz * tz);
-                if (dist < 1.0f)
-                    continue;
-                float dot = (tx * forwardX + ty * forwardY + tz * forwardZ) / dist;
+                // Aiming at either the floor box or the number above it registers. Pick the
+                // marker with the tightest aim cone (largest dot with the view forward).
+                float floorZ = i < spawnMarkerVisuals.Count ? spawnMarkerVisuals[i].FloorZ : sp.Z;
+                float dot = Math.Max(
+                    AimDot(eye, forwardX, forwardY, forwardZ, sp.X, sp.Y, floorZ + spawnMarkerFloorLift),
+                    AimDot(eye, forwardX, forwardY, forwardZ, sp.X, sp.Y, floorZ + spawnMarkerLabelHeight));
                 if (dot > bestDot)
                 {
                     bestDot = dot;
@@ -4556,19 +4946,38 @@ namespace MatchZy
                 }
             }
 
-            if (bestIndex < 0)
-                return;
+            if (bestIndex >= 0)
+                return bestIndex;
 
-            lastSpawnMarkerUseTime[uid] = now;
-            Position target = activeSpawnMarkers[bestIndex];
-            // Defer off the input callback and re-validate (rules #4 / #7): teleport upright so a
-            // steep spawn angle doesn't tilt the model.
-            Server.NextFrame(() =>
+            // Not aiming at a marker: standing inside a box on the floor + USE snaps onto that
+            // spawn (exact position and view angle). Nearest box center wins when boxes overlap.
+            float bestDistSq = float.MaxValue;
+            for (int i = 0; i < activeSpawnMarkers.Count; i++)
             {
-                if (!IsPlayerValid(player))
-                    return;
-                TeleportUpright(player, target.PlayerPosition, target.PlayerAngle);
-            });
+                Vector sp = activeSpawnMarkers[i].PlayerPosition;
+                float floorZ = i < spawnMarkerVisuals.Count ? spawnMarkerVisuals[i].FloorZ : sp.Z;
+                float dx = origin.X - sp.X, dy = origin.Y - sp.Y, dz = origin.Z - floorZ;
+                if (Math.Abs(dx) > spawnMarkerHalfSize || Math.Abs(dy) > spawnMarkerHalfSize
+                    || dz < -spawnMarkerStandInHeight || dz > spawnMarkerStandInHeight)
+                    continue;
+                float distSq = dx * dx + dy * dy;
+                if (distSq < bestDistSq)
+                {
+                    bestDistSq = distSq;
+                    bestIndex = i;
+                }
+            }
+            return bestIndex;
+        }
+
+        // Cosine between the view forward and the direction eye -> target (-1 when on top of it).
+        private static float AimDot(Vector eye, float fx, float fy, float fz, float x, float y, float z)
+        {
+            float tx = x - eye.X, ty = y - eye.Y, tz = z - eye.Z;
+            float dist = (float)Math.Sqrt(tx * tx + ty * ty + tz * tz);
+            if (dist < 1.0f)
+                return -1.0f;
+            return (tx * fx + ty * fy + tz * fz) / dist;
         }
 
         [ConsoleCommand("css_hidespawns", "Hides the highlighted spawns")]

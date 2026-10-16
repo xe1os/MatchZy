@@ -11,13 +11,14 @@ Når GOTV er slået til (`tv_enable 1`, fra startparametrene eller en cfg), opta
 
 Demo-optagelse i CS2 kan fejle uden varsel på flere måder (et `mp_restartgame` der stopper optagelsen, et andet plugin der skifter bane, dynamisk CSTV der fjerner botten). Denne fork beskytter mod dem:
 
-- Optagelsen starter, når go-live-genstarten er faldet på plads, i match, scrim og hill.
+- Optagelsen starter i første runde efter go-live-genstarten, i match, scrim og hill (cirka et sekund efter LIVE).
 - Filen tjekkes for at **vokse** på disken, ikke bare for at findes, og den overvåges hele banen. En optagelse, der går i stå, startes igen i en ny fil (op til tre forsøg).
 - En genstartet optagelse overskriver aldrig en tidligere fil: den får `_part2`, `_part3`, ..., og alle dele af banen uploades.
 - `tv_record_immediate` bruges, så en demo overlever et servercrash.
 - `tv_enable_dynamic 0` sættes, så CSTV-botten ikke fjernes, mens ingen ser med.
 - Practice-bots tager aldrig CSTV-pladsen.
-- "CSTV Recording..." vises først i chatten, når filen findes. Fejler optagelsen, står det i chatten.
+- "CSTV optager kampen." vises først i chatten, når filen findes. Fejler optagelsen, står det i chatten.
+- Når banen slutter, skriver chatten, at optagelsen er afsluttet, med demoens filnavn, og om den bliver uploadet. Det står der også, når optagelsen stopper før tid (`.endmatch`, en reset eller et mapskift).
 - Hver start, bekræftelse, nyt forsøg og stop skrives i serverloggen.
 
 ## Upload { #uploading }

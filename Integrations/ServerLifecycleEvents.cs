@@ -37,9 +37,17 @@ namespace MatchZy
             RegisterListener<Listeners.OnServerPreFatalShutdown>(() => AnnounceShutdown("fatal"));
         }
 
+        // Load() ran with a map already running (css_plugins load), so OnAllPluginsLoaded never follows.
+        private bool _loadedMidMap;
+
         public override void OnAllPluginsLoaded(bool hotReload)
         {
             base.OnAllPluginsLoaded(hotReload);
+            ScheduleServerReady(hotReload);
+        }
+
+        private void ScheduleServerReady(bool hotReload)
+        {
             // config.cfg is exec'd from Load and applied on a later frame; the remote log URL it sets
             // must be in place before server_ready is sent. On a boot this timer runs once the first
             // map ticks.
@@ -120,7 +128,9 @@ namespace MatchZy
 
         // Queues server_shutdown and blocks briefly so it is on the wire before the process exits.
         // Once per process: quit runs the command listener and then unloads the plugin.
-        private void AnnounceShutdown(string reason, int? emptySeconds = null)
+        // matchTarget / matchId: a series that already ended (and reset the match config) can still
+        // name its own receiver and id, so that panel hears about the shutdown too.
+        private void AnnounceShutdown(string reason, int? emptySeconds = null, RemoteLogTarget? matchTarget = null, long? matchId = null, bool waitForSend = true)
         {
             if (_shutdownAnnounced)
                 return;
@@ -129,13 +139,15 @@ namespace MatchZy
             {
                 var sent = PublishLifecycleEvent(new ServerShutdownEvent
                 {
-                    MatchId = LifecycleMatchId(),
+                    MatchId = matchId ?? LifecycleMatchId(),
                     MapName = SafeMapName(),
                     PluginVersion = ModuleVersion,
                     Reason = reason,
                     EmptySeconds = emptySeconds,
-                });
-                if (sent.Length > 0)
+                }, matchTarget);
+                // Only block when the process is about to exit. A plain plugin unload (mode switch)
+                // keeps the server running, so don't freeze the frame for up to 3s.
+                if (waitForSend && sent.Length > 0)
                     Task.WaitAll(sent, ShutdownEventWait);
             }
             catch (Exception e)
@@ -154,7 +166,7 @@ namespace MatchZy
 
         // Sends to the server's own remote log URL and, if a loaded match uses a different one, to
         // that too. Returns the delivery tasks (empty when no URL is configured).
-        private Task[] PublishLifecycleEvent(ServerLifecycleEvent @event)
+        private Task[] PublishLifecycleEvent(ServerLifecycleEvent @event, RemoteLogTarget? extraTarget = null)
         {
             var targets = new List<RemoteLogTarget>();
             var server = new RemoteLogTarget(defaultRemoteLogURL, defaultRemoteLogHeaderKey,
@@ -164,6 +176,9 @@ namespace MatchZy
             var match = CurrentRemoteLogTarget();
             if (!string.IsNullOrEmpty(match.Url) && !string.Equals(match.Url, server.Url, StringComparison.OrdinalIgnoreCase))
                 targets.Add(match);
+            if (extraTarget != null && !string.IsNullOrEmpty(extraTarget.Url)
+                && !targets.Any(t => string.Equals(t.Url, extraTarget.Url, StringComparison.OrdinalIgnoreCase)))
+                targets.Add(extraTarget);
             return targets.Select(t => EnqueueEvent(@event, t, liveMatchId)).ToArray();
         }
     }

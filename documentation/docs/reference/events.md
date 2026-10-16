@@ -10,6 +10,8 @@ Every event is sent as an HTTP `POST` with a JSON body to `matchzy_remote_log_ur
 - `round_number`: on round and live events.
 - Veto events use `team` = `"team1"` / `"team2"`. Live events in the legacy format use sides `"CT"` / `"T"`; the Get5 format uses `"ct"` / `"t"` inside player objects.
 
+Team objects (`team1` / `team2` on `round_end` and `map_result`) carry `id`, `name`, `series_score`, `score` (rounds won on this map), `score_ct` / `score_t` (rounds won on each side; both 0 when not known, for example after restoring a backup made before 1.0.9), `side` and `starting_side` (`ct` / `t` in both event formats; `starting_side` is `null` when not known) and `players`.
+
 Player stats objects (`team1.players[].stats` on `round_end` and `map_result`) use the Get5 field names: `kills`, `deaths`, `assists`, `damage`, `utility_damage`, `enemies_flashed`, `friendlies_flashed`, `flash_assists`, `headshot_kills`, `knife_kills`, `team_kills`, `suicides`, `bomb_plants`, `bomb_defuses`, `rounds_played`, `1k`-`5k`, `1v1`-`1v5` (clutches won), `first_kills_t`, `first_kills_ct`, `first_deaths_t`, `first_deaths_ct`, `trade_kills`, `kast` (rounds with a kill, assist, survival or trade), `score` and `mvp`. Fields beyond the engine's own scoreboard stats are filled for human players; bots report 0 for them. Rating and ADR are in the [stats JSON file](../guides/stats.md#advanced-stats).
 
 ## Match flow
@@ -32,7 +34,7 @@ Player stats objects (`team1.players[].stats` on `round_end` and `map_result`) u
 | `match_unpaused` | Any pause ends | `round_number` |
 | `demo_upload_ended` | A demo upload finished | `map_number`, `filename`, `success` |
 | `player_connect` | A player joins while a match is loaded, and again after each map change. Players kicked for not being in the match are not sent | `player` (user id), `player_steamid`, `player_name`, `player_team`, `ip_address` (without the port) |
-| `player_disconnect` | A player leaves while a match is loaded | `player` (user id), `player_steamid`, `player_name`, `player_team`, `reason` |
+| `player_disconnect` | A player leaves while a match is loaded. Not sent for players kicked for not being in the match, or who leave before Steam has authenticated them | `player` (user id), `player_steamid`, `player_name`, `player_team`, `reason` |
 
 `match_cancelled` `reason` values: `ended_early` (stopped), `surrendered`, `restarted`, `no_show` (cancelled for a no-show) and `map_changed` (ended by a map change from outside MatchZy).
 
@@ -48,7 +50,7 @@ Sent with or without a loaded match, to `matchzy_remote_log_url` from `config.cf
 
 - **`server_ready`**: about 2 seconds after load; on a boot, once the first map runs.
 - **`map_change`**: sent when a map command runs (`changelevel`, `map`, `ds_workshop_changelevel`, `host_workshop_map`), otherwise when the map ends.
-- **`server_shutdown`** `reason`: `quit` (`quit` / `exit`), `restart` (`_restart`), `fatal` (a fatal error), `plugin_unload` (MatchZy being unloaded) or `empty` (the server was empty for `matchzy_empty_shutdown_seconds`).
+- **`server_shutdown`** `reason`: `quit` (`quit` / `exit`), `restart` (`_restart`), `fatal` (a fatal error), `plugin_unload` (MatchZy being unloaded) `empty` (the server was empty for `matchzy_empty_shutdown_seconds`) or `series_end` (`matchzy_series_end_shutdown_seconds` after a series ended).
 
 `server_shutdown` is sent while the server waits up to 3 seconds for it. A server that is killed (crash, `SIGKILL`, a panel's force stop) sends nothing; use `server_ready` on the next start to notice it.
 
@@ -83,7 +85,7 @@ Building blocks:
 | `round_start` | A live round starts | `round_number` |
 | `game_paused`, `game_unpaused` | Match paused / unpaused | `team`, `pause_type`; *extra* `round_number`, `max_duration` |
 | `player_connect` | A player joins while a match is loaded, and again after each map change | `player`, `ip_address` (without the port) |
-| `player_disconnect` | A player leaves while a match is loaded | `player`; *extra* `reason` (engine disconnect code) |
+| `player_disconnect` | A player leaves while a match is loaded (not for players kicked for not being in the match, or not yet authenticated by Steam) | `player`; *extra* `reason` (engine disconnect code) |
 | `player_say` | A player writes in chat while a match is loaded, chat commands such as `.ready` included | `player`, `command` (`say` or `say_team`), `message`, `round_time` |
 | `backup_loaded` | A round backup was restored | `round_number` (the round restored to), `filename` |
 

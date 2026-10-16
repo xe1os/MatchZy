@@ -48,6 +48,11 @@ namespace MatchZy
         // so the beam does not block your view while you stand on the lineup; it reappears when you
         // walk away - no need to .shownades again.
         private const float NadeHideRadiusSq = 70.0f * 70.0f;
+        // Labels are only sent to viewers within this radius.
+        private const float NadeLabelRadiusSq = 1500.0f * 1500.0f;
+
+        // SteamIDs of the players who turned .shownades on; only they receive the markers.
+        private readonly HashSet<ulong> _nadeViewers = new();
 
         private static List<NadeMarkerGroup> GroupLineups(List<NadeLineup> lineups)
         {
@@ -172,11 +177,20 @@ namespace MatchZy
         public void HandleShowNadesCommand(CCSPlayerController? player, CommandInfo? command = null)
         {
             if (!isPractice || !IsPlayerValid(player)) return;
-            // Toggle: if markers are up, this call hides them (so a single key, e.g. bind f
-            // "css_shownades", flips the library on/off).
+            // Toggle per player: the markers are only sent to players who asked for them (see
+            // OnNadeCheckTransmit), so a second player's .shownades adds them as a viewer instead of
+            // hiding the library for everyone, and a viewer's .shownades hides it for them.
             if (grenadeLibraryActive)
             {
-                HandleHideNadesCommand(player);
+                if (_nadeViewers.Contains(player!.SteamID))
+                {
+                    HandleHideNadesCommand(player);
+                }
+                else
+                {
+                    _nadeViewers.Add(player.SteamID);
+                    ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.gl.showing", activeNadeGroups.Sum(g => g.Lineups.Count)));
+                }
                 return;
             }
             try
@@ -205,6 +219,7 @@ namespace MatchZy
                 }
                 activeNadeGroups.AddRange(groups);
                 grenadeLibraryActive = true;
+                _nadeViewers.Add(player!.SteamID);
                 SetNadeTransmitListener(true);
                 ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.gl.showing", lineups.Count));
             }
@@ -218,7 +233,10 @@ namespace MatchZy
         public void HandleHideNadesCommand(CCSPlayerController? player, CommandInfo? command = null)
         {
             if (!IsPlayerValid(player)) return;
-            HideNadeMarkers();
+            // Hidden for this player; the markers are removed once nobody is viewing them.
+            _nadeViewers.Remove(player!.SteamID);
+            if (_nadeViewers.Count == 0)
+                HideNadeMarkers();
             ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.gl.hidden"));
         }
 
@@ -230,7 +248,9 @@ namespace MatchZy
             if (!grenadeLibraryActive || !isPractice || !IsPlayerValid(player)) return;
             try
             {
-                HideNadeMarkers(); // clears markers + grenadeLibraryActive
+                var viewers = new HashSet<ulong>(_nadeViewers);
+                HideNadeMarkers(); // clears markers + grenadeLibraryActive + viewers
+                _nadeViewers.UnionWith(viewers);
                 var lineups = LoadLineupsForCurrentMap(player!);
                 var groups = GroupLineups(lineups);
                 foreach (var g in groups)
@@ -257,6 +277,17 @@ namespace MatchZy
                 foreach ((CCheckTransmitInfo info, CCSPlayerController? player) in infoList)
                 {
                     if (player == null || !player.IsValid) continue;
+
+                    // Only players who ran .shownades get the markers. One beam + one world text per
+                    // lineup group (often 100+ groups) is a lot for every client to draw.
+                    if (!_nadeViewers.Contains(player.SteamID))
+                    {
+                        var hidden = info.TransmitEntities;
+                        foreach (var ent in nadeMarkerEntities)
+                            if (ent != null && ent.IsValid) hidden.Remove(ent);
+                        continue;
+                    }
+
                     var pawn = player.PlayerPawn?.Value;
                     var o = pawn?.AbsOrigin;
                     if (o == null) continue;
@@ -266,7 +297,15 @@ namespace MatchZy
                     foreach (var g in activeNadeGroups)
                     {
                         float dx = g.Pos.X - x, dy = g.Pos.Y - y, dz = g.Pos.Z - z;
-                        if (dx * dx + dy * dy + dz * dz > NadeHideRadiusSq) continue;
+                        float distSq = dx * dx + dy * dy + dz * dz;
+                        // Far away: keep the beam (it shows where the lineup is) but drop the world-text
+                        // label, which is the expensive part for the client and unreadable at range anyway.
+                        if (distSq > NadeLabelRadiusSq)
+                        {
+                            if (g.Label != null && g.Label.IsValid) transmitEntities.Remove(g.Label);
+                            continue;
+                        }
+                        if (distSq > NadeHideRadiusSq) continue;
                         if (g.Beam != null && g.Beam.IsValid) transmitEntities.Remove(g.Beam);
                         if (g.Label != null && g.Label.IsValid) transmitEntities.Remove(g.Label);
                     }
@@ -286,6 +325,7 @@ namespace MatchZy
             }
             nadeMarkerEntities.Clear();
             activeNadeGroups.Clear();
+            _nadeViewers.Clear();
             grenadeLibraryActive = false;
             SetNadeTransmitListener(false);
         }
@@ -296,13 +336,36 @@ namespace MatchZy
         // spot teleported to the previous map's spawn positions.
         private void ForgetPracticeEntitiesOnMapStart()
         {
+            // .arc beams of the previous map are gone too; their removal timers stopped with the map.
+            _liveArcs.Clear();
+            _liveArcBeamCount = 0;
             nadeMarkerEntities.Clear();
             activeNadeGroups.Clear();
+            _nadeViewers.Clear();
             grenadeLibraryActive = false;
             SetNadeTransmitListener(false);
-            spawnMarkerBeams.Clear();
+            spawnMarkerEntities.Clear();
+            spawnMarkerVisuals.Clear();
             spawnMarkersActive = false;
             activeSpawnMarkers.Clear();
+            // Timers flagged STOP_ON_MAPCHANGE are already gone: drop the references.
+            spawnMarkerHoverTimer = null;
+            spawnMarkerAimedByPlayer.Clear();
+            practiceRegenTimer = null;
+            startRoundPending = false;
+            startRoundFrozen.Clear();
+            ForgetBotSpawnMarkersOnMapStart();
+            ForgetRecDisplaysOnMapStart();
+            ForgetNavFloorCache();
+            // Userids from the previous map mean nothing now.
+            botReactionStates.Clear();
+            botsAttacking.Clear();
+            botsEngaged.Clear();
+            botLastAim.Clear();
+            botAiAwake = false;
+            _botJiggleRoll.Clear();
+            humanRegenOverride.Clear();
+            respawnAtSavedLocation.Clear();
         }
 
         // CheckTransmit fires every tick and crosses into managed code for every recipient, so the
@@ -330,7 +393,7 @@ namespace MatchZy
             Color color = NadeTypeColor(lu.Type);
             Vector pos = group.Pos;
 
-            // Vertical beam at the throw spot (same style as .showspawns markers).
+            // Vertical beam at the throw spot.
             var beam = Utilities.CreateEntityByName<CBeam>("beam");
             if (beam != null)
             {

@@ -45,6 +45,7 @@ Workshop maps work everywhere a map name does: `workshop/<id>`, `ws/<id>` or `ws
 | Setting | What it does |
 |---|---|
 | `matchzy_forfeit_ready_timeout 600` | A team not ready 10 minutes after the ready phase began loses by forfeit. |
+| `matchzy_forfeit_join_grace_seconds 60` | A registered player who joins in the last minute still gets up to 60 seconds to ready up before their team forfeits (default `60`). |
 | `matchzy_forfeit_veto_ready_timeout 300` | The same for the ready-up before the map veto (`-1` = same as above, `0` = no limit). |
 | `matchzy_forfeit_leave_timeout 300` | A team with nobody on the server for 5 minutes during a live map loses by forfeit. |
 | `matchzy_veto_step_timeout 60` | A captain who does not ban, pick or choose a side within 60 seconds gets a random choice. |
@@ -57,7 +58,7 @@ All three are off (`0`) by default. A forfeit ends the series with the other tea
 
 | Setting | Effect |
 |---|---|
-| `matchzy_kick_when_no_match_loaded true` | Players not on the loaded roster are kicked on join. Everyone is kicked when no match is loaded. Admins are exempt. |
+| `matchzy_kick_when_no_match_loaded true` | Players not on the loaded roster are kicked on join. Everyone is kicked when no match is loaded, also the players still on the server when a series ends (for example after a forfeit). Admins are exempt. |
 | `matchzy_whitelist_enabled_default true` | Only SteamIDs in `whitelist.cfg` may join. |
 
 ## Players vs bots

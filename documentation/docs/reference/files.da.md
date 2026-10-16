@@ -5,7 +5,7 @@
 | Fil | Placering | Formål |
 |---|---|---|
 | `config.cfg` | `<cfg>` | Alle indstillinger. Laves første gang, og nye indstillinger tilføjes ved opdateringer. |
-| `warmup.cfg`, `knife.cfg`, `live.cfg`, `live_wingman.cfg`, `scrim.cfg`, `hill.cfg`, `prac.cfg`, `dryrun.cfg`, `sleep.cfg` | `<cfg>` | Køres, når den tilhørende fase eller mode starter. Skrives, hvis de mangler, og overskrives aldrig. |
+| `warmup.cfg`, `knife.cfg`, `live.cfg`, `live_wingman.cfg`, `live_rush.cfg`, `live_1v1.cfg`, `scrim.cfg`, `hill.cfg`, `prac.cfg`, `dryrun.cfg`, `sleep.cfg` | `<cfg>` | Køres, når den tilhørende fase eller mode starter. Skrives, hvis de mangler, og overskrives aldrig. |
 | `<mode>_override.cfg` (fx `warmup_override.cfg`, `live_override.cfg`) | `<cfg>` | Valgfri og oprettes af dig. Køres lige efter den tilhørende mode-fil, så dens værdier vinder. Se [Serverens egne indstillinger](#server-specific-settings). |
 | `defaults/*.cfg`, `defaults/database.json.example`, `defaults/README.txt` | `<cfg>` | Referencekopier af de nuværende standarder. Skrives forfra ved hver opstart og køres aldrig. Ret ikke i dem. |
 | `matchzymaps.cfg` | `<cfg>` | Baneliste til automatiske baneskift og `.matchsetup`-guiden. Én bane pr. linje, `#` til kommentarer, `workshop/<id>` til workshop-baner. |
@@ -15,7 +15,9 @@
 | `savednades.json` | `<cfg>` | Gemte practice-lineups. |
 | `grenadelibrary.json` | `<cfg>` | Fælles lineup-pakke (`.libadd`). |
 | `botpositions.json` | `<cfg>` | Navngivne bot-positioner til practice (`.savebotpos`). |
+| `botspawns.json` | `<cfg>` | Bot-spawn-puljer til practice (`.botspawn`, `.placebot`). |
 | `spawns/coach/<bane>.json` | plugin-mappen | Håndplacerede udsigtspladser til coaches. Følger med til ancient, ancient_night, anubis, cache, dust2, inferno, mirage, nuke, overpass, train og vertigo. |
+| `gamemode_competitive_server.cfg`, `gamemode_competitive2v2_server.cfg` | `csgo/cfg/` | Køres af motoren ved hver level load. MatchZy sørger for at de indeholder `bot_quota 0` (opretter filen, eller tilføjer linjen når der ikke er sat nogen `bot_quota`), så der ikke joiner bots mens spillerne i en serie reconnecter. En anden `bot_quota` som du selv har sat, bliver beholdt. |
 | `matchzy.json` | `addons/counterstrikesharp/gamedata/` | Native signaturer. Se [Gamedata](../getting-started/gamedata.md). |
 | `lang/*.json` | plugin-mappen | Oversættelser: engelsk, dansk, albansk. |
 | `matchzy.db` | plugin-mappen | SQLite-database (standard). |
@@ -39,7 +41,7 @@ ammo_grenade_limit_flashbang 0
 
 Sæt ikke `mp_weapons_allow_typecount 0`: `0` blokerer alle køb (`-1` = ingen grænse, `5` = standarden i live).
 
-Filnavnet er mode-filens navn med `_override` tilføjet: `warmup`, `knife`, `live`, `live_wingman`, `scrim`, `hill`, `prac`, `dryrun` eller `sleep`. MatchZy skriver aldrig disse filer, så de overlever alle opdateringer.
+Filnavnet er mode-filens navn med `_override` tilføjet: `warmup`, `knife`, `live`, `live_wingman`, `live_rush`, `live_1v1`, `scrim`, `hill`, `prac`, `dryrun` eller `sleep`. MatchZy skriver aldrig disse filer, så de overlever alle opdateringer.
 
 - **Kun de linjer, du ændrer, skal i override-filen.** Lad mode-filen (`warmup.cfg`) være identisk med standarden, eller slet den for at få den nuværende standard tilbage ved næste genstart. Kopier ikke hele mode-filen ind i override-filen: så låses alle værdier, og du går glip af nye standarder i senere releases.
 - **Rækkefølge:** MatchZys indbyggede standard for moden køres først, derefter din mode-fil, så override-filen og til sidst `cvars` fra en loadet match config. Hvert trin vinder over det forrige. Den indbyggede standard udfylder kun indstillinger, din mode-fil ikke sætter, fx en nyere indstilling, der mangler i en ældre `live.cfg`. Den skrives aldrig til dine filer, og den rører ikke indstillinger, der hører til hele serveren (`sv_hibernate_when_empty`, `tv_relayvoice`, `sv_lan`, `sv_pure`, `sv_steamgroup_exclusive`, `sv_kick_ban_duration`, `sv_competitive_minspec`, `mp_logdetail`): sæt dem i din server.cfg. Practice mode (`prac.cfg`) har ikke det indbyggede trin.

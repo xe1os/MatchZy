@@ -8,6 +8,7 @@ using CounterStrikeSharp.API.Core.Translations;
 using CounterStrikeSharp.API.Modules.Commands;
 using CounterStrikeSharp.API.Modules.Cvars;
 using CounterStrikeSharp.API.Modules.Memory;
+using CounterStrikeSharp.API.Modules.Timers;
 using CounterStrikeSharp.API.Modules.Utils;
 using Newtonsoft.Json.Linq;
 
@@ -279,7 +280,9 @@ public partial class MatchZy
         // actual cvar type (float; reading it as int reinterprets the bits = garbage).
         float freeze = GetFreezeTime();
         float killDelay = Math.Max(0.5f, freeze - 1.0f);
-        coachKillTimer ??= AddTimer(killDelay, KillCoaches);
+        // STOP_ON_MAPCHANGE: armed in a round_start of the old map, a pending kill would land up
+        // to a freezetime later on the NEW level and teleport/kill players while they reconnect.
+        coachKillTimer ??= AddTimer(killDelay, KillCoaches, TimerFlags.STOP_ON_MAPCHANGE);
 
         if (haveCoachSpawns)
         {
@@ -287,7 +290,7 @@ public partial class MatchZy
             {
                 if (!IsPlayerValid(coach))
                     continue;
-                AddTimer(0.5f, () => HandleCoachTeam(coach));
+                AddTimer(0.5f, () => HandleCoachTeam(coach), TimerFlags.STOP_ON_MAPCHANGE);
             }
         }
         else
@@ -1023,26 +1026,398 @@ public partial class MatchZy
     {
         // Runs off the EventPlayerGivenC4 dispatch. Removing a held, networked C4 synchronously
         // inside that event (the old bomb.Remove()) is the WriteEnterPVS / weapon-hook crash
-        // class, so: next frame kill it via entity IO, and give the new carrier the bomb one
-        // frame after that. Both players are re-validated at each step.
-        Server.NextFrame(() =>
+        // class, so the hand-off runs next frame. KillCoaches repeats it before the freezetime
+        // kill in case this one found nobody to take the bomb.
+        Server.NextFrame(() => TryCoachBombHandOff(coach, 0));
+    }
+
+    // The bomb is handed out while the round's players are still spawning, so the first hand-off
+    // can find no live terrorist. Retry every 0.25 s for 3 s instead of leaving the coach holding
+    // it: a coach who dies before freezetime ends (a fall from the viewing spot) drops it there.
+    private void TryCoachBombHandOff(CCSPlayerController coach, int attempt)
+    {
+        if (!IsPlayerValid(coach) || coach.TeamNum != (int)CsTeam.Terrorist)
+            return;
+        // The bomb can reach the coach's inventory a few frames after player_given_c4, so a miss
+        // is retried too, not only "no live terrorist yet".
+        if (HoldsBomb(coach) && HandOffCoachBomb(coach, "EventPlayerGivenC4"))
+            return;
+        if (attempt < 12)
+            AddTimer(0.25f, () => TryCoachBombHandOff(coach, attempt + 1), TimerFlags.STOP_ON_MAPCHANGE);
+        else if (HoldsBomb(coach))
+            Log($"[TryCoachBombHandOff] Coach {coach.PlayerName} still holds the bomb after 3 s of hand-off attempts.");
+    }
+
+    // EventPlayerGivenC4 only covers the bomb handed out at round start. A coach can also pick it
+    // up: a teammate drops it during freezetime and the coach stands on it. The freezetime kill
+    // then dropped it at the coach viewing spot, often outside the map, and the team had no bomb
+    // for the round. Hand a picked-up bomb straight on, like the round-start one.
+    public HookResult OnCoachBombPickup(EventBombPickup @event, GameEventInfo info)
+    {
+        try
         {
-            if (!IsPlayerValid(coach) || coach.TeamNum != (int)CsTeam.Terrorist)
-                return; // can't have bomb
-
-            var target = Utilities.GetPlayers().FirstOrDefault(p => IsPlayerValid(p) && !reverseTeamSides["TERRORIST"].coach.Contains(p) && p.TeamNum == (int)CsTeam.Terrorist && p.PawnIsAlive);
-            if (target == null)
-                return; // no one to hand it to; the coach keeps it until the kill at freeze end drops it
-
-            if (!RemoveWeaponByName(coach, "weapon_c4"))
-                return;
-
+            if (!matchStarted)
+                return HookResult.Continue;
+            var picker = @event.Userid;
+            if (picker == null || !picker.IsValid || !GetAllCoaches().Contains(picker))
+                return HookResult.Continue;
             Server.NextFrame(() =>
             {
-                if (IsPlayerValid(target) && target.PawnIsAlive && target.TeamNum == (int)CsTeam.Terrorist)
-                    target.GiveNamedItem("weapon_c4");
+                if (IsPlayerValid(picker) && picker.TeamNum == (int)CsTeam.Terrorist)
+                    HandOffCoachBomb(picker, "EventBombPickup");
             });
+        }
+        catch (Exception e)
+        {
+            Log($"[EventBombPickup FATAL] {e.Message}");
+        }
+        return HookResult.Continue;
+    }
+
+    // Safety net for every other way a coach ends up dropping the bomb (a death, a team switch, a
+    // hand-off that found nobody): the dropped C4 is removed and given to a live terrorist who is
+    // not a coach, instead of lying at the coach spot.
+    public HookResult OnCoachBombDropped(EventBombDropped @event, GameEventInfo info)
+    {
+        try
+        {
+            if (!matchStarted)
+                return HookResult.Continue;
+            var dropper = @event.Userid;
+            if (dropper != null && dropper.IsValid)
+            {
+                // Remembered for the stuck-bomb check: a player standing on the bomb they just
+                // dropped is not a stuck bomb.
+                lastBombDropperSlot = dropper.Slot;
+                lastBombDropTime = Server.CurrentTime;
+            }
+            if (dropper == null || !dropper.IsValid || !GetAllCoaches().Contains(dropper))
+                return HookResult.Continue;
+            int bombIndex = (int)@event.Entindex;
+            string coachName = dropper.PlayerName;
+            Server.NextFrame(() => RecoverCoachDroppedBomb(bombIndex, coachName));
+        }
+        catch (Exception e)
+        {
+            Log($"[EventBombDropped FATAL] {e.Message}");
+        }
+        return HookResult.Continue;
+    }
+
+    // Coach death: the bomb_dropped event above may not name the coach for a death drop, so look
+    // for an ownerless C4 near where the coach died as well. Only when no player holds a C4.
+    public HookResult OnCoachDeathBombCheck(EventPlayerDeath @event, GameEventInfo info)
+    {
+        try
+        {
+            if (!matchStarted)
+                return HookResult.Continue;
+            var victim = @event.Userid;
+            if (victim == null || !victim.IsValid || victim.TeamNum != (int)CsTeam.Terrorist || !GetAllCoaches().Contains(victim))
+                return HookResult.Continue;
+            var o = victim.PlayerPawn.Value?.AbsOrigin;
+            if (o == null)
+                return HookResult.Continue;
+            float dx = o.X, dy = o.Y, dz = o.Z;
+            string coachName = victim.PlayerName;
+            Server.NextFrame(() =>
+            {
+                int nearest = -1;
+                float nearestDistSq = 512.0f * 512.0f;
+                foreach (var c4 in Utilities.FindAllEntitiesByDesignerName<CBasePlayerWeapon>("weapon_c4"))
+                {
+                    if (c4 == null || !c4.IsValid)
+                        continue;
+                    // Someone holds a bomb: nothing was lost.
+                    if (IsBombCarried(c4))
+                        return;
+                    var p = c4.AbsOrigin;
+                    if (p == null)
+                        continue;
+                    float d = (p.X - dx) * (p.X - dx) + (p.Y - dy) * (p.Y - dy) + (p.Z - dz) * (p.Z - dz);
+                    if (d < nearestDistSq)
+                    {
+                        nearestDistSq = d;
+                        nearest = (int)c4.Index;
+                    }
+                }
+                if (nearest >= 0)
+                    RecoverCoachDroppedBomb(nearest, coachName);
+            });
+        }
+        catch (Exception e)
+        {
+            Log($"[OnCoachDeathBombCheck FATAL] {e.Message}");
+        }
+        return HookResult.Continue;
+    }
+
+    // A bomb a player can see but cannot pick up: a terrorist standing on a dropped C4 picks it up
+    // on touch, so one who stands on it for 1.5 s without getting it is on a broken bomb (seen
+    // with coaches on the server). The C4 is then removed and a new one given to that player.
+    // Checked twice a second, only in a live match with a coach; touches nothing otherwise. The same
+    // check first takes the bomb off any live coach who still holds it.
+    private const float StuckBombSeconds = 1.5f;
+    private readonly Dictionary<uint, float> stuckBombSince = new();
+    private int lastBombDropperSlot = -1;
+    private float lastBombDropTime;
+
+    private void CheckStuckBomb()
+    {
+        try
+        {
+            if (!matchStarted || GetAllCoaches().Count == 0)
+            {
+                stuckBombSince.Clear();
+                return;
+            }
+            float now = Server.CurrentTime;
+            HashSet<CCSPlayerController> coaches = GetAllCoaches();
+            // A live coach holding the bomb, however they got it: pass it to the nearest player now,
+            // long before the freezetime kill could drop it. Runs in every match phase, pauses
+            // included, since the coach can be handed the bomb at any round start.
+            foreach (var coach in coaches)
+            {
+                if (IsPlayerValid(coach) && coach.PawnIsAlive && coach.TeamNum == (int)CsTeam.Terrorist && HoldsBomb(coach))
+                {
+                    HandOffCoachBomb(coach, "CheckStuckBomb");
+                    return;
+                }
+            }
+            if (!isMatchLive || isPaused)
+            {
+                stuckBombSince.Clear();
+                return;
+            }
+            foreach (var c4 in Utilities.FindAllEntitiesByDesignerName<CBasePlayerWeapon>("weapon_c4"))
+            {
+                if (c4 == null || !c4.IsValid || c4.AbsOrigin == null)
+                    continue;
+                if (IsBombCarried(c4))
+                {
+                    stuckBombSince.Remove(c4.Index);
+                    continue;
+                }
+                var b = c4.AbsOrigin;
+                CCSPlayerController? onIt = null;
+                foreach (var p in Utilities.GetPlayers())
+                {
+                    if (!IsPlayerValid(p) || coaches.Contains(p) || p.TeamNum != (int)CsTeam.Terrorist || !p.PawnIsAlive || HoldsBomb(p))
+                        continue;
+                    if (p.Slot == lastBombDropperSlot && now - lastBombDropTime < 3.0f)
+                        continue;
+                    var o = p.PlayerPawn.Value?.AbsOrigin;
+                    if (o == null)
+                        continue;
+                    float dx = o.X - b.X, dy = o.Y - b.Y, dz = b.Z - o.Z;
+                    if (dx * dx + dy * dy <= 40.0f * 40.0f && dz > -16.0f && dz < 72.0f)
+                    {
+                        onIt = p;
+                        break;
+                    }
+                }
+                if (onIt == null)
+                {
+                    stuckBombSince.Remove(c4.Index);
+                    continue;
+                }
+                if (!stuckBombSince.TryGetValue(c4.Index, out float since))
+                {
+                    stuckBombSince[c4.Index] = now;
+                    continue;
+                }
+                if (now - since < StuckBombSeconds || coachBombRecoveryPending)
+                    continue;
+
+                stuckBombSince.Remove(c4.Index);
+                var target = onIt;
+                Log($"[CheckStuckBomb] {target.PlayerName} stood on the dropped bomb for {StuckBombSeconds:0.0}s without picking it up at {b.X:0}/{b.Y:0}/{b.Z:0}; giving a new one.");
+                c4.AcceptInput("Kill");
+                coachBombRecoveryPending = true;
+                Server.NextFrame(() =>
+                {
+                    coachBombRecoveryPending = false;
+                    if (IsPlayerValid(target) && target.PawnIsAlive && target.TeamNum == (int)CsTeam.Terrorist && !HoldsBomb(target))
+                        target.GiveNamedItem("weapon_c4");
+                });
+                return;
+            }
+        }
+        catch (Exception e)
+        {
+            Log($"[CheckStuckBomb FATAL] {e.Message}");
+        }
+    }
+
+    // Set while a recovered bomb is on its way to a player, so the drop event and the death check
+    // for the same drop never hand out two bombs.
+    private bool coachBombRecoveryPending;
+
+    private void RecoverCoachDroppedBomb(int bombIndex, string coachName)
+    {
+        if (coachBombRecoveryPending)
+            return;
+        var bomb = Utilities.GetEntityFromIndex<CBasePlayerWeapon>(bombIndex);
+        if (bomb == null || !bomb.IsValid || bomb.DesignerName != "weapon_c4")
+            return;
+        // Someone already picked it up again.
+        if (IsBombCarried(bomb))
+            return;
+        var target = NearestBombTarget(bomb.AbsOrigin);
+        if (target == null)
+        {
+            Log($"[RecoverCoachDroppedBomb] Coach {coachName} dropped the bomb and there is no live terrorist to give it to.");
+            return;
+        }
+        // A dropped weapon has no holder, so the entity IO kill is safe; the new one is given a frame
+        // later, once the old one is gone.
+        bomb.AcceptInput("Kill");
+        coachBombRecoveryPending = true;
+        Server.NextFrame(() =>
+        {
+            coachBombRecoveryPending = false;
+            if (IsPlayerValid(target) && target.PawnIsAlive && target.TeamNum == (int)CsTeam.Terrorist && !HoldsBomb(target))
+            {
+                target.GiveNamedItem("weapon_c4");
+                Log($"[RecoverCoachDroppedBomb] Bomb dropped by coach {coachName} given to {target.PlayerName}.");
+            }
         });
+    }
+
+    // The live terrorist (not a coach, not already carrying a bomb) closest to a point: the coach
+    // or the dropped bomb. The nearest player is the one the bomb would most likely have reached
+    // anyway, so the hand-off does not move it across spawn. No point: the first one found.
+    // A random live terrorist (not a coach, not already carrying a bomb), like the engine picks the
+    // round's carrier. Used when a coach hands the bomb on: the coach spot is fixed, so the nearest
+    // player would be the same one round after round.
+    private CCSPlayerController? RandomBombTarget()
+    {
+        HashSet<CCSPlayerController> coaches = GetAllCoaches();
+        var candidates = Utilities.GetPlayers()
+            .Where(p => IsPlayerValid(p) && !coaches.Contains(p) && p.TeamNum == (int)CsTeam.Terrorist && p.PawnIsAlive && !HoldsBomb(p))
+            .ToList();
+        return candidates.Count == 0 ? null : candidates[Random.Shared.Next(candidates.Count)];
+    }
+
+    private CCSPlayerController? NearestBombTarget(Vector? from)
+    {
+        HashSet<CCSPlayerController> coaches = GetAllCoaches();
+        CCSPlayerController? best = null;
+        float bestDistSq = float.MaxValue;
+        foreach (var p in Utilities.GetPlayers())
+        {
+            if (!IsPlayerValid(p) || coaches.Contains(p) || p.TeamNum != (int)CsTeam.Terrorist || !p.PawnIsAlive || HoldsBomb(p))
+                continue;
+            var o = p.PlayerPawn.Value?.AbsOrigin;
+            if (from == null || o == null)
+                return p;
+            float d = (o.X - from.X) * (o.X - from.X) + (o.Y - from.Y) * (o.Y - from.Y) + (o.Z - from.Z) * (o.Z - from.Z);
+            if (d < bestDistSq)
+            {
+                bestDistSq = d;
+                best = p;
+            }
+        }
+        return best;
+    }
+
+    // True when a live player really has this C4 in their inventory. The owner handle alone is not
+    // enough: a bomb dropped from a dead coach was seen still pointing at the coach, lying on the
+    // ground with only its light showing and impossible to pick up.
+    private static bool IsBombCarried(CBasePlayerWeapon c4)
+    {
+        foreach (var p in Utilities.GetPlayers())
+        {
+            if (p == null || !p.IsValid || !p.PawnIsAlive)
+                continue;
+            var weapons = p.PlayerPawn.Value?.WeaponServices?.MyWeapons;
+            if (weapons == null)
+                continue;
+            foreach (var h in weapons)
+            {
+                var w = h.Value;
+                if (w != null && w.IsValid && w.Index == c4.Index)
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool HoldsBomb(CCSPlayerController player) => FindHeldBomb(player) != null;
+
+    // The C4 a player carries. The inventory list is checked first; a coach was seen carrying the
+    // bomb (it dropped on the freezetime kill) while it was not found there, so every C4 whose
+    // owner is this player's pawn counts as well.
+    private static CBasePlayerWeapon? FindHeldBomb(CCSPlayerController player)
+    {
+        var pawn = player.PlayerPawn.Value;
+        if (pawn == null || !pawn.IsValid)
+            return null;
+        var weapons = pawn.WeaponServices?.MyWeapons;
+        if (weapons != null)
+        {
+            foreach (var h in weapons)
+            {
+                var w = h.Value;
+                if (w != null && w.IsValid && w.DesignerName == "weapon_c4")
+                    return w;
+            }
+        }
+        foreach (var c4 in Utilities.FindAllEntitiesByDesignerName<CBasePlayerWeapon>("weapon_c4"))
+        {
+            if (c4 != null && c4.IsValid && c4.OwnerEntity.IsValid && c4.OwnerEntity.Index == pawn.Index)
+                return c4;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Moves a coach's C4 to a random live non-coach terrorist: kills the coach's C4 via entity
+    /// IO (never Remove() a held networked weapon) and gives the new carrier one a frame later.
+    /// A coach must never die holding the bomb: the death drops it at the coach viewing spot,
+    /// which is often outside the playable area, and the team loses the bomb for the round.
+    /// Returns true when the coach's C4 was killed.
+    /// </summary>
+    private string lastNoBombTargetLogKey = "";
+
+    private bool HandOffCoachBomb(CCSPlayerController coach, string context)
+    {
+        if (!IsPlayerValid(coach) || !HoldsBomb(coach))
+            return false;
+
+        var target = RandomBombTarget();
+        if (target == null)
+        {
+            // The twice-a-second check and the hand-off retries hit this every time until a terrorist
+            // is alive (a coach alone on T, warmup, everyone dead): log it once per coach and round.
+            string key = $"{coach.Slot}_{GetRoundNumer()}";
+            if (key != lastNoBombTargetLogKey)
+            {
+                lastNoBombTargetLogKey = key;
+                Log($"[HandOffCoachBomb] {context}: no live terrorist to take the bomb from coach {coach.PlayerName}");
+            }
+            return false;
+        }
+
+        var bomb = FindHeldBomb(coach);
+        if (bomb == null)
+            return false;
+        // Entity IO kill, never Remove() on a held networked weapon.
+        bomb.AcceptInput("Kill");
+
+        Server.NextFrame(() =>
+        {
+            if (IsPlayerValid(target) && target.PawnIsAlive && target.TeamNum == (int)CsTeam.Terrorist)
+            {
+                target.GiveNamedItem("weapon_c4");
+                Log($"[HandOffCoachBomb] {context}: bomb moved from coach {coach.PlayerName} to {target.PlayerName}");
+            }
+            else
+            {
+                Log($"[HandOffCoachBomb] {context}: {target.PlayerName} left before receiving the bomb from coach {coach.PlayerName}");
+            }
+        });
+        return true;
     }
 
     public CsTeam GetCoachTeam(CCSPlayerController coach)
@@ -1088,12 +1463,25 @@ public partial class MatchZy
             // first, like the practice side switch.
             if (playerController.PawnIsAlive)
             {
-                WithCoachSuicideCashSuppressed(() => playerController.CommitSuicide(false, true));
-                Server.NextFrame(() =>
+                // A coach on the wrong side is not in that side's coach list, so the
+                // EventPlayerGivenC4 hand-off skipped it. Don't let the suicide drop the bomb;
+                // when the C4 was killed, wait a frame for it to be gone before the suicide.
+                Action killAndSwitch = () =>
                 {
-                    if (IsPlayerValid(playerController) && playerController.Team != oldTeam)
-                        playerController.SwitchTeam(oldTeam);
-                });
+                    if (!IsPlayerValid(playerController) || playerController.Team == oldTeam)
+                        return;
+                    if (playerController.PawnIsAlive)
+                        WithCoachSuicideCashSuppressed(() => playerController.CommitSuicide(false, true));
+                    Server.NextFrame(() =>
+                    {
+                        if (IsPlayerValid(playerController) && playerController.Team != oldTeam)
+                            playerController.SwitchTeam(oldTeam);
+                    });
+                };
+                if (HandOffCoachBomb(playerController, "HandleCoachTeam"))
+                    Server.NextFrame(killAndSwitch);
+                else
+                    killAndSwitch();
             }
             else
             {
@@ -1145,6 +1533,33 @@ public partial class MatchZy
     }
 
     private void KillCoaches()
+    {
+        // The one-shot has fired: drop the reference so HandleCoaches never calls Kill() on a
+        // timer the timer system already freed.
+        coachKillTimer = null;
+        if (isPaused || IsTacticalTimeoutActive())
+            return;
+        HashSet<CCSPlayerController> coaches = GetAllCoaches();
+        if (coaches.Count == 0)
+            return;
+
+        // Take the bomb off any coach first. The hand-off at EventPlayerGivenC4 can miss (no live
+        // teammate yet at that frame), and the death below would drop the C4 at the coach viewing
+        // spot, often outside the map. The C4 is killed via entity IO, so the suicide waits one
+        // frame for it to be gone instead of dropping an entity that is being deleted.
+        bool bombMoved = false;
+        foreach (var coach in coaches)
+        {
+            if (coach.TeamNum == (int)CsTeam.Terrorist && coach.PawnIsAlive)
+                bombMoved |= HandOffCoachBomb(coach, "KillCoaches");
+        }
+        if (bombMoved)
+            Server.NextFrame(KillCoachesNow);
+        else
+            KillCoachesNow();
+    }
+
+    private void KillCoachesNow()
     {
         if (isPaused || IsTacticalTimeoutActive())
             return;

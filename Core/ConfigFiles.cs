@@ -10,6 +10,8 @@ namespace MatchZy
             public const string Hill = "hill.cfg";
             public const string Live = "live.cfg";
             public const string LiveWingman = "live_wingman.cfg";
+            public const string LiveRush = "live_rush.cfg";
+            public const string Live1v1 = "live_1v1.cfg";
             public const string Practice = "prac.cfg";
             public const string Scrim = "scrim.cfg";
             public const string Sleep = "sleep.cfg";

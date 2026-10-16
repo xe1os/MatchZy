@@ -38,6 +38,14 @@ namespace MatchZy
         // demo was killed by the restart that followed.
         public float demoStartArmTime = 0f;
 
+        // Set once the going-live mp_restartgame has been seen queued in the game rules
+        // (m_flRestartRoundTime in the future). The first round_start after that, with no restart
+        // left in the queue, is the real round 1, so the demo starts there instead of waiting out
+        // demoStartArmTime (the restart lands ~1 s after LIVE, before the 4 s floor, so the demo
+        // used to fall through to the 8 s fallback, mid-freezetime).
+        public bool demoSawRestart = false;
+        private CounterStrikeSharp.API.Modules.Timers.Timer? demoRestartPollTimer;
+
         private int demoStartAttempts = 0;
         private const int DemoStartMaxAttempts = 3;
 
@@ -56,6 +64,11 @@ namespace MatchZy
         // was being recorded even when the recording had already been thrown away.
         private bool demoAnnounced = false;
 
+        // One tv_enable 0/1 restart of a missing CSTV bot per demo start sequence. Pending while the
+        // restart is in flight; a map change or a stopped recording cancels the deferred tv_record.
+        private bool cstvRestartTried = false;
+        private bool cstvRestartPending = false;
+
         /// <summary>
         /// Arm the deferred demo start used by StartLive / StartScrim / StartHill.
         /// </summary>
@@ -65,15 +78,67 @@ namespace MatchZy
         {
             demoStartAttempts = 0;
             demoAnnounced = false;
+            cstvRestartTried = false;
             // A new match's recording: parts left by an earlier match that was stopped (no
             // StopDemoRecording) must not be uploaded under this match's id.
             previousDemoSegments.Clear();
             demoStartPending = true;
             demoStartArmTime = Server.CurrentTime + restartSettleSeconds;
+            demoSawRestart = false;
+            // Watch for the queued restart every 0.1 s until it shows up or the fallback fires.
+            // A restore without mp_restartgame never shows one and keeps the arm-time floor.
+            float pollUntil = Server.CurrentTime + fallbackSeconds;
+            demoRestartPollTimer?.Kill();
+            demoRestartPollTimer = AddTimer(0.1f, () =>
+            {
+                if (!demoStartPending || demoSawRestart || Server.CurrentTime > pollUntil)
+                {
+                    demoRestartPollTimer?.Kill();
+                    demoRestartPollTimer = null;
+                    return;
+                }
+                if (IsRestartQueued())
+                    demoSawRestart = true;
+            }, TimerFlags.REPEAT | TimerFlags.STOP_ON_MAPCHANGE);
             AddTimer(fallbackSeconds, () =>
             {
                 if (demoStartPending) StartDemoRecording();
             });
+        }
+
+        /// <summary>
+        /// True while an mp_restartgame is queued and has not landed yet.
+        /// </summary>
+        public bool IsRestartQueued()
+        {
+            try
+            {
+                var rules = GetGameRules();
+                return rules != null && rules.RestartRoundTime > 0f && rules.RestartRoundTime > Server.CurrentTime;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Called on every live round_start while a demo start is pending. Starts the demo on the
+        /// first round_start after the going-live restart has landed, or after the arm-time floor
+        /// when no restart was seen.
+        /// </summary>
+        public void TryStartPendingDemo()
+        {
+            if (!demoStartPending || !isMatchLive)
+                return;
+            if (IsRestartQueued())
+            {
+                // This is the round_start mp_warmup_end fires just before the restart lands.
+                demoSawRestart = true;
+                return;
+            }
+            if (demoSawRestart || Server.CurrentTime >= demoStartArmTime)
+                StartDemoRecording();
         }
 
         /// <summary>
@@ -93,10 +158,15 @@ namespace MatchZy
             demoStartArmTime = 0f;
             demoStartAttempts = 0;
             demoAnnounced = false;
+            cstvRestartTried = false;
+            cstvRestartPending = false;
             activeDemoFile = "";
             previousDemoSegments.Clear();
             demoWatchdogTimer?.Kill();
             demoWatchdogTimer = null;
+            demoSawRestart = false;
+            demoRestartPollTimer?.Kill();
+            demoRestartPollTimer = null;
         }
 
         private bool IsGOTVEnabled()
@@ -133,6 +203,94 @@ namespace MatchZy
             return true;
         }
 
+        // tv_enable 1 only says GOTV is configured, not that the CSTV bot is still connected. The
+        // engine's bot_quota sweep can kick it (it counts the CSTV bot as a bot), and a tv_record
+        // without it creates no file and prints nothing on hosts that mute the HLTV channels.
+        private static bool IsCstvClientPresent()
+        {
+            foreach (var controller in Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller"))
+            {
+                if (controller == null || !controller.IsValid || !controller.IsHLTV)
+                    continue;
+                if (controller.Connected == PlayerConnectedState.Connected
+                    || controller.Connected == PlayerConnectedState.Connecting
+                    || controller.Connected == PlayerConnectedState.Reconnecting)
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Bring a kicked CSTV bot back with tv_enable 0 -> 1 and record a few seconds later. Only
+        /// with tv_enable_dynamic 1: without it a runtime tv_enable change waits for the next map,
+        /// so the toggle would do nothing useful. The two commands run on separate frames (a timer
+        /// apart) and never while a recording is active. Returns true when the restart was started
+        /// and the tv_record is deferred.
+        /// </summary>
+        private bool TryRestartMissingCstv()
+        {
+            if (cstvRestartTried)
+                return false;
+            cstvRestartTried = true;
+
+            bool dynamicEnabled = false;
+            try { dynamicEnabled = ConVar.Find("tv_enable_dynamic")?.GetPrimitiveValue<bool>() == true; } catch { }
+            if (!dynamicEnabled)
+            {
+                Log("[Demo] CSTV bot is not connected and tv_enable_dynamic is 0 - GOTV comes back only after a map change.");
+                return false;
+            }
+
+            Log("[Demo] CSTV bot is not connected (kicked?) - restarting GOTV with tv_enable 0/1 before recording.");
+            cstvRestartPending = true;
+            Server.ExecuteCommand("tv_enable 0");
+            // Not STOP_ON_MAPCHANGE: GOTV must be switched back on even if the map changes meanwhile.
+            AddTimer(2.0f, () => Server.ExecuteCommand("tv_enable 1"));
+            AddTimer(6.0f, () =>
+            {
+                if (!cstvRestartPending)
+                    return;
+                cstvRestartPending = false;
+                if (isDemoRecording)
+                    return;
+                // Still missing: StartDemoRecording sees cstvRestartTried and gives up without a tv_record.
+                StartDemoRecording();
+            }, TimerFlags.STOP_ON_MAPCHANGE);
+            return true;
+        }
+
+        /// <summary>
+        /// The CSTV bot left the server mid-map (kicked by a bot_quota sweep, an admin or another
+        /// plugin). A running demo ends with it, so keep the file as a segment and record again
+        /// once GOTV is back, the same way the watchdog handles a stalled recording.
+        /// </summary>
+        public void OnCstvDisconnected()
+        {
+            if (!isDemoRecording && !demoStartPending)
+                return;
+            Log("[Demo] CSTV bot left the server while a demo was recording or about to start.");
+            // Deferred off the engine's disconnect path. A map change also disconnects CSTV: the new
+            // map clears isDemoRecording (ResetDemoStateOnMapStart), so the check below does nothing then.
+            AddTimer(1.0f, () =>
+            {
+                if (!isDemoRecording || IsCstvClientPresent())
+                    return;
+                demoWatchdogTimer?.Kill();
+                demoWatchdogTimer = null;
+                // Keep what was recorded up to the kick: it is uploaded with the next segment.
+                string fullPath = Path.Join(EngineCsgoDirectory(), activeDemoFile);
+                if (!string.IsNullOrEmpty(activeDemoFile) && File.Exists(fullPath) && !previousDemoSegments.Contains(activeDemoFile))
+                    previousDemoSegments.Add(activeDemoFile);
+                isDemoRecording = false;
+                demoStartAttempts = 0;
+                cstvRestartTried = false;
+                Server.ExecuteCommand("tv_stoprecord");
+                StartDemoRecording();
+            }, TimerFlags.STOP_ON_MAPCHANGE);
+            // A pending start (demoStartPending) needs nothing here: StartDemoRecording checks for
+            // the CSTV bot itself and restarts GOTV.
+        }
+
         public void StartDemoRecording()
         {
             demoStartPending = false;
@@ -146,7 +304,22 @@ namespace MatchZy
             // Check if GOTV is properly enabled before starting (it logs its own reason if not)
             if (!IsGOTVEnabled())
             {
-                AnnounceDemoStatus(false, "CSTV is not enabled on this server - this match is NOT being recorded.");
+                AnnounceDemoStatus("matchzy.demo.notenabled");
+                return;
+            }
+
+            // A GOTV restart is already in flight: its timer starts the recording.
+            if (cstvRestartPending)
+                return;
+            if (!IsCstvClientPresent())
+            {
+                if (TryRestartMissingCstv())
+                    return;
+                // tv_enable is 1 but the CSTV bot is not on the server (kicked, or GOTV did not come
+                // back). A tv_record now would do nothing, so do not send one.
+                Log("[Demo] Not recording: tv_enable is 1 but the CSTV bot is not on the server.");
+                AnnounceDemoStatus("matchzy.demo.notonserver");
+                activeDemoFile = "";
                 return;
             }
 
@@ -160,7 +333,7 @@ namespace MatchZy
             try
             {
                 string baseDemoPath = tempDemoPath.Substring(0, tempDemoPath.Length - ".dem".Length);
-                for (int part = 2; File.Exists(Path.Join(Server.GameDirectory, "csgo", tempDemoPath)) && part < 100; part++)
+                for (int part = 2; File.Exists(Path.Join(EngineCsgoDirectory(), tempDemoPath)) && part < 100; part++)
                     tempDemoPath = $"{baseDemoPath}_part{part}.dem";
                 demoFileName = Path.GetFileName(tempDemoPath);
             }
@@ -170,7 +343,7 @@ namespace MatchZy
             }
             try
             {
-                string? directoryPath = Path.GetDirectoryName(Path.Join(Server.GameDirectory + "/csgo/" + demoPath));
+                string? directoryPath = Path.GetDirectoryName(Path.Join(EngineCsgoDirectory(), demoPath));
                 if (directoryPath != null)
                 {
                     if (!Directory.Exists(directoryPath))
@@ -187,13 +360,7 @@ namespace MatchZy
             }
 
             activeDemoFile = tempDemoPath;
-            // The engine resolves a relative tv_record path against the first Game search path in
-            // gameinfo.gi, which is csgo/addons/metamod on Metamod servers. An absolute path keeps the
-            // demo in csgo/, where the folder above was created and the checks and upload look for it.
-            string recordPath = Path.Join(Server.GameDirectory, "csgo", tempDemoPath).Replace('\\', '/');
-            // Always quoted: the console tokenizer splits an unquoted argument at a space and at the
-            // ':' of a Windows drive letter (C:/...).
-            string recordArg = $"\"{recordPath}\"";
+            string recordArg = CsgoPathArg(tempDemoPath);
             // tv_record_immediate 1 makes GOTV write the .dem while the match runs instead of buffering
             // it, so the file is on disk (which is what the verification below checks) and survives a
             // server crash mid-match. Only sent when the build has the convar.
@@ -211,7 +378,7 @@ namespace MatchZy
         /// cause) reports nothing at all, so without this the plugin believed it was recording for
         /// the whole match and only the missing file at the end gave it away.
         ///
-        /// The existence check (6s) is what gates the retry and the "CSTV Recording..." announce:
+        /// The existence check (3s) is what gates the retry and the "CSTV Recording..." announce:
         /// the engine creates the .dem the moment it accepts tv_record, so a missing file means the
         /// command was dropped. File GROWTH cannot be checked that early: GOTV's async demo writer
         /// (HLTVServerAsync) holds tv_delay seconds of frames in memory before anything past the
@@ -221,12 +388,14 @@ namespace MatchZy
         /// </summary>
         private void VerifyDemoRecording(string expectedDemoFile)
         {
-            AddTimer(6.0f, () =>
+            // The engine creates the .dem as soon as it accepts tv_record, so 3 s is plenty; a miss
+            // still goes through the retry path below.
+            AddTimer(3.0f, () =>
             {
                 // Something else already stopped or replaced the recording - nothing to verify.
                 if (!isDemoRecording || activeDemoFile != expectedDemoFile) return;
 
-                string fullPath = Path.Join(Server.GameDirectory + "/csgo/" + expectedDemoFile);
+                string fullPath = Path.Join(EngineCsgoDirectory(), expectedDemoFile);
                 if (!File.Exists(fullPath))
                 {
                     HandleDemoStartFailure(expectedDemoFile, "never appeared on disk");
@@ -234,7 +403,7 @@ namespace MatchZy
                 }
 
                 Log($"[Demo] Recording confirmed on disk: {expectedDemoFile}");
-                AnnounceDemoStatus(true, "CSTV Recording...");
+                AnnounceDemoStatus("matchzy.util.cstvrecording");
 
                 long sizeAtFirstCheck = 0;
                 try { sizeAtFirstCheck = new FileInfo(fullPath).Length; } catch { }
@@ -256,6 +425,92 @@ namespace MatchZy
                     HandleDemoStartFailure(expectedDemoFile, $"is on disk but not growing {growthGrace:F0}s after the start ({sizeAtFirstCheck} -> {sizeNow} bytes)");
                 });
             });
+        }
+
+        private static string? engineCsgoDirectory;
+
+        /// <summary>
+        /// The csgo/ folder as the engine itself sees it, for paths handed to engine commands.
+        /// Server.GameDirectory can name the game through another path than the engine uses, for
+        /// example a Docker host path (/home/fshost/...) while the engine runs from /home/fsh/...,
+        /// and the engine rejects a write outside its own tree ("Rejecting round backup file path").
+        /// On Linux the folder is taken from the running binary (/proc/self/exe, which the kernel
+        /// reports fully resolved), then from the working directory, before falling back to
+        /// Server.GameDirectory. Every file the engine writes (round backup .txt files, demos) is also
+        /// read back through this folder, so the plugin always reads what this server's engine wrote.
+        /// MatchZy's own files (MatchZyDataBackup, stats, configs) keep using Server.GameDirectory.
+        /// </summary>
+        public string EngineCsgoDirectory()
+        {
+            if (engineCsgoDirectory != null)
+                return engineCsgoDirectory;
+            string fallback = Path.Join(Server.GameDirectory, "csgo");
+            string? found = null;
+            if (OperatingSystem.IsLinux())
+            {
+                try
+                {
+                    // .../game/bin/linuxsteamrt64/cs2 -> .../game/csgo
+                    string? exe = new FileInfo("/proc/self/exe").LinkTarget;
+                    string? gameDir = exe == null ? null : Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(exe)));
+                    if (gameDir != null && File.Exists(Path.Join(gameDir, "csgo", "gameinfo.gi")))
+                        found = Path.Join(gameDir, "csgo");
+                }
+                catch (Exception ex)
+                {
+                    Log($"[EngineCsgoDirectory] /proc/self/exe: {ex.Message}");
+                }
+                if (found == null)
+                {
+                    try
+                    {
+                        // The server runs from game/bin/linuxsteamrt64.
+                        string gameDir = Path.GetFullPath(Path.Join(Environment.CurrentDirectory, "..", ".."));
+                        if (File.Exists(Path.Join(gameDir, "csgo", "gameinfo.gi")))
+                            found = Path.Join(gameDir, "csgo");
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"[EngineCsgoDirectory] working directory: {ex.Message}");
+                    }
+                }
+            }
+            engineCsgoDirectory = found ?? fallback;
+            if (found != null && found != fallback)
+                Log($"[EngineCsgoDirectory] Engine paths use {found} (Server.GameDirectory points at {fallback}).");
+            return engineCsgoDirectory;
+        }
+
+        /// <summary>
+        /// Console argument for a file the engine writes under csgo/ (tv_record, mp_backup_round_file).
+        /// Always an absolute path: the engine resolves a relative path against the first Game search
+        /// path in gameinfo.gi, which is csgo/addons/metamod on Metamod servers. On Windows the drive
+        /// letter is dropped ("D:/Steam/..." -> "/Steam/..."): the engine's record command rejects any
+        /// path containing ':', '\\' or ".." ("record D:/...: invalid path"), and a root-relative path
+        /// resolves on the drive of the server's working directory. Always quoted, with forward
+        /// slashes: the console tokenizer splits an unquoted argument at a space.
+        /// </summary>
+        public string CsgoPathArg(string csgoRelativePath)
+        {
+            string path = Path.Join(EngineCsgoDirectory(), csgoRelativePath);
+            if (OperatingSystem.IsWindows())
+            {
+                string gameRoot = Path.GetPathRoot(path) ?? "";
+                string cwdRoot = Path.GetPathRoot(Environment.CurrentDirectory) ?? "";
+                if (gameRoot.Length >= 2 && gameRoot[1] == ':' && string.Equals(gameRoot, cwdRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    path = path.Substring(2);
+                }
+                else
+                {
+                    // Game on another drive than the working directory, or a UNC path: a root-relative
+                    // path would point at the wrong drive. Fall back to csgo-relative, which lands under
+                    // csgo/addons/metamod on Metamod servers.
+                    Log($"[CsgoPathArg] Cannot build a drive-less path for {path} (working directory {Environment.CurrentDirectory}). Using the csgo-relative path {csgoRelativePath}.");
+                    path = csgoRelativePath;
+                }
+            }
+            return $"\"{path.Replace('\\', '/')}\"";
         }
 
         /// <summary>
@@ -308,7 +563,7 @@ namespace MatchZy
                     return;
                 }
 
-                string fullPath = Path.Join(Server.GameDirectory + "/csgo/" + expectedDemoFile);
+                string fullPath = Path.Join(EngineCsgoDirectory(), expectedDemoFile);
                 long sizeNow = -1;
                 try { if (File.Exists(fullPath)) sizeNow = new FileInfo(fullPath).Length; } catch { }
 
@@ -333,6 +588,7 @@ namespace MatchZy
                     previousDemoSegments.Add(activeDemoFile);
                 isDemoRecording = false;
                 demoStartAttempts = 0;
+                cstvRestartTried = false;
                 Server.ExecuteCommand("tv_stoprecord");
                 StartDemoRecording();
             }, TimerFlags.REPEAT | TimerFlags.STOP_ON_MAPCHANGE);
@@ -354,7 +610,7 @@ namespace MatchZy
             if (demoStartAttempts >= DemoStartMaxAttempts)
             {
                 Log($"[Demo] GOTV demo {expectedDemoFile} {reason} after {demoStartAttempts} attempts - giving up for this map.");
-                AnnounceDemoStatus(false, "CSTV demo could not be started - this match is NOT being recorded.");
+                AnnounceDemoStatus("matchzy.demo.startfailed");
                 // No demo exists, so map_result / match_cancelled and the stats export must not name one.
                 activeDemoFile = "";
                 return;
@@ -367,19 +623,43 @@ namespace MatchZy
         /// Tell the server once whether this match is being recorded. Retries stay silent - only the
         /// final outcome is announced, so a demo that needed a second tv_record does not print twice.
         /// </summary>
-        private void AnnounceDemoStatus(bool recording, string message)
+        private void AnnounceDemoStatus(string key)
         {
             if (demoAnnounced) return;
             demoAnnounced = true;
-            PrintToAllChat($"{(recording ? ChatColors.Green : ChatColors.Red)}{message}");
+            PrintLocalizedToAll(key);
         }
 
         // The demo file map_result / the stats export should name: the current recording, or the last
         // earlier part when a watchdog restart could not start a new one. Set by StopDemoRecording.
         public string lastStoppedDemoFile = "";
 
+        /// <summary>
+        /// Stop a running recording outside the normal map end (.endmatch / reset, a map change or
+        /// reload): tv_stoprecord, stop the watchdog and tell the server the demo is saved. These
+        /// paths used to send a bare tv_stoprecord, so the chat never said the recording had ended.
+        /// No upload: an ended-early or abandoned map is not uploaded here, same as before.
+        /// </summary>
+        private void StopDemoAndAnnounce()
+        {
+            if (!isDemoRecording)
+                return;
+            Server.ExecuteCommand("tv_stoprecord");
+            isDemoRecording = false;
+            demoWatchdogTimer?.Kill();
+            demoWatchdogTimer = null;
+            var files = new List<string>(previousDemoSegments);
+            if (!string.IsNullOrEmpty(activeDemoFile))
+                files.Add(activeDemoFile);
+            Log($"[StopDemo] tv_stoprecord - {activeDemoFile}");
+            if (files.Count > 0)
+                PrintLocalizedToAll("matchzy.demo.saved", string.Join(", ", files.Select(f => Path.GetFileName(f))));
+        }
+
         public void StopDemoRecording(string activeDemoFile, long liveMatchId, int currentMapNumber)
         {
+            // The match is over: a deferred tv_record from a GOTV restart must not start a new demo.
+            cstvRestartPending = false;
             // Earlier segments from a watchdog restart come first, then the current file. The current
             // file only counts while it is actually recording (a failed restart leaves none).
             var segmentFiles = new List<string>(previousDemoSegments);
@@ -387,7 +667,7 @@ namespace MatchZy
                 segmentFiles.Add(activeDemoFile);
             previousDemoSegments.Clear();
             lastStoppedDemoFile = segmentFiles.Count > 0 ? segmentFiles[^1] : "";
-            var segmentPaths = segmentFiles.Select(f => Path.Join(Server.GameDirectory + "/csgo/" + f)).ToList();
+            var segmentPaths = segmentFiles.Select(f => Path.Join(EngineCsgoDirectory(), f)).ToList();
             (int t1score, int t2score) = GetTeamsScore();
             int roundNumber = t1score + t2score;
 
@@ -409,6 +689,8 @@ namespace MatchZy
                 Server.ExecuteCommand("tv_stoprecord");
                 isDemoRecording = false;
                 demoStartPending = false;
+                string savedNames = string.Join(", ", segmentFiles.Select(f => Path.GetFileName(f)));
+                PrintLocalizedToAll(uploadURL != "" ? "matchzy.demo.savedupload" : "matchzy.demo.saved", savedNames);
                 demoWatchdogTimer?.Kill();
                 demoWatchdogTimer = null;
                 Log($"[StopDemoRecording] tv_stoprecord - {activeDemoFile}");

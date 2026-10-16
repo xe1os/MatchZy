@@ -38,13 +38,16 @@ Helpers while learning:
 
 - `.bot` places a bot where you stand, looking where you look. `.crouchbot`, `.boost`, `.crouchboost` for other setups.
 - `.savebotpos <name>` saves a bot spot; `.loadbotpos` with no name spawns every saved spot on the map, rebuilding a full setup instantly.
-- `.showbotpos` shows the saved spots; `.botjiggle` makes bots strafe for peek practice.
+- `.showbotpos` shows the saved spots; `.botjiggle` makes bots strafe for peek practice (`.botjigglerange`, `.botjigglerandom`).
+- `.botspawn <name>` builds a pool of spots; `.placebot <number> <name>` puts bots on random spots from it, so every rep has a new setup. `.showbotspawn` shows the spots (stand in one + ++e++ deletes it).
+- `.botshoot` makes bots fight back from their spot after `.botreactiontime` (default 500 ms). Turn off your health regeneration with `.liferegon` (or `.allliferegon false` for everyone) so their hits count. `.botrespawn` and `.botlifereg` control what happens when you hit them.
+- `.startround` resets the rep: utility cleared, random spawns for every player, bots back on their spots, 5 second freeze.
 - Bot commands respect `-nobots` and never take the CSTV slot, so a practice session cannot kill a running GOTV.
 
 ## Positions and spawns
 
-- `.savepos <name>` / `.loadpos <name>`: up to 32 named positions.
-- `.showspawns`: markers on every competitive spawn; aim + ++e++ teleports you there.
+- `.savepos <name>` / `.loadpos <name>`: up to 32 named positions. `.slp` / `.tlp` / `.dlp` work on the unnamed slot, and after a death you respawn there.
+- `.showspawns`: a numbered box on the floor at every competitive spawn (blue CT, orange T); aim at a box (it turns green) or stand inside one and press ++e++ to teleport there. The number is the one `.spawn <n>` uses.
 - `.spawn <n>`, `.bestspawn`, `.worstspawn` to practice spawn-dependent timings.
 
 ## Team switching

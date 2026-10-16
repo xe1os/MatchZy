@@ -13,6 +13,19 @@ MatchZy kører serveren i én mode ad gangen. Admins skifter med en kommando i c
 
 Hver mode kører sin egen cfg fra `cfg/MatchZy/` (`live.cfg`, `scrim.cfg`, `hill.cfg`, `prac.cfg`, `dryrun.cfg`, `sleep.cfg`, plus `warmup.cfg` og `knife.cfg`). Ret i de filer, eller bedre i en `<mode>_override.cfg`, for at ændre reglerne. Se [Filer og mapper](../reference/files.md#server-specific-settings).
 
+## Holdstørrelser { #team-sizes }
+
+En kamp spilles som competitive (5v5), medmindre dens match config sætter `game_mode`. MatchZy skifter serverens `game_mode`, før banen loader, og bruger den spiltypes live-cfg:
+
+| `game_mode` | Hold | Server-mode | Live-cfg |
+|---|---|---|---|
+| `competitive` | 5v5 | `game_type 0`, `game_mode 1` | `live.cfg` |
+| `wingman` | 2v2 | `game_type 0`, `game_mode 2` | `live_wingman.cfg` |
+| `rush` | 3v3 | `game_type 0`, `game_mode 6` | `live_rush.cfg` (Valves rush-regler: 15 runder, ingen halvleg, 40 sekunders runder) |
+| `1v1` | 1v1 | `game_type 0`, `game_mode 1` | `live_1v1.cfg` (1on1 ladder-regler med MR12: 24 runder, maks. $16000) |
+
+`players_per_team` følger spiltypen, medmindre match configen sætter den. En mapliste med kun rush-baner (`rush_001` og andre `rush_`-baner, `aim_rush`) spilles som rush uden `game_mode`. Uden en match config følger live-cfg'en serverens egen `game_mode` (`2` wingman, `6` rush), og en rush-bane får også `live_rush.cfg`. `.matchsetup` spørger efter spiltypen, se [Menuer](menus.md#matchsetup-wizard).
+
 ## Mode ved opstart { #mode-on-startup }
 
 `matchzy_autostart_mode` bestemmer, hvad en ny bane starter i:

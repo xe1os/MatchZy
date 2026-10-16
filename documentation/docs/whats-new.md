@@ -2,6 +2,50 @@
 
 A short summary of each release. The [full changelog](changelog.md) has the details and background for every change.
 
+## 1.0.9 <small>October 16, 2026</small>
+
+- **New:** `.ma` → Match Control → Restore Round: pick a round backup from a list, with confirmation. Without a live match it lists the newest backups on disk for crash recovery.
+- **New:** Rush (3v3) and 1v1 matches. Set `"game_mode": "rush"` or `"1v1"` in the match config, or pick the mode in `.matchsetup`. Rush uses the new `live_rush.cfg` (Valve's rush rules), 1v1 the new `live_1v1.cfg`.
+- **New:** A match config with only rush maps (`rush_001`, `aim_rush`, ...) plays as rush automatically.
+- **Fixed:** `css_knife` (also `css_rk`, `css_kr`, `css_kniferound`, `css_roundknife`) now works from the server and panel console. Each call toggles the knife round.
+- **Changed:** Without `players_per_team`, the team size follows the mode (1v1: 1, wingman: 2, rush: 3, competitive: 5).
+- **Fixed:** Going live with bots on the server no longer kicks the CSTV bot, so the demo is recorded. With `tv_enable 1`, MatchZy checks that the CSTV bot is on the server before `tv_record` and restarts it if it was kicked (needs `tv_enable_dynamic 1`); a kick during the match starts a new demo file.
+- **New:** `matchzy_series_end_shutdown_seconds` closes the server a set time after a series ends (also after a forfeit), after sending `server_shutdown` with `reason` `series_end`. Players can no longer keep playing an unreported match after a forfeit. Off by default.
+- **Changed:** with `matchzy_kick_when_no_match_loaded` on, the players left on the server after a series ends (also after a forfeit) are kicked, unless a new match is loaded within the reset delay. Admins stay. `get5_endmatch` does not kick, as in Get5.
+- **Fixed:** possible server crash on the map change between series maps when the server's cfgs restored `bot_quota` during the level load. MatchZy now sets `bot_quota 0` in `csgo/cfg/gamemode_competitive_server.cfg` (and the wingman `gamemode_competitive2v2_server.cfg`).
+- **Fixed:** the coach kill no longer carries over to the next map.
+- **Fixed:** no player stats in a game started without a loaded match while `matchzy_kick_when_no_match_loaded` was on.
+- **New:** `matchzy_forfeit_join_grace_seconds` (default 60) gives a registered player who joins right before the ready time runs out a chance to ready up before their team forfeits.
+- **Changed:** the ready time reminders name the players a team is still missing, and `.tech` / `.pause` / `.tac` in the ready phase say that they do not stop the ready time.
+- **Changed:** delivery of the result events (`series_end`, `map_result`, ...) is logged with match id and HTTP status.
+- **Changed:** `.showspawns` draws a numbered box on the floor at each spawn. Aim at a box (it turns green) or stand inside one and press ++e++ to teleport exactly onto that spawn. Bind a spawn to a key with `bind F1 "css_spawn 1"`.
+- **New:** `.botshoot` makes practice bots shoot back from their spot after `.botreactiontime`; smokes block their view. `.botrespawn` and `.botlifereg` control respawning and healing of bots.
+- **New:** `.startround` starts a fresh practice rep: utility cleared, random spawns for everyone, bots reset, 5 second freeze.
+- **New:** bot spawn pools: `.botspawn <name>` collects spots, `.placebot <number> <name>` places bots on random ones. `.showbotspawn` shows them (stand in one + ++e++ deletes it).
+- **New:** `.liferegon` / `.allliferegon` to turn health regeneration off and actually die in practice, `.slp` / `.tlp` / `.dlp` for a saved location you also respawn at, `.kicklastbot`, `.botjigglerange`, `.botjigglerandom`, and `matchzy_spawn_markers_enabled_default`.
+- **Fixed:** Dryrun rounds use the normal competitive spawns, like a match round, instead of random spawn points across the map.
+- **Fixed:** `.nobot` in practice no longer starts an endless bot join/kick loop.
+- **Fixed:** `.throw` / `.rethrow` (`.rt`) now land a grenade thrown while running or jumping on the same spot as the original throw.
+- **Changed:** The `.tac` hint at LIVE shows the server's real timeout settings (`mp_team_timeout_max` x `mp_team_timeout_time`) instead of a fixed "4 x 30 seconds", and `.tac` tells the chat how many timeouts the team has left.
+- **Changed:** `.help` before going live lists the player commands (`.ready`, `.unready`, `.coach`, `.tac`, `.tech`) and shows admin commands (`.start`, `.knife`, `.scrim` / `.playout`, `.endmatch`) only to admins. Live `.help` shows your team's tactical timeouts left.
+- **Changed:** The CSTV demo starts about a second after LIVE instead of about 8 seconds later. Chat confirms the recording sooner, and says when it is finished, with the demo file name.
+- **Changed:** `.clear` / `.cleanup` in practice also remove blood and bullet holes.
+- **Fixed:** Demos and round backups are written again on Windows servers (the engine rejected the full `D:/...` path: `invalid path`).
+- **Fixed:** The bomb no longer drops outside the map when a Terrorist coach is given it. It is passed to a player before the coach is killed at the end of freeze time.
+- **Fixed:** a coach who picks up the bomb (dropped by a teammate in freeze time) passes it straight to a player, and a bomb a coach drops is given to a live Terrorist instead of lying at the coach spot.
+- **Changed:** On load, MatchZy removes settings it no longer has from your `config.cfg`, so they stop printing "Unknown command". Only the setting line goes; comments and commented-out settings stay.
+- **Fixed:** Loading MatchZy mid-map (`css_plugins load`) counts the players already on the server, so the ready-up works without reconnecting.
+- **Fixed:** Unloading MatchZy resets practice settings and removes its bots and markers, so the next mode starts clean.
+- **Fixed:** Unloading during the ready phase no longer leaves a paused warmup behind, and no longer freezes the server for up to 3 seconds.
+- **Changed:** `.arc` uses far fewer beams (max 32 per arc, 256 in total), which is lighter on every player's FPS during practice.
+- **Changed:** `.shownades` is per player: only players who turn it on see the markers, and labels show only when you are near.
+- **Changed:** The ready-phase timer (`matchzy_ready_hint_style` 1) updates the game rules about twice a second instead of every tick.
+- **New:** `.rec` records your movement and grenade throws in practice, `.replay` lets a bot walk it and throw the same grenades. The bot crouches where you crouched and holds the grenade before each throw. `.replay loop` repeats the path, `.saverec` / `.loadrec` / `.listrec` / `.delrec` keep paths per map. `.showrec` draws your path and throw spots on the map, only for you.
+- **Fixed:** round backups on servers where the game folder has another path outside the engine (for example in Docker): CS2 rejected the backup path and wrote no round files.
+- **Important:** CS2 needs the launch option `-allow_round_backup_files` for round backups. Without it nothing is saved and every restore fails; MatchZy now warns about it in the log and in chat.
+- **Changed:** practice turns off cash awards, so a kicked practice bot no longer prints "+$300 ... compensation for the suicide of".
+- **Fixed:** `score_ct` / `score_t` on the teams of `round_end` and `map_result` were always 0. They now hold the rounds won on each side, and the teams also carry `side` and `starting_side`.
+
 ## 1.0.8 <small>October 6, 2026</small>
 
 - **Fixed:** The automatic coach kill at the end of freeze time no longer gives money to the other team.

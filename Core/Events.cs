@@ -824,7 +824,8 @@ public class MapChangeEvent : ServerLifecycleEvent
 
 public class ServerShutdownEvent : ServerLifecycleEvent
 {
-    // "quit", "restart", "fatal", "plugin_unload" or "empty" (matchzy_empty_shutdown_seconds).
+    // "quit", "restart", "fatal", "plugin_unload", "empty" (matchzy_empty_shutdown_seconds) or
+    // "series_end" (matchzy_series_end_shutdown_seconds).
     [JsonPropertyName("reason")]
     public required string Reason { get; init; }
 

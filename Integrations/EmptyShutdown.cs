@@ -9,6 +9,11 @@ namespace MatchZy
     // do), it sends server_shutdown with reason "empty" and quits. It waits while a demo or round
     // backup upload is still running. The count also starts at server start, so a server nobody
     // ever joins is closed as well.
+    //
+    // matchzy_series_end_shutdown_seconds: closes the server a set time after a series ended (also
+    // by forfeit, .gg or get5_endmatch). Without it the server went back to warmup after a forfeit
+    // and the players could ready up and play an unloaded match nobody received events for. Sends
+    // server_shutdown with reason "series_end" to the ended match's receiver too, after uploads.
     public partial class MatchZy
     {
         private const float EmptyShutdownCheckInterval = 10.0f;
@@ -19,6 +24,10 @@ namespace MatchZy
         private DateTime? _serverEmptySince;
         private bool _emptyShutdownWaitLogged;
         private bool _emptyShutdownStarted;
+
+        private const float SeriesEndShutdownWaitInterval = 5.0f;
+        private CounterStrikeSharp.API.Modules.Timers.Timer? _seriesEndShutdownTimer;
+        private bool _seriesEndShutdownWaitLogged;
 
         private void StartEmptyShutdownMonitor()
         {
@@ -72,6 +81,53 @@ namespace MatchZy
             catch (Exception e)
             {
                 Log($"[EmptyShutdown] {e.Message}");
+            }
+        }
+
+        // Called from EndSeries on the game thread, while the match config still holds the ended
+        // match's remote log URL (the reset a few seconds later puts the server's own back).
+        private void ScheduleSeriesEndShutdown(long matchId)
+        {
+            int delay = seriesEndShutdownSeconds.Value;
+            if (delay <= 0)
+                return;
+            RemoteLogTarget target = CurrentRemoteLogTarget();
+            long? id = matchId > 0 ? matchId : null;
+            Log($"[SeriesEndShutdown] Series ended; closing the server in {delay}s (matchzy_series_end_shutdown_seconds).");
+            PrintLocalizedToAll("matchzy.matchmsg.seriesendshutdown", delay);
+            _seriesEndShutdownTimer?.Kill();
+            _seriesEndShutdownTimer = AddTimer(delay, () => SeriesEndShutdownTick(target, id));
+        }
+
+        private void SeriesEndShutdownTick(RemoteLogTarget target, long? matchId)
+        {
+            try
+            {
+                _seriesEndShutdownTimer = null;
+                // The panel loaded the next match within the delay: the server is in use again.
+                if (isMatchSetup || matchStarted)
+                {
+                    Log("[SeriesEndShutdown] A new match was loaded, not shutting down.");
+                    return;
+                }
+                if (Volatile.Read(ref _pendingUploads) > 0)
+                {
+                    if (!_seriesEndShutdownWaitLogged)
+                    {
+                        _seriesEndShutdownWaitLogged = true;
+                        Log("[SeriesEndShutdown] Waiting for uploads to finish before shutting down.");
+                    }
+                    _seriesEndShutdownTimer = AddTimer(SeriesEndShutdownWaitInterval, () => SeriesEndShutdownTick(target, matchId));
+                    return;
+                }
+
+                Log("[SeriesEndShutdown] Shutting down.");
+                AnnounceShutdown("series_end", matchTarget: target, matchId: matchId);
+                Server.ExecuteCommand("quit");
+            }
+            catch (Exception e)
+            {
+                Log($"[SeriesEndShutdown] {e.Message}");
             }
         }
     }

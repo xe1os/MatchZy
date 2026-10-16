@@ -397,6 +397,64 @@ namespace MatchZy
             ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.bp.jiggleon"));
         }
 
+        [ConsoleCommand("css_botjigglerange", "Set how far practice bots strafe with .botjiggle (units)")]
+        public void OnBotJiggleRangeConsoleCommand(CCSPlayerController? player, CommandInfo command)
+            => HandleBotJiggleRangeCommand(player, command.ArgString);
+
+        public void HandleBotJiggleRangeCommand(CCSPlayerController? player, string arg)
+        {
+            if (!RequirePractice(player) || !IsPlayerValid(player))
+                return;
+            if (!float.TryParse(arg.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float range)
+                || range < 1.0f || range > 200.0f)
+            {
+                ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.cc.usage", ".botjigglerange <1-200>"));
+                return;
+            }
+            botJiggleRange.Value = range;
+            ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.px.jigglerange", $"{range:0.#}"));
+        }
+
+        // .botjigglerandom: each bot gets a 50/50 roll whether it jiggles. Rerolled when random mode
+        // is turned on again and on .startround. Bots that don't jiggle stand still on their spot.
+        private bool _botJiggleRandom;
+        private readonly Dictionary<int, bool> _botJiggleRoll = new();
+
+        [ConsoleCommand("css_botjigglerandom", "Toggle: only a random half of the practice bots jiggle")]
+        public void OnBotJiggleRandomConsoleCommand(CCSPlayerController? player, CommandInfo command)
+            => HandleBotJiggleRandomCommand(player, command.ArgString);
+
+        public void HandleBotJiggleRandomCommand(CCSPlayerController? player, string arg)
+        {
+            if (!RequirePractice(player) || !IsPlayerValid(player))
+                return;
+            if (!TryParseToggle(arg, _botJiggleRandom, out bool enabled))
+            {
+                ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.cc.usage", ".botjigglerandom [true|false]"));
+                return;
+            }
+            _botJiggleRandom = enabled;
+            _botJiggleRoll.Clear();
+            ReplyToUserCommand(player, Localizer.ForPlayer(player, enabled ? "matchzy.px.jigglerandomon" : "matchzy.px.jigglerandomoff"));
+        }
+
+        // Whether this bot strafes right now: .botjiggle on, and with .botjigglerandom its roll came up.
+        private bool IsBotJiggling(int botUserId)
+        {
+            if (!_botJiggleOn)
+                return false;
+            if (!_botJiggleRandom)
+                return true;
+            if (!_botJiggleRoll.TryGetValue(botUserId, out bool rolled))
+            {
+                rolled = Random.Shared.Next(2) == 0;
+                _botJiggleRoll[botUserId] = rolled;
+            }
+            return rolled;
+        }
+
+        private void RerollBotJiggle() => _botJiggleRoll.Clear();
+
         // Scratch objects for the jiggle tick. Vector exposes X/Y/Z as `ref float` into its own
         // native buffer, so mutating one instance in place is equivalent to handing Teleport a
         // fresh one - minus a per-bot allocation on every tick.
@@ -440,6 +498,27 @@ namespace MatchZy
                     }
                     if (spot == null)
                         continue;
+
+                    int botUserId = p.UserId.Value;
+                    // A bot walking a recorded path is moved by the replay tick (PathReplay.cs).
+                    if (IsBotReplayingPath(botUserId))
+                        continue;
+                    // A .botshoot bot that sees a target stands still and shoots (BotCombat.cs).
+                    if (botShootEnabled && botsEngaged.Contains(botUserId))
+                        continue;
+                    if (!IsBotJiggling(botUserId))
+                    {
+                        // Not picked by .botjigglerandom: keep it on its spot. With .botshoot on the
+                        // combat tick already does that.
+                        if (!botShootEnabled)
+                        {
+                            _jiggleVel.X = 0;
+                            _jiggleVel.Y = 0;
+                            _jiggleVel.Z = 0;
+                            pawn.Teleport(spot.PlayerPosition, spot.PlayerAngle, _jiggleVel);
+                        }
+                        continue;
+                    }
 
                     double yaw = spot.PlayerAngle.Y * Math.PI / 180.0;
                     float rx = (float)Math.Sin(yaw);    // right vector (perpendicular to facing)

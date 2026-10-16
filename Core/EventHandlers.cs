@@ -50,8 +50,13 @@ public partial class MatchZy
                         KickPlayerDeferred(player);
                         return HookResult.Continue;
                     }
-                    SendPlayerConnectEvent(player);
-                    return HookResult.Continue;
+                    // Only a loaded match has a roster to leave a player out of. An admin who
+                    // joins a server with no match loaded is tracked like anyone else.
+                    if (isMatchSetup)
+                    {
+                        SendPlayerConnectEvent(player);
+                        return HookResult.Continue;
+                    }
                 }
             }
 
@@ -100,18 +105,26 @@ public partial class MatchZy
                     // Also on a match-only server (matchzy_kick_when_no_match_loaded): .scrim / .prac
                     // are not how that server is used, and only admins get in before a match loads.
                     bool hideModeHints = (IsMatchLoadedOrPending() && loadedMatchHideModeHints.Value) || matchModeOnly;
-                    if (!hideModeHints)
-                        PrintToPlayerChat(player, Localizer.ForPlayer(player, "matchzy.eh.warmup"));
                     PrintToPlayerChat(player, Localizer.ForPlayer(player, "matchzy.eh.start"));
-                    if (!hideModeHints)
+                    // The mode commands (.scrim / .match / .knife / .prac) are admin-only, so only the
+                    // joining player sees them, and only if they are an admin. They used to go to every
+                    // player (.scrim) and to every admin on the server on each join (.prac / .knife).
+                    if (!hideModeHints && IsPlayerAdmin(player, "", "@css/config", "@css/map", "@custom/prac"))
                     {
-                        PrintLocalizedToAdmins("matchzy.eh.prac");
-                        PrintLocalizedToAdmins("matchzy.eh.knife");
+                        if (isMatchModeEnabled)
+                        {
+                            string knife = Localizer.ForPlayer(player, isKnifeRequired ? "matchzy.cc.statuson" : "matchzy.cc.statusoff");
+                            PrintToPlayerChat(player, Localizer.ForPlayer(player, "matchzy.eh.adminmatch", knife));
+                        }
+                        else
+                        {
+                            PrintToPlayerChat(player, Localizer.ForPlayer(player, "matchzy.eh.adminscrim"));
+                        }
                     }
                 }
-                else if (isPractice && !readyAvailable)
+                else if (isPractice && !readyAvailable && IsPlayerAdmin(player, "", "@css/map", "@custom/prac"))
                 {
-                    PrintLocalizedToAdmins("matchzy.eh.quitprac");
+                    PrintToPlayerChat(player, Localizer.ForPlayer(player, "matchzy.eh.quitprac"));
                 }
             }
 
@@ -159,7 +172,17 @@ public partial class MatchZy
 
             int userId = player.UserId.Value;
 
-            if ((isMatchSetup || matchStarted) && !player.IsBot && !player.IsHLTV && UseGet5Events)
+            if (player.IsHLTV)
+                OnCstvDisconnected();
+
+            // No player_disconnect for a player the connect gate kicked (they got no player_connect),
+            // nor for one that never finished authenticating (SteamID still 0, e.g. a timeout while
+            // loading): panels look players up by steamid.
+            bool gateKicked = gateKickedUserIds.Remove(userId);
+            bool sendDisconnect = (isMatchSetup || matchStarted) && !player.IsBot && !player.IsHLTV
+                && !gateKicked && player.SteamID != 0;
+
+            if (sendDisconnect && UseGet5Events)
             {
                 PublishEvent(new Get5PlayerDisconnectEvent
                 {
@@ -168,7 +191,7 @@ public partial class MatchZy
                     Reason = @event.Reason,
                 });
             }
-            else if ((isMatchSetup || matchStarted) && !player.IsBot && !player.IsHLTV)
+            else if (sendDisconnect)
             {
                 var disconnectEvent = new MatchZyPlayerDisconnectedEvent
                 {
@@ -434,10 +457,11 @@ public partial class MatchZy
                 return HookResult.Continue;
             var recv = @event.Userid;
 
-            // check if coach
-            var coaches = reverseTeamSides["TERRORIST"].coach;
-            if (coaches.Contains(recv))
+            // Any coach, not only the T team's list: a coach still on the wrong side after a side
+            // switch is on T but listed under the CT team.
+            if (GetAllCoaches().Contains(recv))
             {
+                Log($"[EventPlayerGivenC4] Coach {recv.PlayerName} was given the bomb; passing it to a player.");
                 TransferCoachBomb(recv);
             }
         }
@@ -484,7 +508,19 @@ public partial class MatchZy
                     // (the launch velocity), while AbsVelocity can still read ~0 one frame after spawn.
                     Vector velocity = new(projectile.InitialVelocity.X, projectile.InitialVelocity.Y, projectile.InitialVelocity.Z);
                     if (velocity.X * velocity.X + velocity.Y * velocity.Y + velocity.Z * velocity.Z < 2500f)
+                    {
                         velocity = new(projectile.AbsVelocity.X, projectile.AbsVelocity.Y, projectile.AbsVelocity.Z);
+                    }
+                    else
+                    {
+                        // Pair the spawn-time velocity with the spawn-time position. AbsOrigin is read
+                        // one frame after spawn, when the projectile may already have moved, so replaying
+                        // it with the launch velocity started the rethrow further along the arc. The
+                        // offset grows with throw speed, which is why running throws landed off target.
+                        var initPos = projectile.InitialPosition;
+                        if (initPos.X != 0f || initPos.Y != 0f || initPos.Z != 0f)
+                            position = new(initPos.X, initPos.Y, initPos.Z);
+                    }
                     Vector angularVelocity = new(projectile.AngVelocity.X, projectile.AngVelocity.Y, projectile.AngVelocity.Z);
                     string nadeType = Constants.ProjectileTypeMap[entity.Entity.DesignerName];
 

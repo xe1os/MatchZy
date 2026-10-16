@@ -47,8 +47,7 @@ namespace MatchZy
             {
                 string cfg = isPlayOutEnabled2 ? hillCfgPath
                     : isPlayOutEnabled ? scrimCfgPath
-                    : GetGameMode() == 2 ? liveWingmanCfgPath
-                    : liveCfgPath;
+                    : LiveCfgPathForMode();
                 string? value = GetConvarValueFromCFGFile(Path.Join(Server.GameDirectory + "/csgo/cfg", cfg), "mp_friendlyfire");
                 return value == null || (value.Trim().Trim('"') != "0" && !value.Trim().Trim('"').Equals("false", StringComparison.OrdinalIgnoreCase));
             }

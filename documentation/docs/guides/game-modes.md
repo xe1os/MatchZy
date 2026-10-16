@@ -13,6 +13,19 @@ MatchZy runs the server in one mode at a time. Admins switch with a chat command
 
 Every mode executes its own cfg from `cfg/MatchZy/` (`live.cfg`, `scrim.cfg`, `hill.cfg`, `prac.cfg`, `dryrun.cfg`, `sleep.cfg`, plus `warmup.cfg` and `knife.cfg`). Edit those files, or better a `<mode>_override.cfg`, to change the rules. See [Files and folders](../reference/files.md#server-specific-settings).
 
+## Team sizes
+
+A match plays as competitive (5v5) unless its match config sets `game_mode`. MatchZy switches the server's `game_mode` before the map loads and uses that mode's live cfg:
+
+| `game_mode` | Teams | Server mode | Live cfg |
+|---|---|---|---|
+| `competitive` | 5v5 | `game_type 0`, `game_mode 1` | `live.cfg` |
+| `wingman` | 2v2 | `game_type 0`, `game_mode 2` | `live_wingman.cfg` |
+| `rush` | 3v3 | `game_type 0`, `game_mode 6` | `live_rush.cfg` (Valve's rush rules: 15 rounds, no halftime, 40 second rounds) |
+| `1v1` | 1v1 | `game_type 0`, `game_mode 1` | `live_1v1.cfg` (1on1 ladder rules with MR12: 24 rounds, $16000 max money) |
+
+`players_per_team` follows the mode unless the match config sets it. A maplist with only rush maps (`rush_001` and other `rush_` maps, `aim_rush`) plays as rush without `game_mode`. Without a match config, the live cfg follows the server's own `game_mode` (`2` wingman, `6` rush), and a rush map also gets `live_rush.cfg`. `.matchsetup` asks for the mode, see [Menus](menus.md#matchsetup-wizard).
+
 ## Mode on startup
 
 `matchzy_autostart_mode` decides what a fresh map starts in:

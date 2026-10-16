@@ -16,9 +16,13 @@ namespace MatchZy
 
         public FakeConVar<int> emptyShutdownSeconds = new("matchzy_empty_shutdown_seconds", "Close the server (quit) after it has had no players for this many seconds, counted from server start too. Sends server_shutdown with reason empty first and waits for demo and backup uploads. 0 = off. Default: 0", 0);
 
+        public FakeConVar<int> seriesEndShutdownSeconds = new("matchzy_series_end_shutdown_seconds", "Close the server (quit) this many seconds after a series ends, also on a forfeit, .gg or get5_endmatch. Sends server_shutdown with reason series_end first and waits for demo and backup uploads. 0 = off. Default: 0", 0);
+
         public FakeConVar<bool> smokeColorEnabled = new("matchzy_smoke_color_enabled", "Whether player-specific smoke color is enabled or not. Default: false", false);
 
         public FakeConVar<float> botJiggleRange = new("matchzy_botjiggle_range", "Practice .botjiggle: how far (units) bots strafe side-to-side. Default: 30", 30.0f);
+
+        public FakeConVar<bool> spawnMarkersEnabledDefault = new("matchzy_spawn_markers_enabled_default", "Show the .showspawns markers automatically when practice mode starts. Default: false", false);
 
 
         // Coach viewing-spot source. 1 = use a spawns/coach/<map>.json spot when one exists (hand-tuned
@@ -47,6 +51,7 @@ namespace MatchZy
         public FakeConVar<int> overtimePausesPerTeam = new("matchzy_overtime_pauses_per_team", "How many times each team may use .pause in each overtime period. 0 = no limit. Admin pauses are not counted. Default: 1", 1);
 
         public FakeConVar<int> forfeitReadyTimeout = new("matchzy_forfeit_ready_timeout", "Seconds after the ready phase of a loaded match begins before a team that is not ready forfeits the series (neither ready: the series ends in a tie). 0 = off. Get5 name: get5_time_to_start. Default: 0", 0);
+        public FakeConVar<int> forfeitJoinGraceSeconds = new("matchzy_forfeit_join_grace_seconds", "When the ready time of a loaded match runs out while a registered player of the team that is not ready has joined in the last this many seconds, the forfeit waits for them up to this long. Once per player per ready phase. 0 = off. Default: 60", 60);
 
         public FakeConVar<int> forfeitVetoReadyTimeout = new("matchzy_forfeit_veto_ready_timeout", "Like matchzy_forfeit_ready_timeout, for the ready-up before the map veto. -1 = same as matchzy_forfeit_ready_timeout, 0 = no limit. Get5 name: get5_time_to_start_veto. Default: -1", -1);
 

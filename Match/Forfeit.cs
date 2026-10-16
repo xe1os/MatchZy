@@ -1,7 +1,9 @@
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
+using CounterStrikeSharp.API.Core.Translations;
 using CounterStrikeSharp.API.Modules.Timers;
 using CounterStrikeSharp.API.Modules.Utils;
+using Newtonsoft.Json.Linq;
 
 namespace MatchZy
 {
@@ -23,6 +25,14 @@ namespace MatchZy
         private readonly Dictionary<Team, DateTime> teamEmptySince = new();
         private int forfeitWarnedSecondsLeft = -1;
 
+        // matchzy_forfeit_join_grace_seconds: when a registered player reaches the server late in
+        // the ready phase, the ready forfeit waits this long for them to pick a side and ready up.
+        // A player who connected 30 seconds before the deadline used to lose the series for their
+        // team while still choosing a side. Each player gets it once per ready phase (first seen
+        // time is kept), so leaving and rejoining cannot stall the clock.
+        private readonly Dictionary<ulong, (DateTime At, string Name)> readyPhaseArrivals = new();
+        private readonly HashSet<ulong> joinGraceAnnounced = new();
+
         private void StartForfeitMonitor()
         {
             forfeitMonitorTimer?.Kill();
@@ -34,6 +44,14 @@ namespace MatchZy
         {
             readyPhaseStartedAt = isMatchSetup ? DateTime.UtcNow : null;
             forfeitWarnedSecondsLeft = -1;
+            // Logged so a forfeit can be checked against the limit that was actually in force (a
+            // panel can set get5_time_to_start in the match config's cvars).
+            if (readyPhaseStartedAt != null && CurrentReadyTimeout() > 0)
+                Log($"[Forfeit] Ready phase started: a team that is not ready in {CurrentReadyTimeout()} s forfeits.");
+            // Whoever is already here when the phase starts is not a late arrival.
+            readyPhaseArrivals.Clear();
+            joinGraceAnnounced.Clear();
+            RecordReadyPhaseArrivals(DateTime.MinValue);
             // A force-ready belongs to one ready phase. It used to be cleared only by ResetMatch, so
             // a team forced ready before the veto or on map 1 stayed forced on the next map.
             foreach (var team in teamReadyOverride.Keys.ToList())
@@ -75,6 +93,8 @@ namespace MatchZy
             int timeout = CurrentReadyTimeout();
             if (timeout <= 0 || !readyAvailable || matchStarted || isVeto || readyPhaseStartedAt == null)
                 return;
+            // Before the restore check, so a player who joins during a restore gets the full grace.
+            RecordReadyPhaseArrivals(DateTime.UtcNow);
             // As in Get5: the clock does not run while a round restore is waiting for the teams.
             if (isRoundRestorePending)
             {
@@ -84,6 +104,7 @@ namespace MatchZy
 
             double elapsed = (DateTime.UtcNow - readyPhaseStartedAt.Value).TotalSeconds;
             int secondsLeft = (int)Math.Ceiling(timeout - elapsed);
+            RecordReadyPhaseArrivals(DateTime.UtcNow);
 
             bool team1Ready = IsTeamReady(SideOfTeam(matchzyTeam1));
             bool team2Ready = IsTeamReady(SideOfTeam(matchzyTeam2));
@@ -98,6 +119,24 @@ namespace MatchZy
                 {
                     forfeitWarnedSecondsLeft = mark.Value;
                     PrintLocalizedToAll("matchzy.matchmsg.forfeitreadywarning", FormatReadyTime(secondsLeft));
+                    // Name who is missing: a team that typed .ready while short-handed believed it
+                    // was ready, and only learned otherwise from the forfeit.
+                    if (!team1Ready)
+                        PrintMissingPlayers(matchzyTeam1);
+                    if (!team2Ready)
+                        PrintMissingPlayers(matchzyTeam2);
+                }
+                return;
+            }
+
+            foreach (Team team in new[] { matchzyTeam1, matchzyTeam2 })
+            {
+                if ((team == matchzyTeam1 ? team1Ready : team2Ready) || JoinGraceFor(team) is not (ulong steamId, string name, int graceLeft))
+                    continue;
+                if (joinGraceAnnounced.Add(steamId))
+                {
+                    Log($"[Forfeit] Ready time is up, waiting up to {graceLeft} s for {name} ({team.teamName}) who joined late.");
+                    PrintLocalizedToAll("matchzy.matchmsg.forfeitjoingrace", team.teamName, name, graceLeft);
                 }
                 return;
             }
@@ -116,6 +155,91 @@ namespace MatchZy
             Team winner = team1Ready ? matchzyTeam1 : matchzyTeam2;
             Team loser = team1Ready ? matchzyTeam2 : matchzyTeam1;
             ForfeitSeries(winner, $"{loser.teamName} was not ready in time", "matchzy.matchmsg.forfeitnotready", loser.teamName);
+        }
+
+        // Notes the first time each human is seen on the server (connecting counts) during this
+        // ready phase. Nothing is overwritten, so a rejoin keeps the first time.
+        private void RecordReadyPhaseArrivals(DateTime at)
+        {
+            foreach (var p in Utilities.GetPlayers())
+            {
+                if (p is not { IsValid: true, IsBot: false, IsHLTV: false } || p.SteamID == 0)
+                    continue;
+                if (p.Connected is not (PlayerConnectedState.Connected or PlayerConnectedState.Connecting or PlayerConnectedState.Reconnecting))
+                    continue;
+                readyPhaseArrivals.TryAdd(p.SteamID, (at, p.PlayerName));
+            }
+        }
+
+        // A registered player of this team who joined late, is still on the server and is within
+        // the join grace. The latest arrival wins. Null when the team has nobody to wait for.
+        private (ulong SteamId, string Name, int SecondsLeft)? JoinGraceFor(Team team)
+        {
+            int grace = forfeitJoinGraceSeconds.Value;
+            if (grace <= 0 || team.teamPlayers == null)
+                return null;
+            var onServer = Utilities.GetPlayers()
+                .Where(p => p is { IsValid: true, IsBot: false, IsHLTV: false } && p.Connected != PlayerConnectedState.Disconnected)
+                .Select(p => p.SteamID)
+                .ToHashSet();
+            DateTime now = DateTime.UtcNow;
+            (ulong, string, int)? latest = null;
+            DateTime latestUntil = DateTime.MinValue;
+            foreach (var (steamId, arrival) in readyPhaseArrivals)
+            {
+                DateTime until = arrival.At == DateTime.MinValue ? DateTime.MinValue : arrival.At.AddSeconds(grace);
+                if (until <= now || until <= latestUntil || !onServer.Contains(steamId) || !LookupRosterEntry(team.teamPlayers, steamId))
+                    continue;
+                latestUntil = until;
+                latest = (steamId, arrival.Name, (int)Math.Ceiling((until - now).TotalSeconds));
+            }
+            return latest;
+        }
+
+        // "Herning: 4/5 players on the server. Missing: Mio0p." for a team still waiting for
+        // registered players. Names come from the roster; when it lists more players than the team
+        // needs (substitutes), only the number missing is shown.
+        private void PrintMissingPlayers(Team team)
+        {
+            int side = SideOfTeam(team);
+            if (ShortHandedSide(side) is not (int present, int required))
+                return;
+            int missing = required - present;
+            string who = missing.ToString();
+            if (team.teamPlayers is JObject roster)
+            {
+                var onSide = Utilities.GetPlayers()
+                    .Where(p => p is { IsValid: true, IsBot: false, IsHLTV: false } && p.TeamNum == side)
+                    .Select(p => p.SteamID)
+                    .ToHashSet();
+                var names = roster.Properties()
+                    .Where(e => ulong.TryParse(e.Name, out ulong id) && !onSide.Contains(id) && !LookupRosterEntry(team.teamCoaches, id))
+                    .Select(e => e.Value.Type == JTokenType.String && !string.IsNullOrWhiteSpace(e.Value.ToString()) ? e.Value.ToString() : e.Name)
+                    .ToList();
+                if (names.Count == missing)
+                    who = string.Join(", ", names);
+            }
+            PrintLocalizedToAll("matchzy.matchmsg.forfeitmissingplayers", team.teamName, present, required, who);
+        }
+
+        // .tech / .pause / .tac before a loaded match is live: a pause does not exist yet and does not
+        // stop the ready time. Used to do nothing at all, so a team kept typing .tech and lost on time.
+        // True when it replied (the caller then stops).
+        private bool ReplyPauseInReadyPhase(CCSPlayerController? player)
+        {
+            if (player == null || !isMatchSetup || !readyAvailable || matchStarted || isMatchLive)
+                return false;
+            int timeout = CurrentReadyTimeout();
+            if (timeout > 0 && readyPhaseStartedAt != null && !isVeto)
+            {
+                int secondsLeft = (int)Math.Ceiling(timeout - (DateTime.UtcNow - readyPhaseStartedAt.Value).TotalSeconds);
+                ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.pause.readyphasetime", FormatReadyTime(secondsLeft)));
+            }
+            else
+            {
+                ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.pause.readyphase"));
+            }
+            return true;
         }
 
         private void CheckLeaveForfeit()
@@ -192,7 +316,9 @@ namespace MatchZy
         /// winner a series majority and writes the real map score (a hardcoded 16 used to be written,
         /// wrong under MR12). Between maps there is no map to report.
         /// </summary>
-        private void EndSeriesWithWinner(Team winner)
+        // kickPlayers false: get5_endmatch team1|team2. As in Get5, a forcefully ended match does not
+        // kick the players (matchzy_kick_when_no_match_loaded), only a series that ends by itself.
+        private void EndSeriesWithWinner(Team winner, bool kickPlayers = true)
         {
             (int t1score, int t2score) = GetTeamsScore();
             // Only a demo stopped here belongs to this map; lastStoppedDemoFile can still hold the
@@ -212,8 +338,8 @@ namespace MatchZy
                     MatchId = liveMatchId,
                     MapNumber = matchConfig.CurrentMapNumber,
                     Winner = BuildWinnerFor(winner),
-                    StatsTeam1 = new MatchZyStatsTeam(matchzyTeam1.id, matchzyTeam1.teamName, matchzyTeam1.seriesScore, t1score, 0, 0, statsTeam1),
-                    StatsTeam2 = new MatchZyStatsTeam(matchzyTeam2.id, matchzyTeam2.teamName, matchzyTeam2.seriesScore, t2score, 0, 0, statsTeam2),
+                    StatsTeam1 = BuildStatsTeam(matchzyTeam1, t1score, statsTeam1),
+                    StatsTeam2 = BuildStatsTeam(matchzyTeam2, t2score, statsTeam2),
                     DemoFilename = demoFilename,
                 };
                 // Queued on the game thread before EndSeries queues series_end, so the event queue
@@ -225,7 +351,7 @@ namespace MatchZy
             readyAvailable = false;
             isPreVeto = false;
             readyPhaseStartedAt = null;
-            EndSeries(winner.teamName, 5, t1score, t2score);
+            EndSeries(winner.teamName, 5, t1score, t2score, kickPlayers: kickPlayers);
         }
     }
 }

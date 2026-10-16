@@ -5,7 +5,7 @@
 | File | Location | Purpose |
 |---|---|---|
 | `config.cfg` | `<cfg>` | All settings. Generated on first load, new settings appended on updates. |
-| `warmup.cfg`, `knife.cfg`, `live.cfg`, `live_wingman.cfg`, `scrim.cfg`, `hill.cfg`, `prac.cfg`, `dryrun.cfg`, `sleep.cfg` | `<cfg>` | Executed when the matching phase or mode starts. Written when missing, never overwritten. |
+| `warmup.cfg`, `knife.cfg`, `live.cfg`, `live_wingman.cfg`, `live_rush.cfg`, `live_1v1.cfg`, `scrim.cfg`, `hill.cfg`, `prac.cfg`, `dryrun.cfg`, `sleep.cfg` | `<cfg>` | Executed when the matching phase or mode starts. Written when missing, never overwritten. |
 | `<mode>_override.cfg` (e.g. `warmup_override.cfg`, `live_override.cfg`) | `<cfg>` | Optional, created by you. Executed right after the matching mode cfg, so its values win. See [Server-specific settings](#server-specific-settings). |
 | `defaults/*.cfg`, `defaults/database.json.example`, `defaults/README.txt` | `<cfg>` | Reference copies of the current defaults, rewritten on every load and never executed. Do not edit them. |
 | `matchzymaps.cfg` | `<cfg>` | Map list for automatic map changes and the `.matchsetup` wizard. One map per line, `#` for comments, `workshop/<id>` for workshop maps. |
@@ -15,7 +15,9 @@
 | `savednades.json` | `<cfg>` | Saved practice lineups. |
 | `grenadelibrary.json` | `<cfg>` | Shared lineup pack (`.libadd`). |
 | `botpositions.json` | `<cfg>` | Named practice bot positions (`.savebotpos`). |
+| `botspawns.json` | `<cfg>` | Practice bot spawn pools (`.botspawn`, `.placebot`). |
 | `spawns/coach/<map>.json` | plugin folder | Hand-tuned coach viewing spots. Shipped for ancient, ancient_night, anubis, cache, dust2, inferno, mirage, nuke, overpass, train and vertigo. |
+| `gamemode_competitive_server.cfg`, `gamemode_competitive2v2_server.cfg` | `csgo/cfg/` | Run by the engine on every level load. MatchZy makes sure they contain `bot_quota 0` (creates the file, or appends the line when no `bot_quota` is set) so no bots join while series players reconnect. A different `bot_quota` you set is kept. |
 | `matchzy.json` | `addons/counterstrikesharp/gamedata/` | Native signatures. See [Gamedata](../getting-started/gamedata.md). |
 | `lang/*.json` | plugin folder | Translations: English, Danish, Albanian. |
 | `matchzy.db` | plugin folder | SQLite database (default backend). |
@@ -39,7 +41,7 @@ ammo_grenade_limit_flashbang 0
 
 Do not set `mp_weapons_allow_typecount 0`: `0` blocks all purchases (`-1` = no limit, `5` = the live default).
 
-The file name is the mode cfg's name with `_override` added: `warmup`, `knife`, `live`, `live_wingman`, `scrim`, `hill`, `prac`, `dryrun` or `sleep`. MatchZy never writes these files, so they survive every update.
+The file name is the mode cfg's name with `_override` added: `warmup`, `knife`, `live`, `live_wingman`, `live_rush`, `live_1v1`, `scrim`, `hill`, `prac`, `dryrun` or `sleep`. MatchZy never writes these files, so they survive every update.
 
 - **Only the lines you change go in the override.** Leave the mode cfg (`warmup.cfg`) identical to the default, or delete it to get the current default back on the next restart. Do not copy the whole mode cfg into the override: that pins every value, and you would miss new defaults from later releases.
 - **Order:** MatchZy's built-in default for the mode runs first, then your mode cfg, then its override, then the `cvars` of a loaded match config. Each step wins over the one before. The built-in default only fills settings your mode cfg leaves out, for example a newer setting missing from an older `live.cfg`. It is never written to your files, and it leaves server-level settings alone (`sv_hibernate_when_empty`, `tv_relayvoice`, `sv_lan`, `sv_pure`, `sv_steamgroup_exclusive`, `sv_kick_ban_duration`, `sv_competitive_minspec`, `mp_logdetail`): set those in your server.cfg. Practice mode (`prac.cfg`) has no built-in step.

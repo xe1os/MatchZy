@@ -29,6 +29,9 @@ Autopause replaces the game's own `sv_matchpause_auto_5v5` and ignores bot teams
 
 MatchZy saves a backup at the start of every live round (Valve's backup system plus MatchZy's own state). Backups live in `csgo/MatchZyDataBackup/` and can also be POSTed to `matchzy_remote_backup_url`.
 
+!!! warning "Launch option required"
+    CS2 only writes and loads round backups when the server is started with `-allow_round_backup_files`. Without it, the console says "Round backup files are disabled" and every restore fails. MatchZy logs a warning when the option is missing and refuses `.restore` with a chat message.
+
 | Situation | Command |
 |---|---|
 | Both teams want to replay this round | `.stop` (both teams) |

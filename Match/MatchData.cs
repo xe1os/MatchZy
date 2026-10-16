@@ -164,6 +164,13 @@ public class MatchZyStatsTeam : MatchZyTeamWrapper
     [JsonPropertyName("players")]
     public List<StatsPlayer> Players { get; set; }
 
+    // Get5: "ct" / "t", null when not known.
+    [JsonPropertyName("side")]
+    public string? Side { get; set; }
+
+    [JsonPropertyName("starting_side")]
+    public string? StartingSide { get; set; }
+
     public MatchZyStatsTeam(string id, string name, int seriesScore, int score, int scoreCt, int scoreT, List<StatsPlayer> players)
         : base(id, name)
     {
