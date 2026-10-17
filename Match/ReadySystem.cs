@@ -43,7 +43,7 @@ public partial class MatchZy
 
         // matchzy_ready_per_team: N ready players make the whole side ready (e.g. one per team),
         // instead of every player on the roster.
-        int perTeam = readyPerTeam.Value;
+        int perTeam = EffectiveReadyPerTeam();
         if (perTeam > 0 && (team == (int)CsTeam.CounterTerrorist || team == (int)CsTeam.Terrorist))
         {
             (int sidePlayers, int sideReady) = GetTeamPlayerCount(team, false);

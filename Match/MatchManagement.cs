@@ -353,6 +353,8 @@ namespace MatchZy
         private bool LoadMatchFromJSONCore(string jsonData, bool skipMapChange)
         {
             JObject jsonDataObject = JObject.Parse(jsonData);
+            // The match config decides the mode from here on, not an earlier .1v1 pug choice.
+            pugOneVsOneMode = false;
 
             string validationError = ValidateMatchJsonStructure(jsonDataObject);
 

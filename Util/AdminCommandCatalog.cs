@@ -26,7 +26,7 @@ namespace MatchZy
             new("Modes", ".scrim / .playout / .po", "Scrim/playout mode (no knife, all rounds)", "css_scrim", PermMapOrPrac),
             new("Modes", ".hill", "King of the hill mode", "css_hill", PermMapOrPrac),
             new("Modes", ".prac / .tactics", "Practice mode", "css_prac", PermMapOrPrac),
-            new("Modes", ".dry / .dryrun", "Dryrun mode", "css_prac", PermMapOrPrac),
+            new("Modes", ".dry / .dryrun", "Dryrun: normal rounds with $16,000 and a 6-second freeze time", "css_prac", PermMapOrPrac),
             new("Modes", ".exitprac / .noprac", "Leave practice mode", "css_exitprac", PermMapOrPrac),
             new("Modes", ".exitdry / .stopdry / .enddry", "Leave dryrun mode", "css_exitdry", PermMapOrPrac),
             new("Modes", ".warmup", "Back to warmup", "css_warmup", PermConfig),
@@ -34,7 +34,7 @@ namespace MatchZy
             new("Modes", ".warmupbots", "Toggle warmup bots", "css_warmupbots", PermMapOrPrac),
             new("Modes", ".rs", "Practice: restart the game for everyone", "css_rs", PermMapOrPrac),
             new("Modes", ".grt / .globalrethrow", "Practice: rethrow every player's last grenade", "css_grt", PermMapOrPrac),
-            new("Modes", ".fas / .watchme", "Practice: move every other player to spectator", "css_fas", PermMapOrPrac),
+            new("Modes", ".fas / .watchme / .observeme", "Practice: move every other player to spectator", "css_fas", PermMapOrPrac),
 
             // Setup
             new("Setup", ".ma / .matchadmin", "Admin menu", "css_matchadmin", PermConfig),

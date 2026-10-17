@@ -8,7 +8,7 @@ MatchZy runs the server in one mode at a time. Admins switch with a chat command
 | **Scrim** | `.scrim` | No | All 24 rounds played, no overtime | 800 | Scrims where both halves should be played out. |
 | **Hill** | `.hill` | No | All 24 rounds played | 16000 | Full-buy rounds, e.g. retakes-style or aim sessions with teams. |
 | **Practice** | `.prac` | - | Endless | Unlimited, buy anywhere | Learning lineups, spawns, executes. |
-| **Dryrun** | `.dry` | No | Live-like rounds until stopped | 16000 | Running executes against bots or your team. |
+| **Dryrun** | `.dry` | No | Normal rounds with a 6 second freeze time, until stopped | 16000 | Running executes against bots or your team. |
 | **Sleep** | `.sleep` | - | - | - | Idle server with nothing loaded. |
 
 Every mode executes its own cfg from `cfg/MatchZy/` (`live.cfg`, `scrim.cfg`, `hill.cfg`, `prac.cfg`, `dryrun.cfg`, `sleep.cfg`, plus `warmup.cfg` and `knife.cfg`). Edit those files, or better a `<mode>_override.cfg`, to change the rules. See [Files and folders](../reference/files.md#server-specific-settings).
@@ -22,9 +22,9 @@ A match plays as competitive (5v5) unless its match config sets `game_mode`. Mat
 | `competitive` | 5v5 | `game_type 0`, `game_mode 1` | `live.cfg` |
 | `wingman` | 2v2 | `game_type 0`, `game_mode 2` | `live_wingman.cfg` |
 | `rush` | 3v3 | `game_type 0`, `game_mode 6` | `live_rush.cfg` (Valve's rush rules: 15 rounds, no halftime, 40 second rounds) |
-| `1v1` | 1v1 | `game_type 0`, `game_mode 1` | `live_1v1.cfg` (1on1 ladder rules with MR12: 24 rounds, $16000 max money) |
+| `1v1` | 1v1 | `game_type 0`, `game_mode 2` | `live_1v1.cfg` (wingman format: MR8, 16 rounds, $8000 max money, 1:30 rounds) |
 
-`players_per_team` follows the mode unless the match config sets it. A maplist with only rush maps (`rush_001` and other `rush_` maps, `aim_rush`) plays as rush without `game_mode`. Without a match config, the live cfg follows the server's own `game_mode` (`2` wingman, `6` rush), and a rush map also gets `live_rush.cfg`. `.matchsetup` asks for the mode, see [Menus](menus.md#matchsetup-wizard).
+`players_per_team` follows the mode unless the match config sets it. A maplist with only rush maps (`rush_001` and other `rush_` maps, `aim_rush`) plays as rush without `game_mode`. Without a match config, the live cfg follows the server's own `game_mode` (`2` wingman, `6` rush), and a rush map also gets `live_rush.cfg`. Admins switch the server's mode with `.1v1`, `.wingman` or `.5v5` (optionally with a map); the map reloads, since `game_mode` only changes on a map load. A `.1v1` pug runs in the wingman game mode with `live_1v1.cfg`. In a pug the ready count follows the mode: at most 2 ready players for 1v1, 4 for wingman and 6 for rush, so `.readyrequired` is not needed (a lower `matchzy_minimum_ready_required` still applies). `.matchsetup` asks for the mode, see [Menus](menus.md#matchsetup-wizard).
 
 ## Mode on startup
 

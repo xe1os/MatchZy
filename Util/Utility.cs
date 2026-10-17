@@ -309,7 +309,7 @@ namespace MatchZy
             if (!isWarmup || matchStarted || !readyAvailable || isDryRun || readyHintStyle.Value != 2)
                 return;
             List<string> unreadyPlayers = new();
-            int perTeam = readyPerTeam.Value;
+            int perTeam = EffectiveReadyPerTeam();
 
             foreach (var key in playerReadyStatus.Keys)
             {
@@ -333,7 +333,7 @@ namespace MatchZy
                 {
                     if (player == null || !player.IsValid || player.IsBot || player.IsHLTV)
                         continue;
-                    string minimumReadyRequiredMessage = isMatchSetup || readyPerTeam.Value > 0 ? "" : Localizer.ForPlayer(player, "matchzy.minimum.ready.required", $"{ChatColors.Green}{minimumReadyRequired}{ChatColors.Default}");
+                    string minimumReadyRequiredMessage = isMatchSetup || EffectiveReadyPerTeam() > 0 ? "" : Localizer.ForPlayer(player, "matchzy.minimum.ready.required", $"{ChatColors.Green}{EffectiveMinimumReadyRequired()}{ChatColors.Default}");
                     player.PrintToChat($"{chatPrefix} {Localizer.ForPlayer(player, key, unreadyPlayerList, minimumReadyRequiredMessage)}");
                 }
             }
@@ -350,7 +350,7 @@ namespace MatchZy
                 }
                 else
                 {
-                    PrintLocalizedToAll("matchzy.utility.minimumreadyplayers", minimumReadyRequired, countOfReadyPlayers);
+                    PrintLocalizedToAll("matchzy.utility.minimumreadyplayers", EffectiveMinimumReadyRequired(), countOfReadyPlayers);
                 }
             }
             SendShortHandedHints();
@@ -507,7 +507,7 @@ namespace MatchZy
 
             (_rpCtCount, _rpCtReady) = GetTeamPlayerCount((int)CsTeam.CounterTerrorist);
             (_rpTCount, _rpTReady) = GetTeamPlayerCount((int)CsTeam.Terrorist);
-            int perTeam = readyPerTeam.Value;
+            int perTeam = EffectiveReadyPerTeam();
             if (perTeam > 0)
             {
                 // Per-team ready-up: progress is N per side, extra ready players on one side do not
@@ -534,7 +534,8 @@ namespace MatchZy
             {
                 _rpCtNeed = _rpTNeed = 0;
                 _rpReady = readyCount;
-                _rpRequired = minimumReadyRequired > 0 ? minimumReadyRequired : totalPlayers;
+                int minReady = EffectiveMinimumReadyRequired();
+                _rpRequired = minReady > 0 ? minReady : totalPlayers;
             }
             _rpTotal = totalPlayers;
             _rpFilled = Math.Clamp((int)Math.Round(12.0 * _rpReady / Math.Max(1, _rpRequired)), 0, 12);
@@ -2018,7 +2019,9 @@ namespace MatchZy
             @event.FinalEvent = finalEvent;
         }
 
-        private void HandleMapChangeCommand(CCSPlayerController? player, string mapName)
+        // beforeChange runs once the map is validated and the request passed the debounce, right
+        // before the teardown and changelevel (the mode commands set game_mode there).
+        private void HandleMapChangeCommand(CCSPlayerController? player, string mapName, Action? beforeChange = null)
         {
             if (!IsPlayerAdmin(player, "css_map", "@css/map"))
             {
@@ -2110,6 +2113,8 @@ namespace MatchZy
                 return;
             _lastMapChangeRequestTime = Server.CurrentTime;
 
+            beforeChange?.Invoke();
+
             // Validated named map (or a workshop id) - safe to tear down and change now.
             // Stop demo recording before map change to prevent GOTV crash.
             StopDemoAndAnnounce();
@@ -2144,7 +2149,7 @@ namespace MatchZy
                 if (int.TryParse(commandArg, out int readyRequired) && readyRequired >= 0 && readyRequired <= 32)
                 {
                     minimumReadyRequired = readyRequired;
-                    string minimumReadyRequiredFormatted = (player == null) ? $"{minimumReadyRequired}" : $"{ChatColors.Green}{minimumReadyRequired}{ChatColors.Default}";
+                    string minimumReadyRequiredFormatted = (player == null) ? $"{EffectiveMinimumReadyRequired()}" : $"{ChatColors.Green}{EffectiveMinimumReadyRequired()}{ChatColors.Default}";
                     ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.utility.minreadyplayers", minimumReadyRequiredFormatted));
                     CheckLiveRequired();
                 }
@@ -2155,7 +2160,7 @@ namespace MatchZy
             }
             else
             {
-                string minimumReadyRequiredFormatted = (player == null) ? $"{minimumReadyRequired}" : $"{ChatColors.Green}{minimumReadyRequired}{ChatColors.Default}";
+                string minimumReadyRequiredFormatted = (player == null) ? $"{EffectiveMinimumReadyRequired()}" : $"{ChatColors.Green}{EffectiveMinimumReadyRequired()}{ChatColors.Default}";
                 ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.utility.currentreadyrequired", minimumReadyRequiredFormatted));
             }
         }
@@ -2183,19 +2188,19 @@ namespace MatchZy
                     liveRequired = true;
                 }
             }
-            else if (readyPerTeam.Value > 0)
+            else if (EffectiveReadyPerTeam() > 0)
             {
                 // Per-team ready-up in a pug: N ready on CT and N ready on T, not N in total.
                 liveRequired = IsTeamsReady();
             }
-            else if (minimumReadyRequired == 0)
+            else if (EffectiveMinimumReadyRequired() == 0)
             {
                 if (countOfReadyPlayers >= connectedPlayers && connectedPlayers > 0)
                 {
                     liveRequired = true;
                 }
             }
-            else if (countOfReadyPlayers >= minimumReadyRequired)
+            else if (countOfReadyPlayers >= EffectiveMinimumReadyRequired())
             {
                 liveRequired = true;
             }
@@ -3655,10 +3660,10 @@ namespace MatchZy
                 string L(string key, params object[] a) => Localizer.ForPlayer(player!, key, a);
                 player!.PrintToChat($"{chatPrefix} {L("matchzy.help.practice.title")}");
                 player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.spawns"), ".spawn .ctspawn .tspawn .bestspawn .worstspawn"));
-                player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.bots"), ".bot .cbot .boost .nobot .clearbots .botshoot .botrespawn .startround .rec .replay .saverec .loadrec"));
+                player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.bots"), ".bot .cbot .boost .runboost .nobot .dismiss .dismissall .kevlar .armor .botgun .botshoot .botrespawn .startround .rec .stoprecord .replay .saverec .loadrec .stratrec .strat .strats .createstrat .stratslot"));
                 player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.positions"), ".sbp .lbp .botspawn .placebot .showbotspawn .botjiggle"));
                 player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.nades"), ".savenade .loadnade .listnades .rethrow .throwindex"));
-                player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.utility"), ".clear .ff .god .traj .impacts .break .cam .timer"));
+                player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.utility"), ".clear .ff .god .xray .expire .coloredsmokes .traj .impacts .break .cam .timer"));
                 player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.teams"), ".ct .t .spec"));
                 if (isAdmin)
                 {
@@ -3669,9 +3674,9 @@ namespace MatchZy
                 // Console output (unchanged - detailed practice docs)
                 player.PrintToConsole("=== Practice Mode Command List ===\n");
                 player.PrintToConsole("\n【Spawn Point Operations】\n" + ".spawn <number>  Teleport to the specified competitive spawn point of your team\n" + ".ctspawn <number>  Teleport to the specified CT competitive spawn point (alias: .cts)\n" + ".tspawn <number>  Teleport to the specified T competitive spawn point (alias: .ts)\n" + ".bestspawn  Teleport to the nearest team spawn point\n" + ".worstspawn  Teleport to the farthest team spawn point\n" + ".bestctspawn  Teleport to the nearest CT spawn point\n" + ".worstctspawn  Teleport to the farthest CT spawn point\n" + ".besttspawn  Teleport to the nearest T spawn point\n" + ".worsttspawn  Teleport to the farthest T spawn point\n" + ".showspawns  Highlight all competitive spawn points\n" + ".hidespawns  Hide highlighted spawn points\n");
-                player.PrintToConsole("\n【Bot Control】\n" + ".bot  Add a bot at the player's current position\n" + ".crouchbot  Add a crouching bot at the player's current position (alias: .cbot)\n" + ".boost  Add a bot at the current position and boost the player on top of it\n" + ".crouchboost  Add a crouching bot and boost the player on top of it\n" + ".nobot  Remove the bot under the crosshair\n" + ".clearbots  Remove all bots\n" + ".kicklastbot  Remove the most recently added bot\n" + ".botshoot  Toggle bots shooting back (they stay on their spot)\n" + ".botreactiontime <0-1000>  Delay in ms before a bot fires at you (default 500)\n" + ".botrespawn  Toggle bots respawning after death\n" + ".botlifereg  Toggle bot health regeneration\n" + ".startround  New round: random spawns, bots reset, 5 second freeze\n" + ".rec  Start/stop recording your movement path\n" + ".replay [t|ct] [loop]  A bot replays your last recorded path (.replay stop ends it)\n" + ".saverec <name>  Save your last path on this map\n" + ".loadrec <name>  Load a saved path for .replay\n" + ".listrec  List the saved paths on this map\n" + ".delrec <name>  Delete a saved path\n" + ".showrec  Show/hide your path and throw spots on the map (only you see it)\n");
+                player.PrintToConsole("\n【Bot Control】\n" + ".bot  Add a bot at the player's current position\n" + ".crouchbot  Add a crouching bot at the player's current position (alias: .cbot)\n" + ".boost  Add a bot at the current position and boost the player on top of it\n" + ".runboost  Ride the bot at your aim; it runs with your W/A/S/D (.runboost again stops)\n" + ".kevlar  Toggle kevlar of the bot at your aim\n" + ".armor  Toggle kevlar + helmet of the bot at your aim\n" + ".botgun <weapon>  Give the bot at your aim a weapon (ak47, awp, deagle, ...)\n" + ".dismiss  Remove the bot at your aim\n" + ".dismissall  Remove all bots\n" + ".xray  Toggle players glowing through walls\n" + ".expire  Toggle smokes and molotovs not running out\n" + ".coloredsmokes  Toggle colored smokes\n" + ".crouchboost  Add a crouching bot and boost the player on top of it\n" + ".nobot  Remove the bot under the crosshair\n" + ".clearbots  Remove all bots\n" + ".kicklastbot  Remove the most recently added bot\n" + ".botshoot  Toggle bots shooting back (they stay on their spot)\n" + ".botreactiontime <0-1000>  Delay in ms before a bot fires at you (default 500)\n" + ".botrespawn  Toggle bots respawning after death\n" + ".botlifereg  Toggle bot health regeneration\n" + ".startround  New round: random spawns, bots reset, 5 second freeze\n" + ".rec  Start/stop recording your movement path\n" + ".stoprecord  Stop your .rec, .stratrec or .stratslot recording (or double right click / Shift + E)\n" + ".createstrat <name>  Create an empty strategy for your team\n" + ".stratslot <name> <1-5>  Record one slot while bots play the others\n" + ".strats  Strategy menu\n" + ".stratrec  Record a strategy: every living player on your team is a role (3 second countdown)\n" + ".strat [name] [me <role>]  Play the last or a saved strategy with bots (.strat stop ends it)\n" + ".savestrat <name>  Save the last strategy on this map\n" + ".liststrat  List the saved strategies on this map\n" + ".delstrat <name>  Delete a saved strategy\n" + ".replay [t|ct] [loop]  A bot replays your last recorded path (.replay stop ends it)\n" + ".saverec <name>  Save your last path on this map\n" + ".loadrec <name>  Load a saved path for .replay\n" + ".listrec  List the saved paths on this map\n" + ".delrec <name>  Delete a saved path\n" + ".showrec  Show/hide your path and throw spots on the map (only you see it)\n");
                 player.PrintToConsole("\n【Bot Positions】\n" + ".savebotpos <name>  Save your current spot as a named bot placement for this map (alias: .sbp)\n" + ".loadbotpos <name>  Spawn a bot at that saved spot; no name spawns all saved for this map (alias: .lbp)\n" + ".listbotpos  List saved bot placement names on this map (alias: .listbp)\n" + ".delbotpos <name>  Delete a saved bot placement (alias: .dbp)\n" + ".showbotpos  Toggle in-world markers at every saved bot placement (alias: .showbp)\n" + ".botjiggle  Toggle all practice bots strafing side-to-side (matchzy_botjiggle_range tunes width)\n" + ".botjigglerange <units>  Set the botjiggle width\n" + ".botjigglerandom  Toggle: only a random half of the bots jiggle\n" + ".botspawn <name>  Add your current spot to a named bot spawn pool\n" + ".placebot <number> <name>  Replace the bots with bots on random spots of a pool\n" + ".placenewbot <number> <name>  Add bots on random spots of a pool\n" + ".listbotspawn  List the bot spawn pools on this map\n" + ".delbotspawn <name>  Delete a bot spawn pool\n" + ".showbotspawn  Toggle green boxes on saved bot spawn spots (stand in one + E deletes it)\n");
-                player.PrintToConsole("\n【Teams & Modes】\n" + ".ct, .t, .spec  Switch the player to the requested team\n" + ".fas /.watchme  Force all players into spectator mode except the one issuing the command\n" + ".dryrun  Enable Dryrun Mode (alias: .dry)\n" + ".god  Enable God Mode\n" + ".liferegon  Toggle your own health regeneration\n" + ".allliferegon <true|false>  Health regeneration for every player\n" + ".slp / .tlp / .dlp  Save / teleport to / delete your saved location (after a death you respawn there)\n");
+                player.PrintToConsole("\n【Teams & Modes】\n" + ".ct, .t, .spec  Switch the player to the requested team\n" + ".fas /.watchme /.observeme  Force all players into spectator mode except the one issuing the command\n" + ".dryrun [0-60]  Play normal rounds with $16,000 and a 6-second freeze time, or the seconds given (alias: .dry). .rr [0-60] restarts the round\n" + ".god  Enable God Mode\n" + ".liferegon  Toggle your own health regeneration\n" + ".allliferegon <true|false>  Health regeneration for every player\n" + ".slp / .tlp / .dlp  Save / teleport to / delete your saved location (after a death you respawn there)\n");
                 player.PrintToConsole("\n【Grenade Management】\n" + ".savenade <n> <optional description>  Save a grenade crosshair (alias: .sn)\n" + ".loadnade <n>  Load a grenade crosshair (alias: .ln)\n" + ".deletenade <n>  Delete a saved grenade crosshair from file (alias: .dn)\n" + ".importnade <code>  Save a crosshair using a code printed in chat or from savednades.cfg\n" + ".listnades <optional filter>  List all saved crosshairs, filter optional (alias: .lin)\n");
                 player.PrintToConsole("\n【Grenade Throwing】\n" + ".rethrow  Re-throw your last thrown grenade (alias: .rt)\n" + ".last  Teleport to where you threw your last grenade\n" + ".back <number>  Teleport to a specific grenade history position\n" + ".delay <delay_in_seconds>  Set delay on last grenade (used with .rethrow or .throwindex)\n" + ".throwindex <index> <optional index> <optional index>  Throw grenade(s) from specific history index(es)\n" + ".lastindex  Print the index of your last thrown grenade\n" + ".rethrowsmoke  Throw your last smoke grenade\n" + ".rethrownade  Throw your last HE grenade\n" + ".rethrowflash  Throw your last flashbang\n" + ".rethrowmolotov  Throw your last molotov/incendiary\n" + ".rethrowdecoy  Throw your last decoy\n");
                 player.PrintToConsole("\n【Utilities】\n" + ".clear  Clear all active smokes, molotovs, and incendiaries\n" + ".fastforward  Fast forward server time by 10 seconds (alias: .ff)\n" + ".noflash  Toggle flash immunity (players without noflash still get blinded, alias: .noblind)\n" + ".timer  Start a timer immediately; use .timer again to stop and show duration\n" + ".break  Break all breakable entities (windows, wooden doors, vents, etc.)\n" + ".nobreak  Restore all breakable entities ");
@@ -4767,10 +4772,10 @@ namespace MatchZy
             return matchConfig.Wingman ? "wingman" : "competitive";
         }
 
-        // 1v1 has no game mode of its own in CS2: it runs in competitive (any map) with live_1v1.cfg.
+        // 1v1 has no game mode of its own in CS2: it runs in the wingman game mode with live_1v1.cfg.
         public static int GameModeValue(string mode) => mode switch
         {
-            "wingman" => GameModeWingman,
+            "wingman" or "1v1" => GameModeWingman,
             "rush" => GameModeRush,
             _ => GameModeCompetitive,
         };
@@ -4798,15 +4803,15 @@ namespace MatchZy
                 || name.Equals("aim_rush", StringComparison.OrdinalIgnoreCase);
         }
 
-        // The live cfg for the mode being played: live_1v1.cfg for a 1v1 match, then by the server's
-        // game_mode (a pug runs in whatever mode the server is in). Without a mode from a match
-        // config, a rush map also gets live_rush.cfg.
+        // The live cfg for the mode being played: live_1v1.cfg for a 1v1 match (or a .1v1 pug in the
+        // wingman game mode), then by the server's game_mode (a pug runs in whatever mode the server
+        // is in). Without a mode from a match config, a rush map also gets live_rush.cfg.
         public string LiveCfgPathForMode()
         {
-            if (MatchGameMode() == "1v1")
-                return live1v1CfgPath;
             int gameMode = GetGameMode();
             bool modeFromConfig = !string.IsNullOrEmpty(matchConfig.GameMode) || matchConfig.Wingman;
+            if (MatchGameMode() == "1v1" || (!modeFromConfig && pugOneVsOneMode && gameMode == GameModeWingman))
+                return live1v1CfgPath;
             if (gameMode == GameModeRush || (!modeFromConfig && gameMode != GameModeWingman && IsRushMap(Server.MapName)))
                 return liveRushCfgPath;
             if (gameMode == GameModeWingman)

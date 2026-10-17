@@ -83,9 +83,52 @@ namespace MatchZy
                 roundBackupFlagWarned = true;
                 Log("[RoundBackup] WARNING: the server was started without -allow_round_backup_files. CS2 writes no round backup files and .restore cannot work. Add -allow_round_backup_files to the server's launch options.");
             }
-            // Absolute so it is not resolved under csgo/addons/metamod; drive letter dropped on Windows.
-            string prefixArg = CsgoPathArg($"matchzy_{liveMatchId}_{matchConfig.CurrentMapNumber}");
-            Server.ExecuteCommand($"mp_backup_round_file {prefixArg}");
+            // A bare file name. Since CS2 1.41.9.1 (Oct 15 2026) the engine rejects a round backup
+            // path that is absolute or contains ".." or ':' ("Rejecting round backup file path"),
+            // for writing and for mp_backup_restore_load_file alike, so the absolute csgo path sent
+            // before made it write nothing. A relative file lands in the first Game search path:
+            // csgo/, or csgo/addons/metamod/ on Metamod servers (see EngineRoundBackupDirs).
+            Server.ExecuteCommand($"mp_backup_round_file \"matchzy_{liveMatchId}_{matchConfig.CurrentMapNumber}\"");
+        }
+
+        // Folders the engine's own round backup files can be in: it writes a relative file to the
+        // first Game search path (csgo/, or csgo/addons/metamod/ with Metamod) and loads one from
+        // any of them.
+        private string[] EngineRoundBackupDirs()
+        {
+            string csgoDir = EngineCsgoDirectory();
+            return new[] { csgoDir, Path.Combine(csgoDir, "addons", "metamod") };
+        }
+
+        // Every place the engine may have written this round file, for the off-thread readers.
+        private string[] EngineRoundBackupCandidates(string fileName)
+            => EngineRoundBackupDirs().Select(dir => Path.Combine(dir, fileName)).ToArray();
+
+        // The newest existing candidate (a copy left in csgo/ by a build before the path change
+        // must not win over the file the engine just wrote), else the first. Thread-safe: file IO only.
+        private static string NewestExistingFile(string[] candidates)
+        {
+            string? best = null;
+            DateTime bestTime = DateTime.MinValue;
+            foreach (var candidate in candidates)
+            {
+                try
+                {
+                    if (!File.Exists(candidate))
+                        continue;
+                    DateTime time = File.GetLastWriteTimeUtc(candidate);
+                    if (best == null || time > bestTime)
+                    {
+                        best = candidate;
+                        bestTime = time;
+                    }
+                }
+                catch
+                {
+                    // Unreadable candidate: skip it.
+                }
+            }
+            return best ?? candidates[0];
         }
 
         [ConsoleCommand("css_stop", "Restore the backup of the current round (Both teams need to type .stop to restore the current round)")]
@@ -231,6 +274,12 @@ namespace MatchZy
         [CommandHelper(minArgs: 0, usage: "")]
         public void OnRestoreCurrentRoundCommand(CCSPlayerController? player, CommandInfo? command)
         {
+            // A dryrun has no match backups: .rr / !rr restarts its round instead.
+            if (isDryRun)
+            {
+                HandleDryRunRestartRound(player, command?.ArgString ?? "");
+                return;
+            }
             if (!IsPlayerAdmin(player, "css_restorecurrent", "@css/config"))
             {
                 SendPlayerNotAdminMessage(player);
@@ -627,7 +676,7 @@ namespace MatchZy
                     {
                         tempFileName = $"matchzy_{liveMatchId}_{matchConfig.CurrentMapNumber}_round{roundNumber}.txt";
                     }
-                    string tempFilePath = Path.Combine(csgoDir, tempFileName);
+                    string tempFilePath = NewestExistingFile(EngineRoundBackupCandidates(tempFileName));
 
                     // Two candidates can feed mp_backup_restore_load_file: the copy embedded in the
                     // JSON snapshot, and the .txt the engine wrote itself. Pick between them on
@@ -667,6 +716,10 @@ namespace MatchZy
                         {
                             Log($"[RestoreRoundBackup] {tempFileName} on disk is {diskContent.Length} chars, backup carries {safeScript.Length}. Both parse as complete; using the backup copy (it is known to belong to this match).");
                         }
+                        // Under its own name in csgo/: the load searches every Game path, and with the
+                        // engine's file of the same name in csgo/addons/metamod/ (searched first) that
+                        // one would be loaded instead of this copy.
+                        tempFilePath = Path.Combine(csgoDir, "matchzy_restore_" + tempFileName);
                         File.WriteAllText(tempFilePath, safeScript);
                         Log($"[RestoreRoundBackup] Wrote {tempFilePath} ({safeScript.Length} chars) for restore of {fileName}.");
                     }
@@ -685,7 +738,7 @@ namespace MatchZy
                     {
                         // Neither candidate is usable under the expected name. Widen the search to the
                         // other name this round can be stored under before giving up.
-                        string? diskBackup = FindValveRoundBackupOnDisk(csgoDir, tempFileName, fileName);
+                        string? diskBackup = FindValveRoundBackupOnDisk(tempFileName, fileName);
                         if (diskBackup == null)
                         {
                             // Nothing to load: the round would stay exactly as it is while we announce a
@@ -808,20 +861,20 @@ namespace MatchZy
             string tempFileName = fileName.Replace(".json", ".txt");
             if (backupData.TryGetValue("round", out var roundNumber))
                 tempFileName = $"matchzy_{matchId}_{mapNumber}_round{roundNumber}.txt";
-            return FindValveRoundBackupOnDisk(EngineCsgoDirectory(), tempFileName, fileName) != null;
+            return FindValveRoundBackupOnDisk(tempFileName, fileName) != null;
         }
 
         // Locates the round file the engine wrote itself (mp_backup_round_auto) for a MatchZy JSON backup
         // that carries no embedded copy. Two names can point at the same round: the one built from the
         // current match id and map number, and the JSON backup's own name with a .txt extension. Both are
         // checked, and an empty file counts as not found.
-        private string? FindValveRoundBackupOnDisk(string csgoDir, params string[] candidateNames)
+        private string? FindValveRoundBackupOnDisk(params string[] candidateNames)
         {
             foreach (var name in candidateNames)
             {
                 if (string.IsNullOrWhiteSpace(name))
                     continue;
-                string candidate = Path.Combine(csgoDir, Path.GetFileNameWithoutExtension(name) + ".txt");
+                string candidate = NewestExistingFile(EngineRoundBackupCandidates(Path.GetFileNameWithoutExtension(name) + ".txt"));
                 if (!File.Exists(candidate))
                     continue;
                 try
@@ -1214,8 +1267,8 @@ namespace MatchZy
                 string round = roundNumber.ToString("D2");
                 string matchZyBackupFileName = $"matchzy_{liveMatchId}_{matchConfig.CurrentMapNumber}_round{round}.json";
                 string filePath = Path.Combine(Server.GameDirectory, "csgo", "MatchZyDataBackup", matchZyBackupFileName);
-                string lastBackupFilePath = Path.Combine(
-                    EngineCsgoDirectory(),
+                // Resolved off-thread at read time: the engine may not have written the file yet.
+                string[] lastBackupCandidates = EngineRoundBackupCandidates(
                     $"matchzy_{liveMatchId}_{matchConfig.CurrentMapNumber}_round{round}.txt"
                 );
 
@@ -1287,7 +1340,7 @@ namespace MatchZy
                 _ = Task.Run(async () =>
                 {
                     await WriteRoundDataBackupAsync(
-                        filePath, lastBackupFilePath, roundData, scoreboard,
+                        filePath, lastBackupCandidates, roundData, scoreboard,
                         configSnapshot, team1Snapshot, team2Snapshot);
                     // matchzy_remote_backup_url (get5_remote_backup_url) was stored but never used.
                     if (uploadUrl != "")
@@ -1368,7 +1421,7 @@ namespace MatchZy
 
         private async Task WriteRoundDataBackupAsync(
             string filePath,
-            string lastBackupFilePath,
+            string[] lastBackupCandidates,
             Dictionary<string, string> roundData,
             List<ScoreboardSnapshot> scoreboard,
             MatchConfig configSnapshot,
@@ -1394,6 +1447,7 @@ namespace MatchZy
                 // later restore load a corrupt file. Treat an incomplete read as "not there yet".
                 string valveBackupContent = "";
                 needsFillIn = true;
+                string lastBackupFilePath = NewestExistingFile(lastBackupCandidates);
                 if (File.Exists(lastBackupFilePath))
                 {
                     string rawValveBackup = await File.ReadAllTextAsync(lastBackupFilePath).ConfigureAwait(false);
@@ -1442,6 +1496,7 @@ namespace MatchZy
             await backupWriteLock.WaitAsync().ConfigureAwait(false);
             try
             {
+                string lastBackupFilePath = NewestExistingFile(lastBackupCandidates);
                 if (!File.Exists(lastBackupFilePath) || !File.Exists(filePath))
                     return;
                 string valveContent = SanitizeValveBackup(await File.ReadAllTextAsync(lastBackupFilePath).ConfigureAwait(false));

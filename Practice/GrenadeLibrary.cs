@@ -18,6 +18,10 @@ namespace MatchZy
     // teleport to that lineup. Reuses the interactive spawn-marker aim-cone + teleport pattern.
     // Markers are server-wide entities (all players see them); the set is a single server-wide toggle
     // (last .shownades caller wins), which suits a practice server.
+    // Each marker also has a small glowing grenade model of its type that shows through walls, so
+    // lineups can be found across the map. `.shownades <filter>` limits what a viewer sees: a type
+    // (smoke, flash, he, molly, decoy), mine / global, or text matched in the name and description;
+    // `.shownades all` clears it. The filter is per viewer (applied in CheckTransmit).
     public partial class MatchZy
     {
         private sealed class NadeLineup
@@ -40,6 +44,7 @@ namespace MatchZy
             public int Current;
             public CPointWorldText? Label;         // updated on F-toggle
             public CBeam? Beam;
+            public CBaseModelEntity? Glow;         // grenade model glowing through walls
         }
 
         // Lineups within this radius of each other share one marker.
@@ -53,6 +58,69 @@ namespace MatchZy
 
         // SteamIDs of the players who turned .shownades on; only they receive the markers.
         private readonly HashSet<ulong> _nadeViewers = new();
+        // Per viewer: their .shownades filter (absent = everything), and per filter the groups it
+        // hides, built on first use and dropped whenever the markers are rebuilt.
+        private readonly Dictionary<ulong, string> _nadeViewerFilters = new();
+        private readonly Dictionary<string, HashSet<NadeMarkerGroup>> _nadeFilterHidden = new(StringComparer.OrdinalIgnoreCase);
+        // Glow markers are visible this far.
+        private const int NadeGlowRange = 5000;
+
+        // Whether a lineup matches a .shownades filter.
+        private static bool LineupMatchesFilter(NadeLineup lu, string filter)
+        {
+            string f = filter.Trim().ToLowerInvariant();
+            string type = lu.Type.ToLowerInvariant();
+            switch (f)
+            {
+                case "smoke": case "smokes": return type == "smoke";
+                case "flash": case "flashes": case "flashbang": return type == "flash";
+                case "he": case "nade": case "grenade": return type == "he";
+                case "molly": case "molotov": case "molotovs": case "inc": case "incendiary": case "fire": return type == "molly";
+                case "decoy": return type == "decoy";
+                case "mine": case "my": case "private": return !lu.Global;
+                case "global": case "shared": return lu.Global;
+            }
+            return lu.Name.Contains(f, StringComparison.OrdinalIgnoreCase) || lu.Desc.Contains(f, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private HashSet<NadeMarkerGroup> NadeGroupsHiddenByFilter(string filter)
+        {
+            if (_nadeFilterHidden.TryGetValue(filter, out var hidden))
+                return hidden;
+            hidden = new HashSet<NadeMarkerGroup>();
+            foreach (var g in activeNadeGroups)
+                if (!g.Lineups.Any(lu => LineupMatchesFilter(lu, filter)))
+                    hidden.Add(g);
+            _nadeFilterHidden[filter] = hidden;
+            return hidden;
+        }
+
+        private static bool IsClearNadeFilter(string filter)
+            => filter.Length == 0 || filter.Equals("all", StringComparison.OrdinalIgnoreCase) || filter == "*";
+
+        // Remembers the viewer's filter and replies with how many lineups it leaves.
+        private void SetNadeViewerFilter(CCSPlayerController player, string filter)
+        {
+            if (IsClearNadeFilter(filter))
+            {
+                _nadeViewerFilters.Remove(player.SteamID);
+                ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.gl.showing", activeNadeGroups.Sum(g => g.Lineups.Count)));
+                return;
+            }
+            _nadeViewerFilters[player.SteamID] = filter;
+            int matching = activeNadeGroups.Sum(g => g.Lineups.Count(lu => LineupMatchesFilter(lu, filter)));
+            ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.gl.filtered", matching, filter));
+        }
+
+        // The grenade model a marker's glow uses.
+        private static string NadeGlowModel(string type) => type.ToLowerInvariant() switch
+        {
+            "flash" => "weapons/models/grenade/flashbang/weapon_flashbang.vmdl",
+            "he" => "weapons/models/grenade/hegrenade/weapon_hegrenade.vmdl",
+            "molly" => "weapons/models/grenade/molotov/weapon_molotov.vmdl",
+            "decoy" => "weapons/models/grenade/decoy/weapon_decoy.vmdl",
+            _ => "weapons/models/grenade/smokegrenade/weapon_smokegrenade.vmdl",
+        };
 
         private static List<NadeMarkerGroup> GroupLineups(List<NadeLineup> lineups)
         {
@@ -88,7 +156,7 @@ namespace MatchZy
 
         // Console commands so a client can bind a key: bind g "css_shownades".
         [ConsoleCommand("css_shownades", "Toggle the in-world grenade library")]
-        public void OnShowNadesConsoleCommand(CCSPlayerController? player, CommandInfo command) => HandleShowNadesCommand(player);
+        public void OnShowNadesConsoleCommand(CCSPlayerController? player, CommandInfo command) => ShowNadesWithFilter(player, command.ArgString);
 
         [ConsoleCommand("css_hidenades", "Hide the in-world grenade library")]
         public void OnHideNadesConsoleCommand(CCSPlayerController? player, CommandInfo command) => HandleHideNadesCommand(player);
@@ -175,8 +243,25 @@ namespace MatchZy
 
         // ── .shownades / .hidenades ──────────────────────────────────────────────────────
         public void HandleShowNadesCommand(CCSPlayerController? player, CommandInfo? command = null)
+            => ShowNadesWithFilter(player, "");
+
+        // .shownades [filter]: without a filter it toggles the library for the caller; with one it
+        // shows the library (if it is not up yet) and limits what the caller sees.
+        public void ShowNadesWithFilter(CCSPlayerController? player, string filter)
         {
             if (!isPractice || !IsPlayerValid(player)) return;
+            filter = (filter ?? "").Trim().Trim('"');
+            if (filter.Length > 0)
+            {
+                if (!grenadeLibraryActive || !_nadeViewers.Contains(player!.SteamID))
+                {
+                    ShowNadesWithFilter(player, "");
+                    if (!grenadeLibraryActive)
+                        return;
+                }
+                SetNadeViewerFilter(player!, filter);
+                return;
+            }
             // Toggle per player: the markers are only sent to players who asked for them (see
             // OnNadeCheckTransmit), so a second player's .shownades adds them as a viewer instead of
             // hiding the library for everyone, and a viewer's .shownades hides it for them.
@@ -235,6 +320,7 @@ namespace MatchZy
             if (!IsPlayerValid(player)) return;
             // Hidden for this player; the markers are removed once nobody is viewing them.
             _nadeViewers.Remove(player!.SteamID);
+            _nadeViewerFilters.Remove(player.SteamID);
             if (_nadeViewers.Count == 0)
                 HideNadeMarkers();
             ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.gl.hidden"));
@@ -249,8 +335,11 @@ namespace MatchZy
             try
             {
                 var viewers = new HashSet<ulong>(_nadeViewers);
+                var filters = new Dictionary<ulong, string>(_nadeViewerFilters);
                 HideNadeMarkers(); // clears markers + grenadeLibraryActive + viewers
                 _nadeViewers.UnionWith(viewers);
+                foreach (var (steam, f) in filters)
+                    _nadeViewerFilters[steam] = f;
                 var lineups = LoadLineupsForCurrentMap(player!);
                 var groups = GroupLineups(lineups);
                 foreach (var g in groups)
@@ -294,8 +383,18 @@ namespace MatchZy
                     // AbsOrigin is engine-backed; snapshot it once for this recipient.
                     float x = o.X, y = o.Y, z = o.Z;
                     var transmitEntities = info.TransmitEntities;
+                    HashSet<NadeMarkerGroup>? filteredOut = _nadeViewerFilters.TryGetValue(player.SteamID, out var viewerFilter)
+                        ? NadeGroupsHiddenByFilter(viewerFilter)
+                        : null;
                     foreach (var g in activeNadeGroups)
                     {
+                        if (filteredOut != null && filteredOut.Contains(g))
+                        {
+                            if (g.Beam != null && g.Beam.IsValid) transmitEntities.Remove(g.Beam);
+                            if (g.Label != null && g.Label.IsValid) transmitEntities.Remove(g.Label);
+                            if (g.Glow != null && g.Glow.IsValid) transmitEntities.Remove(g.Glow);
+                            continue;
+                        }
                         float dx = g.Pos.X - x, dy = g.Pos.Y - y, dz = g.Pos.Z - z;
                         float distSq = dx * dx + dy * dy + dz * dz;
                         // Far away: keep the beam (it shows where the lineup is) but drop the world-text
@@ -308,6 +407,7 @@ namespace MatchZy
                         if (distSq > NadeHideRadiusSq) continue;
                         if (g.Beam != null && g.Beam.IsValid) transmitEntities.Remove(g.Beam);
                         if (g.Label != null && g.Label.IsValid) transmitEntities.Remove(g.Label);
+                        if (g.Glow != null && g.Glow.IsValid) transmitEntities.Remove(g.Glow);
                     }
                 }
             }
@@ -326,6 +426,8 @@ namespace MatchZy
             nadeMarkerEntities.Clear();
             activeNadeGroups.Clear();
             _nadeViewers.Clear();
+            _nadeViewerFilters.Clear();
+            _nadeFilterHidden.Clear();
             grenadeLibraryActive = false;
             SetNadeTransmitListener(false);
         }
@@ -342,6 +444,8 @@ namespace MatchZy
             nadeMarkerEntities.Clear();
             activeNadeGroups.Clear();
             _nadeViewers.Clear();
+            _nadeViewerFilters.Clear();
+            _nadeFilterHidden.Clear();
             grenadeLibraryActive = false;
             SetNadeTransmitListener(false);
             spawnMarkerEntities.Clear();
@@ -448,6 +552,29 @@ namespace MatchZy
                 group.Label = text;
                 nadeMarkerEntities.Add(text);
             }
+
+            // Glowing grenade model just above the spot, visible through walls (GlowType 3).
+            var glow = Utilities.CreateEntityByName<CBaseModelEntity>("prop_dynamic");
+            if (glow != null)
+            {
+                glow.SetModel(NadeGlowModel(lu.Type));
+                glow.Spawnflags = 256u; // no collisions
+                glow.Teleport(new Vector(pos.X, pos.Y, pos.Z + 24.0f), new QAngle(0, lu.Pos.PlayerAngle.Y, 0), new Vector(0, 0, 0));
+                glow.DispatchSpawn();
+                SetNadeGlowColor(glow, color);
+                group.Glow = glow;
+                nadeMarkerEntities.Add(glow);
+            }
+        }
+
+        private static void SetNadeGlowColor(CBaseModelEntity glow, Color color)
+        {
+            glow.Glow.GlowColorOverride = color;
+            glow.Glow.GlowRange = NadeGlowRange;
+            glow.Glow.GlowRangeMin = 0;
+            glow.Glow.GlowTeam = -1;
+            glow.Glow.GlowType = 3;
+            Utilities.SetStateChanged(glow, "CBaseModelEntity", "m_Glow");
         }
 
         // Push a label center horizontally away from nearby walls so the text panel never intersects
@@ -703,6 +830,8 @@ namespace MatchZy
                 g.Label.Color = NadeTypeColor(g.Lineups[g.Current].Type);
                 Utilities.SetStateChanged(g.Label, "CPointWorldText", "m_messageText");
             }
+            if (g.Glow != null && g.Glow.IsValid)
+                SetNadeGlowColor(g.Glow, NadeTypeColor(g.Lineups[g.Current].Type));
         }
 
         // ── global pack IO + admin add/remove/list ───────────────────────────────────────

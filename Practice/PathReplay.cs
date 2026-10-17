@@ -56,6 +56,9 @@ namespace MatchZy
             public bool? LastDuck;
             public float LastPitch = float.NaN;
             public float LastYaw = float.NaN;
+            // A role of a .strat playback: the bot stays where its path ends (no kick, no message);
+            // .strat stop removes the strategy's bots.
+            public bool StratRole;
         }
 
         // 60 seconds at 64 tick.
@@ -90,12 +93,18 @@ namespace MatchZy
         {
             ClearRecDisplays();
             activePathRecordings.Clear();
+            pendingRecCountdowns.Clear();
             lastPathRecordings.Clear();
             activePathReplays.Clear();
             pathReplayBots.Clear();
         }
 
+        // Per recorder steamid: the countdown generation of a .rec that has not started yet.
+        private readonly Dictionary<ulong, int> pendingRecCountdowns = new();
+        private int recCountdownGeneration;
+
         [ConsoleCommand("css_rec", "Start or stop recording your movement path")]
+        [ConsoleCommand("css_record", "Start or stop recording your movement path")]
         public void OnRecConsoleCommand(CCSPlayerController? player, CommandInfo command)
             => HandleRecCommand(player, command.ArgString);
 
@@ -111,25 +120,62 @@ namespace MatchZy
                 FinishPathRecording(player, steamId, running);
                 return;
             }
+            // .rec during the countdown cancels it.
+            if (pendingRecCountdowns.Remove(steamId))
+            {
+                UnfreezeStratPlayer(player);
+                ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.rp.reccancelled"));
+                return;
+            }
+            if (IsStratRole(steamId) || IsSlotRecording(steamId))
+            {
+                ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.st.busy"));
+                return;
+            }
 
             if (!player.PawnIsAlive || (player.Team != CsTeam.Terrorist && player.Team != CsTeam.CounterTerrorist))
             {
                 ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.rp.notalive"));
                 return;
             }
-            activePathRecordings[steamId] = new PathRecording { MapName = Server.MapName, Team = player.Team };
-            ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.rp.recstart", MaxPathFrames / 64));
+
+            // Frozen for a 3 second countdown, so every take starts the same way.
+            int generation = ++recCountdownGeneration;
+            pendingRecCountdowns[steamId] = generation;
+            Server.NextFrame(() => FreezeStratPlayer(player));
+            ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.rp.reccountdown", StratCountdownSeconds));
+            for (int left = StratCountdownSeconds; left >= 1; left--)
+            {
+                int secondsLeft = left;
+                AddTimer(StratCountdownSeconds - left, () =>
+                {
+                    if (pendingRecCountdowns.TryGetValue(steamId, out int g) && g == generation && IsHumanPlayerValid(player))
+                        PrintToPlayerChat(player, Localizer.ForPlayer(player, "matchzy.st.countdown", secondsLeft));
+                }, TimerFlags.STOP_ON_MAPCHANGE);
+            }
+            AddTimer(StratCountdownSeconds, () =>
+            {
+                if (!pendingRecCountdowns.TryGetValue(steamId, out int g) || g != generation)
+                    return;
+                pendingRecCountdowns.Remove(steamId);
+                UnfreezeStratPlayer(player);
+                if (!isPractice || !IsHumanPlayerValid(player) || !player.PawnIsAlive)
+                    return;
+                activePathRecordings[steamId] = new PathRecording { MapName = Server.MapName, Team = player.Team };
+                ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.rp.recstart", MaxPathFrames / 64));
+            }, TimerFlags.STOP_ON_MAPCHANGE);
         }
 
         // Called from RecordThrownNade for every recorded throw: tag it with the current tick of the
         // thrower's running .rec, if any.
         private void AddThrowToPathRecording(int userId, GrenadeThrownData nade)
         {
-            if (activePathRecordings.Count == 0)
+            if (activePathRecordings.Count == 0 && activeStrat == null)
                 return;
             var player = Utilities.GetPlayerFromUserid(userId);
             if (player == null || !player.IsValid || player.IsBot)
                 return;
+            AddThrowToStratRecording(player.SteamID, nade);
             if (!activePathRecordings.TryGetValue(player.SteamID, out var recording))
                 return;
             int frame = Math.Max(0, recording.Frames.Count - 1);
@@ -185,6 +231,7 @@ namespace MatchZy
                 throws[i] = (Math.Clamp(throws[i].Frame - start, 0, frames.Count - 1), throws[i].Nade);
         }
 
+        // .play / css_play: registered on OnUnCoachCommand (Teams.cs), which hands it to this in practice.
         [ConsoleCommand("css_replay", "Replay your last recorded path with a bot")]
         public void OnReplayConsoleCommand(CCSPlayerController? player, CommandInfo command)
             => HandleReplayCommand(player, command.ArgString);
@@ -341,21 +388,12 @@ namespace MatchZy
             foreach (var (steamId, recording) in activePathRecordings)
             {
                 var player = Utilities.GetPlayerFromSteamId(steamId);
-                var pawn = player?.PlayerPawn.Value;
-                bool usable = IsHumanPlayerValid(player) && player!.PawnIsAlive && pawn != null
-                    && pawn.AbsOrigin != null && pawn.AbsVelocity != null;
-                if (!usable || recording.Frames.Count >= MaxPathFrames)
+                if (recording.Frames.Count >= MaxPathFrames || !TryCapturePathFrame(player, out var frame))
                 {
                     (_pathStopList ??= new()).Add(steamId);
                     continue;
                 }
-                Vector o = pawn!.AbsOrigin!;
-                Vector v = pawn.AbsVelocity!;
-                QAngle e = pawn.EyeAngles;
-                bool duck = false;
-                if (pawn.MovementServices != null && pawn.MovementServices.Handle != IntPtr.Zero)
-                    duck = new CCSPlayer_MovementServices(pawn.MovementServices.Handle).DuckAmount >= 0.5f;
-                recording.Frames.Add(new PathFrame(o.X, o.Y, o.Z, e.X, e.Y, v.X, v.Y, v.Z, duck));
+                recording.Frames.Add(frame);
             }
             if (_pathStopList == null || _pathStopList.Count == 0)
                 return;
@@ -367,6 +405,23 @@ namespace MatchZy
                 var player = Utilities.GetPlayerFromSteamId(steamId);
                 FinishPathRecording(IsHumanPlayerValid(player) ? player : null, steamId, recording);
             }
+        }
+
+        // This tick's position, view, velocity and crouch of a living human, for .rec and .stratrec.
+        private bool TryCapturePathFrame(CCSPlayerController? player, out PathFrame frame)
+        {
+            frame = default;
+            var pawn = player?.PlayerPawn.Value;
+            if (!IsHumanPlayerValid(player) || !player!.PawnIsAlive || pawn == null || pawn.AbsOrigin == null || pawn.AbsVelocity == null)
+                return false;
+            Vector o = pawn.AbsOrigin;
+            Vector v = pawn.AbsVelocity;
+            QAngle e = pawn.EyeAngles;
+            bool duck = false;
+            if (pawn.MovementServices != null && pawn.MovementServices.Handle != IntPtr.Zero)
+                duck = new CCSPlayer_MovementServices(pawn.MovementServices.Handle).DuckAmount >= 0.5f;
+            frame = new PathFrame(o.X, o.Y, o.Z, e.X, e.Y, v.X, v.Y, v.Z, duck);
+            return true;
         }
 
         private List<int>? _replayDoneList;
@@ -445,7 +500,10 @@ namespace MatchZy
             if (_replayDoneList == null || _replayDoneList.Count == 0)
                 return;
             foreach (int uid in _replayDoneList)
-                EndPathReplay(uid, kickBot: true);
+            {
+                bool stratRole = activePathReplays.TryGetValue(uid, out var done) && done.StratRole;
+                EndPathReplay(uid, announce: !stratRole, kickBot: !stratRole);
+            }
         }
 
         private static void SetReplayBotDuck(CCSPlayerController bot, bool duck)

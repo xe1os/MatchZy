@@ -66,8 +66,8 @@ namespace MatchZy
         {
             if (readyAvailable && !matchStarted)
             {
-                int perTeam = readyPerTeam.Value;
-                int totalPlayers = perTeam > 0 ? perTeam * 2 : minimumReadyRequired;
+                int perTeam = EffectiveReadyPerTeam();
+                int totalPlayers = perTeam > 0 ? perTeam * 2 : EffectiveMinimumReadyRequired();
 
                 // Per-team mode: only up to N ready players per side count toward the start, and
                 // spectators or extra ready players on one side must not hide a side that is missing.
@@ -736,7 +736,7 @@ namespace MatchZy
                 }
                 else
                 {
-                    string minimumReadyRequiredFormatted = (player == null) ? $"{minimumReadyRequired}" : $"{ChatColors.Green}{minimumReadyRequired}{ChatColors.Default}";
+                    string minimumReadyRequiredFormatted = (player == null) ? $"{EffectiveMinimumReadyRequired()}" : $"{ChatColors.Green}{EffectiveMinimumReadyRequired()}{ChatColors.Default}";
                     ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.cmd.readyrequired.current", minimumReadyRequiredFormatted));
                 }
             }

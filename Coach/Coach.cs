@@ -243,6 +243,8 @@ public partial class MatchZy
         }
 
         matchZyCoachTeam.coach.Add(player!);
+        // A player who played earlier in the match keeps no stats line as coach.
+        ResetCoachScoreboard(player!);
         ApplyClanTag(player!, $"[{matchZyCoachTeam.teamName} COACH]");
         if (player.InGameMoneyServices != null)
             player.InGameMoneyServices.Account = 0;
@@ -284,16 +286,17 @@ public partial class MatchZy
         // to a freezetime later on the NEW level and teleport/kill players while they reconnect.
         coachKillTimer ??= AddTimer(killDelay, KillCoaches, TimerFlags.STOP_ON_MAPCHANGE);
 
-        if (haveCoachSpawns)
+        // The coach belongs to its team, not to a side: after halftime (or any side swap) a coach
+        // left on the old side is moved to its team's side. This used to run only on maps with a
+        // coach viewing-spawn file, so elsewhere a coach could stay on the wrong side.
+        foreach (CCSPlayerController coach in coaches)
         {
-            foreach (CCSPlayerController coach in coaches)
-            {
-                if (!IsPlayerValid(coach))
-                    continue;
-                AddTimer(0.5f, () => HandleCoachTeam(coach), TimerFlags.STOP_ON_MAPCHANGE);
-            }
+            if (!IsPlayerValid(coach))
+                continue;
+            ResetCoachScoreboard(coach);
+            AddTimer(0.5f, () => HandleCoachTeam(coach), TimerFlags.STOP_ON_MAPCHANGE);
         }
-        else
+        if (!haveCoachSpawns)
         {
             Log($"[HandleCoaches] No coach viewing spawns for map {Server.MapName}; coaches stay at engine spawn, but real players are still re-seated onto competitive spawns.");
         }
@@ -1420,6 +1423,80 @@ public partial class MatchZy
         return true;
     }
 
+    /// <summary>
+    /// A coach is out of the game, so its scoreboard line stays at 0: the end-of-freezetime kill
+    /// (and a side-fix suicide) would otherwise add a death and take a point every round. Called on
+    /// every round start and from a Post player_death handler, because the engine changes the stats
+    /// during the event (a Pre or timer reset lands before the +1).
+    /// </summary>
+    private void ResetCoachScoreboard(CCSPlayerController coach)
+    {
+        try
+        {
+            if (coach == null || !coach.IsValid)
+                return;
+            var stats = coach.ActionTrackingServices?.MatchStats;
+            if (stats != null)
+            {
+                stats.Kills = 0;
+                stats.Deaths = 0;
+                stats.Assists = 0;
+                stats.Damage = 0;
+                stats.HeadShotKills = 0;
+                stats.EnemiesFlashed = 0;
+                stats.UtilityDamage = 0;
+                stats.Objective = 0;
+                stats.KillReward = 0;
+                stats.CashEarned = 0;
+            }
+            coach.Score = 0;
+            coach.MVPs = 0;
+            Utilities.SetStateChanged(coach, "CCSPlayerController", "m_iScore");
+            Utilities.SetStateChanged(coach, "CCSPlayerController", "m_iMVPs");
+            Utilities.SetStateChanged(coach, "CCSPlayerController", "m_pActionTrackingServices");
+        }
+        catch (Exception e)
+        {
+            Log($"[ResetCoachScoreboard] {e.Message}");
+        }
+    }
+
+    // Post round_mvp / round_end: the engine hands out MVPs and end-of-round points during the
+    // event, so every coach is put back to 0 right after.
+    public HookResult OnCoachRoundStatsPost()
+    {
+        try
+        {
+            if (!matchStarted)
+                return HookResult.Continue;
+            foreach (var coach in GetAllCoaches())
+                ResetCoachScoreboard(coach);
+        }
+        catch (Exception e)
+        {
+            Log($"[OnCoachRoundStatsPost FATAL] {e.Message}");
+        }
+        return HookResult.Continue;
+    }
+
+    // Post: runs after the engine counted the coach's death.
+    public HookResult OnCoachDeathPost(EventPlayerDeath @event, GameEventInfo info)
+    {
+        try
+        {
+            if (!matchStarted)
+                return HookResult.Continue;
+            var victim = @event.Userid;
+            if (victim != null && IsMatchCoach(victim))
+                ResetCoachScoreboard(victim);
+        }
+        catch (Exception e)
+        {
+            Log($"[OnCoachDeathPost FATAL] {e.Message}");
+        }
+        return HookResult.Continue;
+    }
+
     public CsTeam GetCoachTeam(CCSPlayerController coach)
     {
         if (matchzyTeam1.coach.Contains(coach))
@@ -2081,6 +2158,7 @@ public partial class MatchZy
             return;
 
         coachTeam.coach.Add(player);
+        ResetCoachScoreboard(player);
         ApplyClanTag(player, $"[{coachTeam.teamName} COACH]");
         if (player.InGameMoneyServices != null)
             player.InGameMoneyServices.Account = 0;

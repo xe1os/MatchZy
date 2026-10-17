@@ -501,7 +501,7 @@ namespace MatchZy
 
                     int botUserId = p.UserId.Value;
                     // A bot walking a recorded path is moved by the replay tick (PathReplay.cs).
-                    if (IsBotReplayingPath(botUserId))
+                    if (IsBotReplayingPath(botUserId) || IsBotRunBoosting(botUserId))
                         continue;
                     // A .botshoot bot that sees a target stands still and shoots (BotCombat.cs).
                     if (botShootEnabled && botsEngaged.Contains(botUserId))

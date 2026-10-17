@@ -1,6 +1,6 @@
 # Coaching
 
-A coach is part of a team but does not play. In this fork the coach stands at a viewing spot behind the team during freeze time (for the tactical talk), is invisible and cannot be damaged, and is killed at the very end of freeze time so they spectate the round.
+A coach is part of a team but does not play. In this fork the coach stands at a viewing spot behind the team during freeze time (for the tactical talk), is invisible and cannot be damaged, and is killed at the very end of freeze time so they spectate the round. The coach has no money, never keeps the bomb, and their scoreboard line stays at 0. The coach belongs to the team, not the side: after halftime they follow their team to the other side.
 
 ## Who can coach
 

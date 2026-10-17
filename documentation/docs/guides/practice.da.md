@@ -20,7 +20,7 @@ Hjælp, mens du lærer:
 
 ## Granatbiblioteket { #grenade-library }
 
-`.shownades` tegner en farvet markør ved hvert gemt lineup på banen (smoke blå, flash gul, HE rød, molotov orange, decoy grå) med en tekst, der viser type, kommentar og kastemåde.
+`.shownades` tegner en farvet markør ved hvert gemt lineup på banen (smoke blå, flash gul, HE rød, molotov orange, decoy grå) med en tekst, der viser type, kommentar og kastemåde. En lille lysende granat markerer hvert sted gennem vægge, så du kan finde lineups på tværs af banen. `.shownades smoke` (eller `flash`, `he`, `molly`, `mine` eller en del af et navn) viser kun dem.
 
 - Sigt på en markør, og tryk ++e++ for at teleportere dertil med den rigtige granat.
 - Flere lineups på samme sted deler en markør; tryk ++f++ for at skifte mellem dem.
@@ -41,6 +41,8 @@ Hjælp, mens du lærer:
 - `.showbotpos` viser de gemte spots; `.botjiggle` får bots til at strafe, til peek-træning (`.botjigglerange`, `.botjigglerandom`).
 - `.botspawn <navn>` bygger en pulje af pladser; `.placebot <antal> <navn>` sætter bots på tilfældige pladser fra den, så hver gentagelse får en ny opstilling. `.showbotspawn` viser pladserne (stil dig i en + ++e++ sletter den).
 - `.botshoot` får bots til at skyde igen fra deres plads efter `.botreactiontime` (standard 500 ms). Slå din livsregenerering fra med `.liferegon` (eller `.allliferegon false` for alle), så deres skud tæller. `.botrespawn` og `.botlifereg` styrer, hvad der sker, når du rammer dem.
+- Sigt på en bot: `.kevlar` / `.armor` tager dens armor af eller giver den igen, `.botgun awp` skifter dens våben, `.dismiss` fjerner den, `.runboost` lader dig ride på den, mens den følger dine bevægelser. `.xray` viser alle gennem vægge.
+- `.stratrec` optager hele dit holds execute på én gang (3 sekunders nedtælling, alle starter samtidig); `.strat` afspiller den med én bot pr. rolle, `.strat <navn> me 2` lader dig spille rolle 2 med de andres timing. `.savestrat` gemmer den pr. bane. Alene? `.createstrat <navn>` og så `.stratslot <navn> 1`, `2`, ... optager én rolle ad gangen, mens bots spiller de roller, du allerede har optaget; `.strats` gør det samme fra en menu.
 - `.startround` nulstiller gentagelsen: utility ryddet, tilfældige spawns til alle spillere, bots tilbage på deres plads, 5 sekunders frys.
 - Bot-kommandoerne respekterer `-nobots` og tager aldrig CSTV-pladsen, så en practice-session kan ikke stoppe en kørende GOTV.
 

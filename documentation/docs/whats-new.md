@@ -2,6 +2,16 @@
 
 A short summary of each release. The [full changelog](changelog.md) has the details and background for every change.
 
+## 1.0.10 <small>October 17, 2026</small>
+
+- **Changed:** `live_1v1.cfg` uses the wingman format: MR8 (first to 9), $8000 max money, 1:30 rounds, overtime MR2. Existing servers keep their old file: delete it to get the new defaults.
+- **New:** `.1v1`, `.wingman` and `.5v5` switch the server's game mode and reload the map (or `.wingman <map>`). 1v1 now runs in the wingman game mode.
+- **New:** `.shownades` lineups glow through walls; `.shownades smoke` (or `flash`, `mine`, a name...) filters them.
+- **New:** Strategy recorder: `.stratrec` records your team's execute, `.strat` plays it back with bots (`me <role>` to play one role yourself). `.createstrat` + `.stratslot` build one alone, slot by slot, and `.strats` is the menu for it. `.record` / `.play` with a 3 second countdown; `.stoprecord`, a double right click or Shift + E stops a recording.
+- **New:** Practice: `.kevlar`, `.armor`, `.botgun`, `.dismiss` and `.runboost` on the bot at your aim, `.dismissall`, `.xray`, `.expire` (smokes and molotovs never run out), `.coloredsmokes`, and `.observeme` for `.fas`.
+- **Fixed:** Round backups and `.restore` work again after the CS2 update of October 15, 2026 (CS2 rejected the backup path MatchZy used). `-allow_round_backup_files` is still required.
+- **Changed:** A pug in 1v1, wingman or rush starts with 2, 4 or 6 ready players without `.readyrequired`.
+
 ## 1.0.9 <small>October 16, 2026</small>
 
 - **New:** `.ma` → Match Control → Restore Round: pick a round backup from a list, with confirmation. Without a live match it lists the newest backups on disk for crash recovery.

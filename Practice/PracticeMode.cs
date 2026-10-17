@@ -1487,13 +1487,22 @@ namespace MatchZy
             StartPracticeMode();
         }
 
-        [ConsoleCommand("css_dry", "Starts dryrun")]
-        [ConsoleCommand("css_dryrun", "Starts dryrun")]
+        [ConsoleCommand("css_dry", "Play normal rounds with $16,000 and a 6-second freeze time")]
+        [ConsoleCommand("css_dryrun", "Play normal rounds with $16,000 and a 6-second freeze time")]
         public void OnDryRunCommand(CCSPlayerController? player, CommandInfo? command)
+            => HandleDryRunCommand(player, command?.ArgString ?? "");
+
+        // .dryrun [0-60]: the number is the freeze time (dryrun.cfg has 6).
+        public void HandleDryRunCommand(CCSPlayerController? player, string arg)
         {
             if (!IsPlayerAdmin(player, "css_prac", "@css/map", "@custom/prac"))
             {
                 SendPlayerNotAdminMessage(player);
+                return;
+            }
+            if (!TryParseDryRunFreeze(arg, out int? freezeSeconds))
+            {
+                ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.cc.usage", ".dryrun [0-60]"));
                 return;
             }
 
@@ -1506,9 +1515,7 @@ namespace MatchZy
             // If already in dryrun, just restart the round instead of blocking
             if (isDryRun)
             {
-                Server.ExecuteCommand("mp_restartgame 1");
-                ScheduleRoundHistoryWipe();
-                PrintLocalizedToAll("matchzy.prac.dryrunrestarted");
+                HandleDryRunRestartRound(player, arg);
                 return;
             }
 
@@ -1528,6 +1535,9 @@ namespace MatchZy
 
             ExecUnpracCommands(); // reset practice-specific cvars
             ExecDryRunCFG(); // apply dry run cvars and restart
+            // After the cfg, before the restart it queued lands, so round 1 already uses it.
+            if (freezeSeconds is int freeze)
+                SetDryRunFreezeTime(freeze);
             readyStatusHintTimer?.Kill();
             readyStatusHintTimer = null;
             ClearClanTags();
@@ -2866,6 +2876,14 @@ namespace MatchZy
             var closestBot = GetClosestBotOfPlayer(player);
             if (closestBot == null || !IsPlayerValid(closestBot) || !closestBot.UserId.HasValue)
                 return;
+            KickPracticeBot(player, closestBot);
+        }
+
+        // Untracks and kicks one practice bot (.nobot, .dismiss).
+        private void KickPracticeBot(CCSPlayerController? player, CCSPlayerController closestBot)
+        {
+            if (!closestBot.UserId.HasValue)
+                return;
 
             int botUserId = closestBot.UserId.Value;
 
@@ -2898,6 +2916,7 @@ namespace MatchZy
                             pracUsedBots.Remove(botUserId);
                             remainingBots = pracUsedBots.Count;
                         }
+                        ForgetBotLoadout(botUserId);
                         Server.ExecuteCommand($"bot_quota {remainingBots}");
                         // kickid by the captured userid, not bot_kick <name> (names can repeat).
                         Server.ExecuteCommand($"kickid {botUserId}");
@@ -3278,6 +3297,7 @@ namespace MatchZy
 
         [ConsoleCommand("css_fas", "Switches all other players to spectator")]
         [ConsoleCommand("css_watchme", "Switches all other players to spectator")]
+        [ConsoleCommand("css_observeme", "Switches all other players to spectator")]
         public void OnFASCommand(CCSPlayerController? player, CommandInfo? command)
         {
             if (!RequirePractice(player))
@@ -3325,6 +3345,7 @@ namespace MatchZy
 
         [ConsoleCommand("css_breakrestore", "")]
         [ConsoleCommand("css_nobreak", "")]
+        [ConsoleCommand("css_repair", "Restores everything .break destroyed")]
         public void OnBreakRestoreCommand(CCSPlayerController? player, CommandInfo? command)
         {
             if (!RequirePractice(player))

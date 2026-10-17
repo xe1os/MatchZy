@@ -195,7 +195,7 @@ namespace MatchZy
                         continue;
                     int uid = bot.UserId.Value;
                     // A bot walking a recorded path is moved by the replay tick.
-                    if (IsBotReplayingPath(uid))
+                    if (IsBotReplayingPath(uid) || IsBotRunBoosting(uid))
                         continue;
                     Position? anchor = TrackedBotPosition(uid);
                     if (anchor == null)

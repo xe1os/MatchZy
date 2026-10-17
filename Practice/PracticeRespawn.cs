@@ -116,6 +116,11 @@ namespace MatchZy
             try
             {
                 var player = @event.Userid;
+                if (isPractice && player != null && player.IsValid && player.IsBot)
+                {
+                    ReapplyBotLoadout(player);
+                    return HookResult.Continue;
+                }
                 if (!isPractice || player == null || !player.IsValid || player.IsBot || !player.UserId.HasValue)
                     return HookResult.Continue;
                 if (!respawnAtSavedLocation.Remove(player.UserId.Value))

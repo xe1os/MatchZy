@@ -1,6 +1,6 @@
 # Coaching
 
-En coach er en del af et hold, men spiller ikke. I denne fork står coachen på en udsigtsplads bag holdet i freeze time (til den taktiske snak), er usynlig og kan ikke tage skade, og dræbes til allersidst i freeze time, så han ser runden som spectator.
+En coach er en del af et hold, men spiller ikke. I denne fork står coachen på en udsigtsplads bag holdet i freeze time (til den taktiske snak), er usynlig og kan ikke tage skade, og dræbes til allersidst i freeze time, så de ser runden som spectator. Coachen har ingen penge, beholder aldrig bomben, og deres linje på scoreboardet bliver på 0. Coachen hører til holdet, ikke siden: efter halvleg følger de holdet over på den anden side.
 
 ## Hvem kan være coach { #who-can-coach }
 

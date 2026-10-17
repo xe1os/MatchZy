@@ -76,6 +76,12 @@ namespace MatchZy
         [ConsoleCommand("css_uncoach", "Sets coach for the requested team")]
         public void OnUnCoachCommand(CCSPlayerController? player, CommandInfo? command)
         {
+            // In practice there is no coach: .play replays your .record path instead.
+            if (isPractice)
+            {
+                HandleReplayCommand(player, command?.ArgString ?? "");
+                return;
+            }
             if (player == null || !player.PlayerPawn.IsValid)
                 return;
             if (isPractice)

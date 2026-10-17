@@ -27,7 +27,7 @@ Argumenter i `<vinkelparenteser>` er påkrævede, argumenter i `[firkantede pare
 | **Player** | Alle. |
 | **Config** | `@css/config` (SourceMod-flag `i`). Kamp-admins. |
 | **Map/prac** | `@css/map` eller `@custom/prac` (flag `g`). Kan skifte mode, men ikke styre en kørende kamp. |
-| **Map** | Kun `@css/map`. Bruges af `.map`. |
+| **Map** | Kun `@css/map`. Bruges af `.map`, `.1v1`, `.wingman` og `.5v5`. |
 | **Chat** | `@css/chat` (flag `j`). |
 | **Root** | `@css/root`, SteamID'er i MatchZys `admins.json` eller serverkonsollen. |
 
@@ -45,6 +45,7 @@ Argumenter i `<vinkelparenteser>` er påkrævede, argumenter i `[firkantede pare
 | `!color <0-4>` | Player | Vælger din holdfarve på radaren og scoreboardet (0 blå, 1 grøn, 2 gul, 3 orange, 4 lilla). |
 | `.asay <besked>` | Chat | Sender en meddelelse til hele chatten med admin-præfikset. `.asay` virker altid. |
 | `.map <bane>` | Map | Skifter bane, før en kamp er startet. Tager `mirage`, `de_mirage`, et workshop-id, `ws/<id>` eller `ws:<navn>`. |
+| `.1v1 [bane]`, `.wingman [bane]`, `.5v5 [bane]` | Map | Skifter serveren til 1v1, wingman (2v2) eller competitive (5v5), før en kamp er startet, og genindlæser banen eller skifter til den angivne bane. Også `.2v2`, `.competitive` og `css_1v1` / `css_wingman` / `css_5v5`. |
 | `.rmap` | Root | Genindlæser den nuværende bane. |
 
 `!asay`-formen kan slås fra med `matchzy_asay_console_enabled`, hvis et andet admin-plugin bruger den.
@@ -63,7 +64,7 @@ Disse starter en mode fra warmup eller fra en anden mode og afvises, når en kam
 | `.hill` | Map/prac | Hill-mode: som en kamp uden knife-runde, med `hill.cfg`. |
 | `.prac` `.tactics` `.training` | Map/prac | Practice mode. Se [Practice mode](#practice-mode). |
 | `.exitprac` `.noprac` `.exittraining` | Map/prac | Forlader practice og går tilbage til match-warmup. |
-| `.dryrun` `.dry` | Map/prac | Starter en dryrun. Se [Dryrun](#dryrun). |
+| `.dryrun [0-60]` `.dry` | Map/prac | Spiller normale runder med $16.000 og 6 sekunders freeze time. Tilføj antal sekunder (0 til 60) for en anden freeze time: `.dryrun 15` giver 15 sekunder. Skriv `.rr` for at genstarte runden, eller `.rr 15` for at genstarte med 15 sekunder. Se [Dryrun](#dryrun). |
 | `.warmup` | Config | Går tilbage til warmup (ikke når en kamp er startet, og ikke mens `matchzy_warmup_enabled` er slået fra). |
 | `.sleep` | Map/prac | Hviletilstand til en tom server. |
 
@@ -195,7 +196,7 @@ Mere under [Coaching](../guides/coaching.md).
 | `.forceunpause` `.fup` | Config | Hæver enhver pause med det samme. |
 | `.restore <runde>` | Config | Sætter kampen tilbage til starten af den runde (score, penge, udstyr). Brug `R`-nummeret, som `.backups` viser. |
 | `.restorelast` `.rl` | Config | Gendanner den forrige runde. |
-| `.restorecurrent` `.rrestore` `.rr` | Config | Genstarter den nuværende runde fra start. Også `!restartround`. (I practice genstarter `.rr` i stedet practice-runden.) |
+| `.restorecurrent` `.rrestore` `.rr` | Config | Genstarter den nuværende runde fra start. Også `!restartround`. (I practice genstarter `.rr` i stedet practice-runden; i en dryrun genstarter den dryrun-runden, `.rr 15` med 15 sekunders freeze time.) |
 | `.backups` `.backup` `.backupmenu` | Config | Viser op til 10 backups af denne kamp, nyeste runde først, med score og `!restore`-kommandoen til hver. |
 | `!loadbackup <fil>` | Config | Gendanner en backup-fil ved navn (fra `csgo/MatchZyDataBackup`). Genopbygger kampen ud fra filen, også med baneskift, hvis det er nødvendigt. |
 | `.listbackups [matchid]` | Config | Viser alle backups af en kamp. Uden et match-id bruges den nuværende kamp. |
@@ -240,7 +241,7 @@ Alt her virker **kun i practice mode** (`.prac`). Ingen admin-rettigheder kræve
 | Kommando | Hvad den gør |
 |---|---|
 | `.ct` / `.t` / `.spec` | Skifter dit hold. Du respawner på den nye side, og det tæller ikke som et dødsfald. |
-| `.fas` `.watchme` | Flytter alle andre spillere til spectator, så de kan se dig. Kun Map/prac-admins. |
+| `.fas` `.watchme` `.observeme` | Flytter alle andre spillere til spectator, så de kan se dig. Kun Map/prac-admins. |
 | `.spawn <n>` `.sp <n>` | Teleporterer dig til dit holds konkurrence-spawn nummer N. `.ctspawn <n>` (`.cts`) / `.tspawn <n>` (`.ts`) vælger siden. |
 | `.bestspawn` / `.worstspawn` | Teleporterer dig til spawnet nærmest / længst fra, hvor du står. Varianter pr. side: `.bestctspawn`, `.besttspawn`, `.worstctspawn`, `.worsttspawn`. |
 | `.showspawns` / `.hidespawns` | Tegner en nummereret boks på gulvet ved hver konkurrence-spawn. Sigt på en og tryk ++e++ for at teleportere dertil. |
@@ -256,6 +257,24 @@ Alt her virker **kun i practice mode** (`.prac`). Ingen admin-rettigheder kræve
 | `.crouchbot` `.cbot` | Det samme, men på hug. `.tcrouchbot` / `.ctcrouchbot` vælger holdet. Også `!duckbot`. |
 | `.boost` / `.crouchboost` `.cboost` | Spawner en bot og sætter dig på dens hoved, til boost-spots. Også `!duckboost`. |
 | `.nobot` `.nb` `.removebot` `.kickbot` `.unbot` | Fjerner den bot, der er nærmest dig. |
+| `.dismiss` | Fjerner den bot, du sigter på. |
+| `.dismissall` | Fjerner alle practice-bots (som `.clearbots`). |
+| `.kevlar` | Slår kevlar (uden hjelm) til/fra på den bot, du sigter på. Bevares, når botten respawner. |
+| `.armor` | Slår kevlar + hjelm til/fra på den bot, du sigter på. Bevares, når botten respawner. |
+| `.botgun <våben>` | Giver den bot, du sigter på, et våben (`ak47`, `awp`, `m4a1s`, `deagle`, ...) i stedet for dens våben i samme slot. Bevares, når botten respawner. |
+| `.runboost` | Sætter dig på den bot, du sigter på; botten løber så med dine W/A/S/D (Shift går). Hop af for at booste. Slutter med `.runboost` igen, eller når du lander et andet sted; botten går tilbage til sin plads. |
+| `.rec` `.record` | Optager dine bevægelser og granatkast (op til 60 s). Du er frosset i en 3 sekunders nedtælling først. Stop med `.rec` igen, `.stoprecord`, dobbelt højreklik eller ++shift+e++. |
+| `.stoprecord` | Stopper din `.rec`-, `.stratrec`- eller `.stratslot`-optagelse. Dobbelt højreklik eller ++shift+e++ gør det samme, mens du optager. |
+| `.replay` `.play` `[t\|ct] [loop]` | En bot går din sidste optagede rute og kaster de samme granater. `.replay stop` afslutter den. |
+| `.saverec <navn>` / `.loadrec <navn>` / `.listrec` / `.delrec <navn>` / `.showrec` | Gem optagede ruter pr. bane; `.showrec` tegner din rute, kun for dig. |
+| `.stratrec` | Optager en strategi: hver levende spiller på dit hold er en rolle. Alle fryses i en 3 sekunders nedtælling, og så optages alle fra samme øjeblik (op til 120 s). Kør igen (eller `.stoprecord`) for at stoppe. |
+| `.strat [navn] [me <rolle>]` | Afspiller den sidst optagede (eller en gemt) strategi: én bot pr. rolle, alle starter samtidig efter en 3 sekunders nedtælling. `me 2` lader dig selv spille rolle 2. `.strat stop` afslutter og fjerner bots. |
+| `.savestrat <navn>` / `.liststrat` / `.delstrat <navn>` | Gem strategier pr. bane (`strats/<map>.json`). |
+| `.createstrat <navn>` | Opretter en tom strategi for dit hold, som fyldes ét slot ad gangen. |
+| `.stratslot <navn> <1-5>` | Optager ét slot af strategien alene: bots spiller dens andre optagede slots samtidig, efter samme 3 sekunders nedtælling, så du kan time din del mod dem. Optages et slot igen, erstattes det. |
+| `.playgroup <navn>` | Samme som `.strat <navn>`. |
+| `.strats` | Menu: vælg en strategi, start eller stop afspilning, optag, spil eller ryd hvert slot, slet den. |
+
 | `.nobots` `.nbots` `.nbs` `.nbts` `.kbots` `.kickbots` `.clearbots` `.removebots` | Fjerner alle practice-bots. |
 | `.savebotpos <navn>` `.sbp <navn>` | Gemmer, hvor du står (og om du er på hug), som et navngivet bot-spot på denne bane. |
 | `.loadbotpos [navn]` `.lbp [navn]` | Spawner en bot på et gemt spot (det navn, der passer bedst). Uden navn spawnes alle gemte spots på banen, så en hel opstilling kommer tilbage med én kommando. |
@@ -307,7 +326,7 @@ Kommandoerne til rethrow pr. type virker også som `.rethrowsmoke`, `.rethrowfla
 | `.importnade <navn> <x> <y> <z> <pitch> <yaw> <roll>` | Importerer et lineup ud fra en position og synsvinkel (fx kopieret fra `getpos`). Også `!in`. |
 | `.mynades` | Hvor mange lineups du har gemt. |
 | `.nades` | Menu til at gennemse lineups efter granattype og loade et (kræver CS2MenuManager). |
-| `.shownades` / `.hidenades` | Farvede markører med navne ved alle lineups på banen. Sigt på en og tryk ++e++ for at loade den. |
+| `.shownades [filter]` / `.hidenades` | Farvede markører med navne ved alle lineups på banen, plus en lysende granatmodel, du kan se gennem vægge. Sigt på en og tryk ++e++ for at loade den. Et filter begrænser, hvad du ser: `smoke`, `flash`, `he`, `molly`, `decoy`, `mine`, `global` eller tekst fra navn eller beskrivelse (`.shownades jungle`). `.shownades all` viser alle igen. |
 | `.liblist` | Viser det fælles lineup-bibliotek for denne bane. |
 | `.libadd <navn>` / `.libremove <navn>` | Config-admins: tilføj et af dine lineups på denne bane til det fælles bibliotek, eller fjern et. |
 
@@ -328,12 +347,15 @@ Kommandoerne til rethrow pr. type virker også som `.rethrowsmoke`, `.rethrowfla
 | `.flashtest` `.ft` | Skriver, hvor længe du var blændet, hver gang du bliver flashet. |
 | `.blind` | Kaster en flashbang i hovedet på dig, til træning af reaktion på pop-flashes. |
 | `.god` | Du tager ingen skade. Skriv igen for at slå det fra. |
+| `.expire` | Smokes og molotovs udløber ikke: en smoke fornys på stedet, før den forsvinder, og ild bliver ved med at brænde (for ild startet efter du slog det til). Skriv igen for at slå det fra. |
+| `.coloredsmokes` | Slår farvede smokes (holdfarve) til eller fra; samme som `matchzy_smoke_color_enabled`. |
+| `.xray` | Alle spillere og bots lyser gennem vægge (T orange, CT blå). For alle på serveren. Skriv igen for at slå det fra. |
 | `.liferegon` | Slår din egen livsregenerering fra / til. Til som standard, så du ikke kan dø; slå den fra for at træne mod `.botshoot`-bots. |
 | `.allliferegon <true\|false>` | Livsregenerering for alle spillere, også dem der kommer senere. |
 | `.solid` | Skifter, om holdkammerater blokerer hinanden. |
 | `.ff` `.fastforward` | Spoler tiden frem i 10 sekunder (vent smokes og ild af). Spillerne er frosset imens. Uden for practice slår `.ff` i stedet friendly fire til/fra (se `.friendlyfire`). |
 | `.break` | Smadrer alt glas, døre og objekter, der kan gå i stykker. |
-| `.breakrestore` `.nobreak` | Genskaber alt, `.break` har ødelagt. |
+| `.breakrestore` `.nobreak` `.repair` | Genskaber alt, `.break` har ødelagt. |
 | `.rs` `.rr` | Genstarter practice-runden for alle. Kun Map/prac-admins. |
 
 ### Eksempler { #examples_4 }
@@ -361,7 +383,7 @@ Kommandoerne til rethrow pr. type virker også som `.rethrowsmoke`, `.rethrowfla
 
 ## Dryrun { #dryrun }
 
-En dryrun spiller rigtige runder (købetid, rundeur, penge) uden en kamp, til at øve udførelser med dit hold eller bots. Den kører, indtil en admin stopper den.
+En dryrun spiller normale runder med $16.000 og 6 sekunders freeze time (købetid og rundeur som i en kamp) uden en kamp, til at øve udførelser med dit hold eller bots. Den kører, indtil en admin stopper den.
 
 | Kommando | Hvem | Hvad den gør |
 |---|---|---|

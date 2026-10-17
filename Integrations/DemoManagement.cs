@@ -482,7 +482,8 @@ namespace MatchZy
         }
 
         /// <summary>
-        /// Console argument for a file the engine writes under csgo/ (tv_record, mp_backup_round_file).
+        /// Console argument for a file the engine writes under csgo/ (tv_record). Not for round backups:
+        /// since CS2 1.41.9.1 the engine rejects an absolute mp_backup_round_file (see SetupRoundBackupFile).
         /// Always an absolute path: the engine resolves a relative path against the first Game search
         /// path in gameinfo.gi, which is csgo/addons/metamod on Metamod servers. On Windows the drive
         /// letter is dropped ("D:/Steam/..." -> "/Steam/..."): the engine's record command rejects any

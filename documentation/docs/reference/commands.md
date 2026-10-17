@@ -27,7 +27,7 @@ Arguments in `<angle brackets>` are required, arguments in `[square brackets]` a
 | **Player** | Everyone. |
 | **Config** | `@css/config` (SourceMod flag `i`). Match admins. |
 | **Map/prac** | `@css/map` or `@custom/prac` (flag `g`). Can switch modes, but not control a running match. |
-| **Map** | `@css/map` only. Used by `.map`. |
+| **Map** | `@css/map` only. Used by `.map`, `.1v1`, `.wingman` and `.5v5`. |
 | **Chat** | `@css/chat` (flag `j`). |
 | **Root** | `@css/root`, SteamIDs in MatchZy's `admins.json`, or the server console. |
 
@@ -45,6 +45,7 @@ Arguments in `<angle brackets>` are required, arguments in `[square brackets]` a
 | `!color <0-4>` | Player | Picks your teammate color on the radar and scoreboard (0 blue, 1 green, 2 yellow, 3 orange, 4 purple). |
 | `.asay <message>` | Chat | Sends an announcement to all chat with the admin prefix. `.asay` always works. |
 | `.map <map>` | Map | Changes map before a match has started. Accepts `mirage`, `de_mirage`, a workshop id, `ws/<id>` or `ws:<name>`. |
+| `.1v1 [map]`, `.wingman [map]`, `.5v5 [map]` | Map | Switches the server to 1v1, wingman (2v2) or competitive (5v5) before a match has started and reloads the map, or changes to the map given. Also `.2v2`, `.competitive` and `css_1v1` / `css_wingman` / `css_5v5`. |
 | `.rmap` | Root | Reloads the current map. |
 
 The `!asay` form can be turned off with `matchzy_asay_console_enabled` when another admin plugin owns it.
@@ -63,7 +64,7 @@ These start a mode from warmup or from another mode, and are refused once a matc
 | `.hill` | Map/prac | Hill mode: like a match without the knife round, using `hill.cfg`. |
 | `.prac` `.tactics` `.training` | Map/prac | Practice mode. See [Practice mode](#practice-mode). |
 | `.exitprac` `.noprac` `.exittraining` | Map/prac | Leaves practice and goes back to match warmup. |
-| `.dryrun` `.dry` | Map/prac | Starts a dryrun. See [Dryrun](#dryrun). |
+| `.dryrun [0-60]` `.dry` | Map/prac | Plays normal rounds with $16,000 and a 6-second freeze time. For a different freeze time, add the seconds, from 0 to 60: `.dryrun 15` gives 15 seconds. Type `.rr` to restart the round, or `.rr 15` to restart with 15 seconds. See [Dryrun](#dryrun). |
 | `.warmup` | Config | Goes back to warmup (not once a match has started, and not while `matchzy_warmup_enabled` is off). |
 | `.sleep` | Map/prac | Idle mode for an empty server. |
 
@@ -195,7 +196,7 @@ More in [Coaching](../guides/coaching.md).
 | `.forceunpause` `.fup` | Config | Lifts any pause at once. |
 | `.restore <round>` | Config | Restores the match to the start of that round (score, money, equipment). Use the `R` number `.backups` shows. |
 | `.restorelast` `.rl` | Config | Restores the previous round. |
-| `.restorecurrent` `.rrestore` `.rr` | Config | Restarts the current round from its start. Also `!restartround`. (In practice, `.rr` restarts the practice round instead.) |
+| `.restorecurrent` `.rrestore` `.rr` | Config | Restarts the current round from its start. Also `!restartround`. (In practice, `.rr` restarts the practice round instead; in a dryrun it restarts the dryrun round, `.rr 15` with a 15 second freeze time.) |
 | `.backups` `.backup` `.backupmenu` | Config | Lists up to 10 backups of this match, latest round first, with score and the `!restore` command for each. |
 | `!loadbackup <file>` | Config | Restores a backup file by name (from `csgo/MatchZyDataBackup`). Rebuilds the match from the file, including a map change if needed. |
 | `.listbackups [matchid]` | Config | Lists every backup of a match. Without a match id it uses the current match. |
@@ -240,7 +241,7 @@ Everything here works **only in practice mode** (`.prac`). No admin rights neede
 | Command | What it does |
 |---|---|
 | `.ct` / `.t` / `.spec` | Switches your team. You respawn on the new side and it does not count as a death. |
-| `.fas` `.watchme` | Moves every other player to spectator so they can watch you. Map/prac admins only. |
+| `.fas` `.watchme` `.observeme` | Moves every other player to spectator so they can watch you. Map/prac admins only. |
 | `.spawn <n>` `.sp <n>` | Teleports you to your team's competitive spawn number N. `.ctspawn <n>` (`.cts`) / `.tspawn <n>` (`.ts`) pick the side. |
 | `.bestspawn` / `.worstspawn` | Teleports you to the spawn nearest to / furthest from where you stand. Side variants: `.bestctspawn`, `.besttspawn`, `.worstctspawn`, `.worsttspawn`. |
 | `.showspawns` / `.hidespawns` | Draws a numbered box on the floor at every competitive spawn. Aim at one and press ++e++ to teleport to it. |
@@ -256,6 +257,24 @@ Everything here works **only in practice mode** (`.prac`). No admin rights neede
 | `.crouchbot` `.cbot` | Same, crouched. `.tcrouchbot` / `.ctcrouchbot` choose the team. Also `!duckbot`. |
 | `.boost` / `.crouchboost` `.cboost` | Spawns a bot and puts you on its head, for boost spots. Also `!duckboost`. |
 | `.nobot` `.nb` `.removebot` `.kickbot` `.unbot` | Removes the bot nearest to you. |
+| `.dismiss` | Removes the bot at your aim. |
+| `.dismissall` | Removes all practice bots (same as `.clearbots`). |
+| `.kevlar` | Toggles kevlar (no helmet) on the bot at your aim. Kept when the bot respawns. |
+| `.armor` | Toggles kevlar + helmet on the bot at your aim. Kept when the bot respawns. |
+| `.botgun <weapon>` | Gives the bot at your aim a weapon (`ak47`, `awp`, `m4a1s`, `deagle`, ...), replacing its gun in that slot. Kept when the bot respawns. |
+| `.runboost` | Puts you on the bot at your aim; the bot then runs with your W/A/S/D (Shift walks). Jump off to boost. Ends with `.runboost` again or when you land somewhere else; the bot goes back to its spot. |
+| `.rec` `.record` | Records your movement and grenade throws (up to 60 s). You are frozen for a 3 second countdown first. Stop with `.rec` again, `.stoprecord`, a double right click or ++shift+e++. |
+| `.stoprecord` | Stops your `.rec`, `.stratrec` or `.stratslot` recording. A double right click or ++shift+e++ does the same while you record. |
+| `.replay` `.play` `[t\|ct] [loop]` | A bot walks your last recorded path and throws the same grenades. `.replay stop` ends it. |
+| `.saverec <name>` / `.loadrec <name>` / `.listrec` / `.delrec <name>` / `.showrec` | Keep recorded paths per map; `.showrec` draws your path, only for you. |
+| `.stratrec` | Records a strategy: every living player on your team is a role. Everyone is frozen for a 3 second countdown, then all are recorded from the same moment (up to 120 s). Run again (or `.stoprecord`) to stop. |
+| `.strat [name] [me <role>]` | Plays the last recorded (or a saved) strategy: one bot per role, all start together after a 3 second countdown. `me 2` lets you play role 2 yourself. `.strat stop` ends it and removes the bots. |
+| `.savestrat <name>` / `.liststrat` / `.delstrat <name>` | Keep strategies per map (`strats/<map>.json`). |
+| `.createstrat <name>` | Creates an empty strategy for your team, to fill one slot at a time. |
+| `.stratslot <name> <1-5>` | Records one slot of the strategy alone: bots play its other recorded slots at the same time, after the same 3 second countdown, so you time your part against them. Recording a slot again replaces it. |
+| `.playgroup <name>` | Same as `.strat <name>`. |
+| `.strats` | Menu: pick a strategy, start or stop its replay, record, replay or clear each slot, delete it. |
+
 | `.nobots` `.nbots` `.nbs` `.nbts` `.kbots` `.kickbots` `.clearbots` `.removebots` | Removes all practice bots. |
 | `.savebotpos <name>` `.sbp <name>` | Saves where you stand (and if you crouch) as a named bot spot for this map. |
 | `.loadbotpos [name]` `.lbp [name]` | Spawns a bot at a saved spot (the closest matching name). Without a name it spawns every saved spot on the map, so a whole setup comes back in one command. |
@@ -307,7 +326,7 @@ The per-type rethrow commands also work as `.rethrowsmoke`, `.rethrowflash`, `.r
 | `.importnade <name> <x> <y> <z> <pitch> <yaw> <roll>` | Imports a lineup from a position and view (for example copied from `getpos`). Also `!in`. |
 | `.mynades` | How many lineups you have saved. |
 | `.nades` | Menu to browse lineups by grenade type and load one (needs CS2MenuManager). |
-| `.shownades` / `.hidenades` | Colored markers with labels at every lineup on the map. Aim at one and press ++e++ to load it. |
+| `.shownades [filter]` / `.hidenades` | Colored markers with labels at every lineup on the map, plus a glowing grenade model you can see through walls. Aim at one and press ++e++ to load it. A filter limits what you see: `smoke`, `flash`, `he`, `molly`, `decoy`, `mine`, `global`, or text from the name or description (`.shownades jungle`). `.shownades all` shows everything again. |
 | `.liblist` | Lists the shared lineup library for this map. |
 | `.libadd <name>` / `.libremove <name>` | Config admins: add one of your lineups on this map to the shared library, or remove one. |
 
@@ -328,12 +347,15 @@ The per-type rethrow commands also work as `.rethrowsmoke`, `.rethrowflash`, `.r
 | `.flashtest` `.ft` | Prints how long you were blinded each time you get flashed. |
 | `.blind` | Throws a flashbang at your face, for pop-flash reaction practice. |
 | `.god` | You take no damage. Type again to turn it off. |
+| `.expire` | Smokes and molotovs do not run out: a smoke is renewed on the spot before it fades, fires burn on (for fires started after turning it on). Type again to turn it off. |
+| `.coloredsmokes` | Turns colored smokes (teammate color) on or off; same as `matchzy_smoke_color_enabled`. |
+| `.xray` | Every player and bot glows through walls (T orange, CT blue). For everyone on the server. Type again to turn it off. |
 | `.liferegon` | Turns your own health regeneration off / on. On by default, so you cannot die; turn it off to practice against `.botshoot` bots. |
 | `.allliferegon <true\|false>` | Health regeneration for every player, also players who join later. |
 | `.solid` | Toggles whether teammates block each other. |
 | `.ff` `.fastforward` | Speeds up time for 10 seconds (wait out smokes and fires). Players are frozen meanwhile. Outside practice `.ff` toggles friendly fire instead (see `.friendlyfire`). |
 | `.break` | Breaks all breakable glass, doors and props. |
-| `.breakrestore` `.nobreak` | Restores everything `.break` destroyed. |
+| `.breakrestore` `.nobreak` `.repair` | Restores everything `.break` destroyed. |
 | `.rs` `.rr` | Restarts the practice round for everyone. Map/prac admins only. |
 
 ### Examples
@@ -361,7 +383,7 @@ The per-type rethrow commands also work as `.rethrowsmoke`, `.rethrowflash`, `.r
 
 ## Dryrun
 
-A dryrun plays real rounds (buy time, round timer, money) without a match, for running executes with your team or bots. It keeps going until an admin ends it.
+A dryrun plays normal rounds with $16,000 and a 6-second freeze time (buy time and round timer as in a match) without a match, for running executes with your team or bots. It keeps going until an admin ends it.
 
 | Command | Who | What it does |
 |---|---|---|

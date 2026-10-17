@@ -20,7 +20,7 @@ Helpers while learning:
 
 ## Grenade library
 
-`.shownades` draws a colored marker at every saved lineup on the map (smoke blue, flash yellow, HE red, molotov orange, decoy grey) with a label showing type, comment and throw style.
+`.shownades` draws a colored marker at every saved lineup on the map (smoke blue, flash yellow, HE red, molotov orange, decoy grey) with a label showing type, comment and throw style. A small glowing grenade marks each spot through walls, so you can find lineups from across the map. `.shownades smoke` (or `flash`, `he`, `molly`, `mine`, or part of a name) shows only those.
 
 - Aim at a marker and press ++e++ to teleport there with the right grenade.
 - Several lineups on one spot share a marker; press ++f++ to cycle them.
@@ -41,6 +41,8 @@ Helpers while learning:
 - `.showbotpos` shows the saved spots; `.botjiggle` makes bots strafe for peek practice (`.botjigglerange`, `.botjigglerandom`).
 - `.botspawn <name>` builds a pool of spots; `.placebot <number> <name>` puts bots on random spots from it, so every rep has a new setup. `.showbotspawn` shows the spots (stand in one + ++e++ deletes it).
 - `.botshoot` makes bots fight back from their spot after `.botreactiontime` (default 500 ms). Turn off your health regeneration with `.liferegon` (or `.allliferegon false` for everyone) so their hits count. `.botrespawn` and `.botlifereg` control what happens when you hit them.
+- Aim at a bot: `.kevlar` / `.armor` take its armor off or put it back, `.botgun awp` changes its weapon, `.dismiss` removes it, `.runboost` lets you ride it while it copies your movement. `.xray` shows everyone through walls.
+- `.stratrec` records your whole team's execute at once (3 second countdown, everyone starts together); `.strat` plays it back with one bot per role, `.strat <name> me 2` lets you play role 2 against the timing of the others. `.savestrat` keeps it per map. Alone? `.createstrat <name>` and then `.stratslot <name> 1`, `2`, ... records one role at a time while bots play the roles you already recorded; `.strats` does the same from a menu.
 - `.startround` resets the rep: utility cleared, random spawns for every player, bots back on their spots, 5 second freeze.
 - Bot commands respect `-nobots` and never take the CSTV slot, so a practice session cannot kill a running GOTV.
 

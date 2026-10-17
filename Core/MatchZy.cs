@@ -16,7 +16,7 @@ namespace MatchZy
     public partial class MatchZy : BasePlugin
     {
         public override string ModuleName => "MatchZy";
-        public override string ModuleVersion => "1.0.9";
+        public override string ModuleVersion => "1.0.10";
         public override string ModuleAuthor => "Miksen/mrc4tt (based on MatchZy by WD-)";
         public override string ModuleDescription => "A plugin for running and managing CS2 practice/pugs/scrims/matches!";
         public string chatPrefix = $"{ChatColors.Green}[MatchZy]{ChatColors.Default}";
@@ -502,6 +502,7 @@ namespace MatchZy
                 { ".ffire", OnFriendlyFireCommand },
                 { ".breakrestore", OnBreakRestoreCommand },
                 { ".nobreak", OnBreakRestoreCommand },
+                { ".repair", OnBreakRestoreCommand },
                 { ".rs", OnRestartRoundCommand },
                 // .rr restarts the round in practice; everywhere else it matches !rr (restore the
                 // current round). It used to be practice-only, so it did nothing in a match.
@@ -605,6 +606,7 @@ namespace MatchZy
                 { ".spec", OnSpecCommand },
                 { ".fas", OnFASCommand },
                 { ".watchme", OnFASCommand },
+                { ".observeme", OnFASCommand },
                 { ".last", OnLastCommand },
                 { ".throw", OnRethrowCommand },
                 { ".rethrow", OnRethrowCommand },
@@ -681,6 +683,9 @@ namespace MatchZy
             RegisterEventHandler<EventRoundStart>(EventRoundStartHandler);
             RegisterEventHandler<EventRoundFreezeEnd>(EventRoundFreezeEndHandler);
             RegisterEventHandler<EventPlayerSpawn>(OnCoachPlayerSpawn, HookMode.Post);
+            RegisterEventHandler<EventPlayerDeath>(OnCoachDeathPost, HookMode.Post);
+            RegisterEventHandler<EventRoundMvp>((@event, info) => OnCoachRoundStatsPost(), HookMode.Post);
+            RegisterEventHandler<EventRoundEnd>((@event, info) => OnCoachRoundStatsPost(), HookMode.Post);
             RegisterEventHandler<EventPlayerSpawn>((@event, info) =>
             {
                 RefreshTeamClanTag(@event.Userid);
@@ -1701,6 +1706,25 @@ namespace MatchZy
                     // Practice extras (.botshoot, .startround, .placebot, .slp, ...): bare and argument forms.
                     if (HandlePracticeExtraChatCommand(player, cmdWord, messageCommandArg))
                         return HookResult.Continue;
+
+                    // .1v1 / .wingman / .5v5 [map] (bare forms land here too: they are not in commandActions).
+                    if (GameModeChatCommands.TryGetValue(cmdWord, out var chatGameMode))
+                    {
+                        HandleGameModeCommand(player, chatGameMode, messageCommandArg);
+                        return HookResult.Continue;
+                    }
+
+                    // .dryrun 15 / .rr 15: dryrun freeze time (the bare forms match exactly above).
+                    if ((cmdWord == ".dryrun" || cmdWord == ".dry") && messageCommandArg != "")
+                    {
+                        HandleDryRunCommand(player, messageCommandArg);
+                        return HookResult.Continue;
+                    }
+                    if (cmdWord == ".rr" && messageCommandArg != "" && isDryRun)
+                    {
+                        HandleDryRunRestartRound(player, messageCommandArg);
+                        return HookResult.Continue;
+                    }
 
                     if (cmdWord == ".addreadytime")
                     {

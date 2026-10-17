@@ -13,9 +13,13 @@ namespace MatchZy
         {
             RegisterListener<Listeners.OnTick>(OnBotCombatTick);
             RegisterListener<Listeners.OnTick>(OnPathReplayTick);
+            RegisterListener<Listeners.OnTick>(OnRunBoostTick);
             RegisterListener<Listeners.OnPlayerButtonsChanged>(OnBotSpawnMarkerButtonHandler);
             RegisterEventHandler<EventPlayerDeath>(OnPracticeDeathPre, HookMode.Pre);
             RegisterEventHandler<EventPlayerSpawn>(OnPracticeSpawnPost);
+            RegisterXray();
+            RegisterStrategyRecorder();
+            RegisterUtilityExpire();
         }
 
         // Practice start and end: every extra goes back to its default, so a new session never
@@ -32,6 +36,11 @@ namespace MatchZy
             ResetStartRound();
             ClearBotSpawnMarkers();
             ResetPathReplay();
+            ResetBotLoadouts();
+            ResetRunBoosts();
+            ResetXray();
+            ResetStrats();
+            ResetUtilityExpire();
         }
 
         // Chat dispatch for the extras (both the bare and the argument forms). Returns true when the
@@ -41,6 +50,26 @@ namespace MatchZy
             switch (cmdWord)
             {
                 case ".botshoot": HandleBotShootCommand(player, arg); return true;
+                case ".kevlar": HandleBotArmorCommand(player, helmet: false); return true;
+                case ".armor": HandleBotArmorCommand(player, helmet: true); return true;
+                case ".botgun": HandleBotGunCommand(player, arg); return true;
+                case ".dismiss": OnDismissConsoleCommand(player, null); return true;
+                case ".dismissall": OnDismissAllConsoleCommand(player, null); return true;
+                case ".runboost": OnRunBoostConsoleCommand(player, null); return true;
+                case ".stratrec": OnStratRecConsoleCommand(player, null); return true;
+                case ".stoprecord": OnStopRecordConsoleCommand(player, null); return true;
+                case ".strat": HandleStratCommand(player, arg); return true;
+                case ".savestrat": HandleSaveStratCommand(player, arg); return true;
+                case ".liststrat": OnListStratConsoleCommand(player, null); return true;
+                case ".delstrat": HandleDelStratCommand(player, arg); return true;
+                case ".createstrat": HandleCreateStratCommand(player, arg); return true;
+                case ".stratslot": HandleStratSlotCommand(player, arg); return true;
+                case ".playgroup": HandleStratCommand(player, arg); return true;
+                case ".strats": OnStratsMenuCommand(player, null); return true;
+                case ".xray": OnXrayConsoleCommand(player, null); return true;
+                case ".expire": OnExpireConsoleCommand(player, null); return true;
+                case ".shownades": ShowNadesWithFilter(player, arg); return true;
+                case ".coloredsmokes": OnColoredSmokesConsoleCommand(player, null); return true;
                 case ".botreactiontime": HandleBotReactionTimeCommand(player, arg); return true;
                 case ".botrespawn": HandleBotRespawnCommand(player, arg); return true;
                 case ".botlifereg": HandleBotLifeRegCommand(player, arg); return true;
@@ -51,6 +80,8 @@ namespace MatchZy
                 case ".startround": OnStartRoundCommand(player, null); return true;
                 case ".rec": HandleRecCommand(player, arg); return true;
                 case ".replay": HandleReplayCommand(player, arg); return true;
+                case ".record": HandleRecCommand(player, arg); return true;
+                case ".play" when isPractice: HandleReplayCommand(player, arg); return true;
                 case ".saverec": HandleSaveRecCommand(player, arg); return true;
                 case ".loadrec": HandleLoadRecCommand(player, arg); return true;
                 case ".listrec": OnListRecConsoleCommand(player, null); return true;

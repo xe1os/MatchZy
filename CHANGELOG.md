@@ -2,6 +2,30 @@
 
 Based on [MatchZy](https://github.com/shobhit-pathak/MatchZy) by Shobhit Pathak, adapted for CS2 game-server hosting: remote log HTTP API, G5API compatibility, auto changelevel, advanced stats (HLTV 2.0 rating / KAST / clutch / opening duels), a coach system, a pause overhaul, and in-game admin and match-setup menus.
 
+# 1.0.10
+
+#### October 17, 2026
+
+- `live_1v1.cfg` now uses the wingman format: 16 rounds (MR8, first to 9), $8000 max money, 1:30 rounds, 40 second bomb timer, overtime MR2 with $8000. Existing servers keep their current `live_1v1.cfg`; delete it to get the new defaults, or set the values in `live_1v1_override.cfg`.
+- New admin commands `.1v1`, `.wingman` (`.2v2`) and `.5v5` (`.competitive`), also as `css_1v1`, `css_wingman`, `css_5v5`: switch the server's game mode and reload the map, or change to the map given (`.wingman de_inferno`). `.1v1` runs in the wingman game mode and goes live with `live_1v1.cfg`. Needs `@css/map`, only before a match has started.
+- In a pug, `matchzy_minimum_ready_required` and `matchzy_ready_per_team` now follow the game mode: at most 2 ready players for 1v1, 4 for wingman and 6 for rush (1, 2 and 3 per team). A lower value set by the admin still applies, and 5v5 is unchanged.
+- Round backups work again on the CS2 update of October 15, 2026. CS2 now rejects a round backup path that is absolute ("Rejecting round backup file path"), so no round backup files were written and every restore failed with nothing to load. MatchZy now sets a plain file name and finds the files in `csgo/` or `csgo/addons/metamod/`. The `-allow_round_backup_files` launch option is still required.
+- New practice commands on the bot at your aim: `.kevlar` and `.armor` toggle its kevlar or kevlar + helmet, `.botgun <weapon>` changes its weapon (both kept when the bot respawns), `.dismiss` removes it and `.runboost` puts you on it while it runs with your movement keys. `.dismissall` removes all bots.
+- New practice strategy recorder: `.stratrec` records every living player on your team at once after a 3 second countdown, `.strat [name] [me <role>]` plays it back with one bot per role (all start together), `.strat stop` ends it. `.savestrat`, `.liststrat` and `.delstrat` keep strategies per map in `strats/<map>.json`.
+- Strategies can be built one slot at a time: `.createstrat <name>`, then `.stratslot <name> <1-5>` records that slot while bots play the slots already recorded. `.playgroup <name>` plays a strategy, `.strats` opens a menu for it all.
+- `.rec` (new alias `.record`) freezes you for a 3 second countdown before recording. In practice `.play` replays your recording (outside practice it is still `.uncoach`).
+- New practice command `.stoprecord`: stops your `.rec` or `.stratrec` recording. A double right click or Shift + E while recording does the same.
+- `.shownades` markers now include a glowing grenade model (in the lineup's color) that shows through walls, so saved lineups can be found across the map. `.shownades <filter>` shows only `smoke`, `flash`, `he`, `molly`, `decoy`, `mine`, `global` or lineups whose name or description contains the text; `.shownades all` clears it.
+- New practice command `.expire`: smokes and molotovs do not run out until you type it again.
+- New practice command `.coloredsmokes`: turns colored smokes on or off without editing `matchzy_smoke_color_enabled`.
+- New practice command `.xray`: every player and bot glows through walls.
+- New alias `.observeme` (`css_observeme`) for `.fas`.
+- `.dryrun` takes an optional freeze time from 0 to 60 seconds (`.dryrun 15`); the default stays 6. In a dryrun `.rr` (and `!rr`) restarts the round, `.rr 15` restarts it with a 15 second freeze time.
+- New alias `.repair` (`css_repair`) for `.nobreak` / `.breakrestore`.
+- A coach's scoreboard line stays at 0 for the whole match: it is cleared when a player becomes coach, after their end-of-freezetime death, after round MVPs and at round end and start.
+- A coach is moved to its team's side after halftime on every map. Before, this only happened on maps with a coach viewing-spawn file.
+- 1v1 matches (`"game_mode": "1v1"`) now run in the wingman game mode (`game_mode 2`) instead of competitive.
+
 # 1.0.9
 
 #### October 16, 2026
