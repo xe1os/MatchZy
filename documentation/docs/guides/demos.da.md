@@ -15,7 +15,7 @@ Demo-optagelse i CS2 kan fejle uden varsel på flere måder (et `mp_restartgame`
 - Filen tjekkes for at **vokse** på disken, ikke bare for at findes, og den overvåges hele banen. En optagelse, der går i stå, startes igen i en ny fil (op til tre forsøg).
 - En genstartet optagelse overskriver aldrig en tidligere fil: den får `_part2`, `_part3`, ..., og alle dele af banen uploades.
 - `tv_record_immediate` bruges, så en demo overlever et servercrash.
-- `tv_enable_dynamic 0` sættes, så CSTV-botten ikke fjernes, mens ingen ser med.
+- Mangler CSTV-botten, når optagelsen skal starte (fx kicket af en ændring i `bot_quota`), genstarter MatchZy GOTV med `tv_enable 0` / `tv_enable 1`. Det virker kun med `tv_enable_dynamic 1`, som får en ændring af `tv_enable` til at virke med det samme i stedet for først på næste bane. Tilføj `+tv_enable_dynamic 1` til startparametrene.
 - Practice-bots tager aldrig CSTV-pladsen.
 - "CSTV optager kampen." vises først i chatten, når filen findes. Fejler optagelsen, står det i chatten.
 - Når banen slutter, skriver chatten, at optagelsen er afsluttet, med demoens filnavn, og om den bliver uploadet. Det står der også, når optagelsen stopper før tid (`.endmatch`, en reset eller et mapskift).

@@ -28,11 +28,19 @@ hide:
 
     [:octicons-arrow-right-24: Kør en kamp](guides/match-setup.md)
 
+-   :material-account-group:{ .lg .middle } **5v5, wingman, rush og 1v1**
+
+    ---
+
+    Alle holdstørrelser med én kommando (`.5v5`, `.wingman`, `.1v1`) eller én nøgle i match configen. Holdstørrelse, ready-antal og live-cfg følger spiltypen.
+
+    [:octicons-arrow-right-24: Spiltyper](guides/game-modes.md)
+
 -   :material-crosshairs-gps:{ .lg .middle } **Seriøs practice mode**
 
     ---
 
-    Granathistorik og rethrow, et granatbibliotek med markører på banen, rethrows for hele holdet, flyvebaner, navngivne bot-pladser og dryruns.
+    Granathistorik og rethrow, et granatbibliotek med markører på banen, bots der skyder igen, optagelse af ruter, afspilning af hele holdets strategier og dryruns.
 
     [:octicons-arrow-right-24: Practice mode](guides/practice.md)
 
@@ -66,7 +74,7 @@ hide:
 
     Pålidelig demo-optagelse og S3-upload, gendannelse af runder efter et crash, auto-pause, sikre config-opdateringer og sameksistens med CS2-SimpleAdmin.
 
-    [:octicons-arrow-right-24: Opdatering](getting-started/updating.md)
+    [:octicons-arrow-right-24: Installation](getting-started/installation.md) · [Fejlfinding](getting-started/troubleshooting.md)
 
 </div>
 

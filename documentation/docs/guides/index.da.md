@@ -6,7 +6,7 @@ Opgavefokuserede gennemgange. Alle kommandoer og indstillinger står under [Refe
 
 -   :material-gamepad-variant: **[Spiltyper](game-modes.md)**
 
-    Match, scrim, hill, practice, dryrun og sleep, og hvordan serveren vælger en ved opstart.
+    Match, scrim, hill, practice, dryrun og sleep; 5v5, wingman, rush og 1v1; og hvordan serveren vælger en ved opstart.
 
 -   :material-trophy: **[Kør en kamp](match-setup.md)**
 
@@ -26,7 +26,7 @@ Opgavefokuserede gennemgange. Alle kommandoer og indstillinger står under [Refe
 
 -   :material-crosshairs-gps: **[Practice mode](practice.md)**
 
-    Spawns, bots, granathistorik, lineups og granatbiblioteket.
+    Spawns, bots, granathistorik, lineups, granatbiblioteket, optagelse af ruter og holdstrategier.
 
 -   :material-menu: **[Admin-menuer](menus.md)**
 

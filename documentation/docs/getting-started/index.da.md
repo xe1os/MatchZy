@@ -28,4 +28,12 @@ MatchZy er et [CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSh
 
     [:octicons-arrow-right-24: Gamedata](gamedata.md)
 
+-   :material-lifebuoy:{ .lg .middle } **Fejlfinding**
+
+    ---
+
+    Pluginet loader ikke, menuer mangler, restores fejler, ingen demo: årsager og løsninger.
+
+    [:octicons-arrow-right-24: Fejlfinding](troubleshooting.md)
+
 </div>

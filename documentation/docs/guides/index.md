@@ -6,7 +6,7 @@ Task-focused walkthroughs. For every command and setting, see the [Reference](..
 
 -   :material-gamepad-variant: **[Game modes](game-modes.md)**
 
-    Match, scrim, hill, practice, dryrun and sleep, and how the server picks one on startup.
+    Match, scrim, hill, practice, dryrun and sleep; 5v5, wingman, rush and 1v1; and how the server picks one on startup.
 
 -   :material-trophy: **[Running a match](match-setup.md)**
 
@@ -26,7 +26,7 @@ Task-focused walkthroughs. For every command and setting, see the [Reference](..
 
 -   :material-crosshairs-gps: **[Practice mode](practice.md)**
 
-    Spawns, bots, grenade history, lineups and the grenade library.
+    Spawns, bots, grenade history, lineups, the grenade library, path recording and team strategies.
 
 -   :material-menu: **[Admin menus](menus.md)**
 

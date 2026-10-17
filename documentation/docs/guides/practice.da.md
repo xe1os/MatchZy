@@ -41,10 +41,42 @@ Hjælp, mens du lærer:
 - `.showbotpos` viser de gemte spots; `.botjiggle` får bots til at strafe, til peek-træning (`.botjigglerange`, `.botjigglerandom`).
 - `.botspawn <navn>` bygger en pulje af pladser; `.placebot <antal> <navn>` sætter bots på tilfældige pladser fra den, så hver gentagelse får en ny opstilling. `.showbotspawn` viser pladserne (stil dig i en + ++e++ sletter den).
 - `.botshoot` får bots til at skyde igen fra deres plads efter `.botreactiontime` (standard 500 ms). Slå din livsregenerering fra med `.liferegon` (eller `.allliferegon false` for alle), så deres skud tæller. `.botrespawn` og `.botlifereg` styrer, hvad der sker, når du rammer dem.
-- Sigt på en bot: `.kevlar` / `.armor` tager dens armor af eller giver den igen, `.botgun awp` skifter dens våben, `.dismiss` fjerner den, `.runboost` lader dig ride på den, mens den følger dine bevægelser. `.xray` viser alle gennem vægge.
-- `.stratrec` optager hele dit holds execute på én gang (3 sekunders nedtælling, alle starter samtidig); `.strat` afspiller den med én bot pr. rolle, `.strat <navn> me 2` lader dig spille rolle 2 med de andres timing. `.savestrat` gemmer den pr. bane. Alene? `.createstrat <navn>` og så `.stratslot <navn> 1`, `2`, ... optager én rolle ad gangen, mens bots spiller de roller, du allerede har optaget; `.strats` gør det samme fra en menu.
+- Sigt på en bot: `.kevlar` / `.armor` tager dens armor af eller giver den igen, `.botgun awp` skifter dens våben, `.dismiss` fjerner den (`.dismissall` fjerner alle bots), `.runboost` lader dig ride på den, mens den følger dine bevægelsestaster.
 - `.startround` nulstiller gentagelsen: utility ryddet, tilfældige spawns til alle spillere, bots tilbage på deres plads, 5 sekunders frys.
 - Bot-kommandoerne respekterer `-nobots` og tager aldrig CSTV-pladsen, så en practice-session kan ikke stoppe en kørende GOTV.
+
+## Optag og afspil { #record-and-replay }
+
+1. `.rec` (eller `.record`): du fryses under en nedtælling på 3 sekunder, og derefter optages dine bevægelser og granatkast (op til 60 sekunder).
+2. Stop med `.rec` igen, `.stoprecord`, et dobbelt højreklik eller ++shift+e++.
+3. `.play` (eller `.replay t` / `.replay ct loop`): en bot går din rute og kaster de samme granater. `.replay stop` stopper den.
+4. `.showrec` tegner ruten på banen, kun for dig. `.saverec <navn>` gemmer den til banen, `.loadrec <navn>` loader den igen (`.listrec`, `.delrec`).
+
+## Strategier { #strategies }
+
+En strategi er et helt holds execute, afspillet af én bot pr. rolle.
+
+**Med dit hold:**
+
+1. Alle stiller sig på deres startposition.
+2. `.stratrec`: efter en nedtælling på 3 sekunder optages alle levende spillere på dit hold fra samme øjeblik (op til 120 sekunder). `.stratrec` igen eller `.stoprecord` stopper den.
+3. `.strat` afspiller den: én bot pr. rolle, alle starter samtidig. `.strat <navn> me 2` lader dig selv spille rolle 2 med de andres timing.
+4. `.savestrat <navn>` gemmer den til banen (`.liststrat`, `.delstrat`). Gemte strategier ligger i `strats/<map>.json`.
+
+**Alene, én rolle ad gangen:**
+
+1. `.createstrat <navn>` opretter en tom strategi.
+2. `.stratslot <navn> 1` optager rolle 1. Derefter `.stratslot <navn> 2`: botten for rolle 1 spiller samtidig, så du kan time rolle 2 mod den. Gentag op til 5. Optager du en rolle igen, erstattes den.
+3. `.strat <navn>` afspiller hele executen.
+
+`.strats` åbner en menu til det hele: vælg en strategi, start eller stop den, optag, afspil eller ryd en rolle, slet den. `.strat stop` stopper en afspilning og fjerner dens bots.
+
+## Utility-hjælpere { #utility-helpers }
+
+- `.expire`: smokes og molotovs løber ikke ud, før du skriver det igen.
+- `.coloredsmokes`: smokes i kasterens holdfarve, til eller fra.
+- `.xray`: alle spillere og bots lyser gennem vægge (T orange, CT blå), for alle på serveren.
+- `.noflash`, `.god`, `.solid`, `.break` / `.repair`: se [Utility og visning](../reference/commands.md#utility-and-visuals).
 
 ## Positioner og spawns { #positions-and-spawns }
 

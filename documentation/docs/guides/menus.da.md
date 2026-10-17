@@ -30,3 +30,7 @@ Kampen går derefter til veto eller warmup som enhver loadet config. Holdene er 
 ## Granatbiblioteket `.nades` { #nades-grenade-library }
 
 Alle spillere i practice mode. Gennemse lineups på den nuværende bane efter type (All, Smoke, Flash, HE, Molotov, Decoy), og vælg et for at loade det.
+
+## Strategier `.strats` { #strats-strategies }
+
+Alle spillere i practice mode. Viser de gemte strategier på den nuværende bane: start eller stop en afspilning, optag, afspil eller ryd hver rolle, eller slet strategien. Se [Strategier](practice.md#strategies).

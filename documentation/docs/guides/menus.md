@@ -1,6 +1,6 @@
 # Admin menus
 
-The menus need the optional [CS2MenuManager](https://git.miksen.me/mikkel/CS2MenuManager/releases) plugin (1.0.42+). Without it, MatchZy runs normally and the menu commands reply with a notice.
+The menus (`.ma`, `.matchsetup`, `.nades`, `.strats`) need the optional [CS2MenuManager](https://git.miksen.me/mikkel/CS2MenuManager/releases) plugin (1.0.42+). Without it, MatchZy runs normally and the menu commands reply with a notice.
 
 Navigate with ++w++ / ++s++, select with ++e++, go back with the back entry.
 
@@ -30,3 +30,7 @@ The match then goes to veto or warmup like any loaded config. Rosters are not lo
 ## `.nades` grenade library
 
 Any player in practice mode. Browse lineups for the current map by type (All, Smoke, Flash, HE, Molotov, Decoy) and select one to load it.
+
+## `.strats` strategies
+
+Any player in practice mode. Lists the saved strategies of the current map: start or stop a replay, record, replay or clear each slot, or delete the strategy. See [Strategies](practice.md#strategies).

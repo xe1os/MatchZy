@@ -28,11 +28,19 @@ hide:
 
     [:octicons-arrow-right-24: Running a match](guides/match-setup.md)
 
+-   :material-account-group:{ .lg .middle } **5v5, wingman, rush and 1v1**
+
+    ---
+
+    Every team size from one command (`.5v5`, `.wingman`, `.1v1`) or one match config key. Team size, ready count and live cfg follow the mode.
+
+    [:octicons-arrow-right-24: Game modes](guides/game-modes.md)
+
 -   :material-crosshairs-gps:{ .lg .middle } **Serious practice mode**
 
     ---
 
-    Grenade history and rethrow, a grenade library with in-world markers, team-wide rethrows, flight arcs, named bot spots and dryruns.
+    Grenade history and rethrow, a grenade library with in-world markers, bots that shoot back, path recording, whole-team strategy replays and dryruns.
 
     [:octicons-arrow-right-24: Practice mode](guides/practice.md)
 
@@ -66,7 +74,7 @@ hide:
 
     Reliable demo recording and S3 upload, round restores after a crash, auto-pause, safe config updates, and coexistence with CS2-SimpleAdmin.
 
-    [:octicons-arrow-right-24: Updating](getting-started/updating.md)
+    [:octicons-arrow-right-24: Installation](getting-started/installation.md) · [Troubleshooting](getting-started/troubleshooting.md)
 
 </div>
 

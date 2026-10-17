@@ -39,7 +39,8 @@ MatchZy saves a backup at the start of every live round (Valve's backup system p
 | Go back one round | `.restorelast` |
 | Go back to round N | `.restore <n>` |
 | See what is available | `.backups` |
-| Server crashed mid-match | Reconnect, `.backups` lists the newest files on disk with a ready-made restore command, then `!loadbackup <file>` |
+| Pick a round from a list | `.ma` → Match Control → Restore Round (asks for confirmation) |
+| Server crashed mid-match | Reconnect and use `.ma` → Restore Round, which then lists the newest backups on disk. Or `.backups` lists the newest files on disk with a ready-made restore command, then `!loadbackup <file>` |
 
 ### After a restore
 

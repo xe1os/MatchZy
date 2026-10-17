@@ -6,7 +6,7 @@
 |---|---|---|
 | CS2 dedicated server | Yes | Linux or Windows. |
 | [CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp) | Yes | Stock CounterStrikeSharp works. The fork is developed against a .NET 10 CounterStrikeSharp build. |
-| [CS2MenuManager](https://git.miksen.me/mikkel/CS2MenuManager/releases) 1.0.42+ | Optional | Only needed for the in-game menus (`.ma`, `.matchsetup`, `.nades`); without it those commands reply with a notice. |
+| [CS2MenuManager](https://git.miksen.me/mikkel/CS2MenuManager/releases) 1.0.42+ | Optional | Only needed for the in-game menus (`.ma`, `.matchsetup`, `.nades`, `.strats`); without it those commands reply with a notice. |
 | MySQL / MariaDB | Optional | SQLite is used by default and needs no setup. |
 
 ## Install from the release zip
@@ -34,6 +34,22 @@ To update later, see [Updating](updating.md).
 
 !!! tip "Admins"
     MatchZy accepts CounterStrikeSharp admin flags (for example `@css/config`, `@css/map`). You can also list SteamID64s in `cfg/MatchZy/admins.json`; every player listed there is a full MatchZy admin. See [Files and folders](../reference/files.md#adminsjson).
+
+## Launch options
+
+Add these to the server's start command (or the launch options field in your panel):
+
+```text
+-dedicated +map de_dust2 +game_type 0 +game_mode 1 -allow_round_backup_files +tv_enable 1 +tv_enable_dynamic 1
+```
+
+| Option | Why |
+|---|---|
+| `-allow_round_backup_files` | **Required for round backups.** Without it CS2 writes no backup files and `.restore`, `.ma` → Restore Round and crash recovery do not work. |
+| `+tv_enable 1` | Turns on GOTV so MatchZy can record demos. Can also go in a cfg. See [Demos](../guides/demos.md). |
+| `+tv_enable_dynamic 1` | Recommended: a `tv_enable` change takes effect right away instead of on the next map, so MatchZy can bring back a kicked CSTV bot mid-map. |
+| `+game_type 0 +game_mode 1` | Competitive. For wingman, rush and 1v1, MatchZy switches the mode itself. See [Game modes](../guides/game-modes.md#team-sizes). |
+| `+host_workshop_map <id>` / `+host_workshop_collection <id>` | Optional: start on a workshop map, or make a collection's maps available to `.map ws:<name>`. |
 
 ## Build from source
 

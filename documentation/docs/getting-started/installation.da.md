@@ -6,7 +6,7 @@
 |---|---|---|
 | Dedikeret CS2-server | Ja | Linux eller Windows. |
 | [CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp) | Ja | Almindelig CounterStrikeSharp virker. Forken udvikles mod et CounterStrikeSharp-build til .NET 10. |
-| [CS2MenuManager](https://git.miksen.me/mikkel/CS2MenuManager/releases) 1.0.42+ | Valgfri | Kun nødvendig for menuerne i spillet (`.ma`, `.matchsetup`, `.nades`). Uden den svarer de kommandoer med en besked. |
+| [CS2MenuManager](https://git.miksen.me/mikkel/CS2MenuManager/releases) 1.0.42+ | Valgfri | Kun nødvendig for menuerne i spillet (`.ma`, `.matchsetup`, `.nades`, `.strats`). Uden den svarer de kommandoer med en besked. |
 | MySQL / MariaDB | Valgfri | SQLite bruges som standard og kræver ingen opsætning. |
 
 ## Installer fra release-zippen
@@ -34,6 +34,22 @@ Senere opdateringer: se [Opdatering](updating.md).
 
 !!! tip "Admins"
     MatchZy accepterer CounterStrikeSharps admin-flag (fx `@css/config`, `@css/map`). Du kan også skrive SteamID64'er i `cfg/MatchZy/admins.json`; alle spillere på den liste er fulde MatchZy-admins. Se [Filer og mapper](../reference/files.md#adminsjson).
+
+## Startparametre { #launch-options }
+
+Tilføj dem til serverens startkommando (eller feltet til startparametre i dit panel):
+
+```text
+-dedicated +map de_dust2 +game_type 0 +game_mode 1 -allow_round_backup_files +tv_enable 1 +tv_enable_dynamic 1
+```
+
+| Parameter | Hvorfor |
+|---|---|
+| `-allow_round_backup_files` | **Påkrævet for round-backups.** Uden den skriver CS2 ingen backup-filer, og `.restore`, `.ma` → Restore Round og gendannelse efter et crash virker ikke. |
+| `+tv_enable 1` | Slår GOTV til, så MatchZy kan optage demoer. Kan også stå i en cfg. Se [Demoer](../guides/demos.md). |
+| `+tv_enable_dynamic 1` | Anbefalet: en ændring af `tv_enable` virker med det samme i stedet for først på næste bane, så MatchZy kan hente en kicket CSTV-bot tilbage midt på banen. |
+| `+game_type 0 +game_mode 1` | Competitive. Til wingman, rush og 1v1 skifter MatchZy selv spiltype. Se [Spiltyper](../guides/game-modes.md#team-sizes). |
+| `+host_workshop_map <id>` / `+host_workshop_collection <id>` | Valgfrit: start på en workshop-bane, eller gør en samlings baner tilgængelige for `.map ws:<navn>`. |
 
 ## Byg fra kildekoden
 

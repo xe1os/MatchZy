@@ -50,7 +50,7 @@ namespace MatchZy
         private const int DemoStartMaxAttempts = 3;
 
         // Mid-match recording watchdog: the start-time growth check only proves the demo was alive
-        // during its first seconds. GOTV can stall later (tv_enable_dynamic spinning the bot down),
+        // during its first seconds. GOTV can stall later (for example the CSTV bot kicked by a bot_quota change),
         // so a repeating timer keeps sampling the file size for the whole match and restarts the
         // recording if it stops growing.
         private CounterStrikeSharp.API.Modules.Timers.Timer? demoWatchdogTimer;

@@ -39,7 +39,8 @@ MatchZy gemmer en backup ved starten af hver live-runde (Valves backup-system pl
 | Gå én runde tilbage | `.restorelast` |
 | Gå tilbage til runde N | `.restore <n>` |
 | Se, hvad der findes | `.backups` |
-| Serveren crashede midt i kampen | Connect igen; `.backups` viser de nyeste filer på disken med en færdig gendannelseskommando, og så `!loadbackup <fil>` |
+| Vælg en runde fra en liste | `.ma` → Match Control → Restore Round (beder om bekræftelse) |
+| Serveren crashede midt i kampen | Connect igen, og brug `.ma` → Restore Round, som så viser de nyeste backups på disken. Eller `.backups` viser de nyeste filer på disken med en færdig gendannelseskommando, og så `!loadbackup <fil>` |
 
 ### Efter en gendannelse { #after-a-restore }
 

@@ -84,6 +84,7 @@ plugins:
             Getting started: Kom i gang
             Installation: Installation
             Updating: Opdatering
+            Troubleshooting: Fejlfinding
             Guides: Guides
             Game modes: Spiltyper
             Running a match: Kør en kamp
@@ -153,6 +154,7 @@ nav:
       - Installation: getting-started/installation.md
       - Updating: getting-started/updating.md
       - Gamedata: getting-started/gamedata.md
+      - Troubleshooting: getting-started/troubleshooting.md
   - Guides:
       - guides/index.md
       - Game modes: guides/game-modes.md

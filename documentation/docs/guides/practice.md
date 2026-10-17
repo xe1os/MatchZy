@@ -41,10 +41,42 @@ Helpers while learning:
 - `.showbotpos` shows the saved spots; `.botjiggle` makes bots strafe for peek practice (`.botjigglerange`, `.botjigglerandom`).
 - `.botspawn <name>` builds a pool of spots; `.placebot <number> <name>` puts bots on random spots from it, so every rep has a new setup. `.showbotspawn` shows the spots (stand in one + ++e++ deletes it).
 - `.botshoot` makes bots fight back from their spot after `.botreactiontime` (default 500 ms). Turn off your health regeneration with `.liferegon` (or `.allliferegon false` for everyone) so their hits count. `.botrespawn` and `.botlifereg` control what happens when you hit them.
-- Aim at a bot: `.kevlar` / `.armor` take its armor off or put it back, `.botgun awp` changes its weapon, `.dismiss` removes it, `.runboost` lets you ride it while it copies your movement. `.xray` shows everyone through walls.
-- `.stratrec` records your whole team's execute at once (3 second countdown, everyone starts together); `.strat` plays it back with one bot per role, `.strat <name> me 2` lets you play role 2 against the timing of the others. `.savestrat` keeps it per map. Alone? `.createstrat <name>` and then `.stratslot <name> 1`, `2`, ... records one role at a time while bots play the roles you already recorded; `.strats` does the same from a menu.
+- Aim at a bot: `.kevlar` / `.armor` take its armor off or put it back, `.botgun awp` changes its weapon, `.dismiss` removes it (`.dismissall` removes every bot), `.runboost` lets you ride it while it copies your movement keys.
 - `.startround` resets the rep: utility cleared, random spawns for every player, bots back on their spots, 5 second freeze.
 - Bot commands respect `-nobots` and never take the CSTV slot, so a practice session cannot kill a running GOTV.
+
+## Record and replay
+
+1. `.rec` (or `.record`): you are frozen for a 3 second countdown, then your movement and grenade throws are recorded (up to 60 seconds).
+2. Stop with `.rec` again, `.stoprecord`, a double right click or ++shift+e++.
+3. `.play` (or `.replay t` / `.replay ct loop`): a bot walks your path and throws the same grenades. `.replay stop` ends it.
+4. `.showrec` draws the path on the map, only for you. `.saverec <name>` keeps it for this map, `.loadrec <name>` loads it again (`.listrec`, `.delrec`).
+
+## Strategies
+
+A strategy is a whole team's execute, played back by one bot per role.
+
+**With your team:**
+
+1. Everyone takes their start position.
+2. `.stratrec`: after a 3 second countdown every living player on your team is recorded from the same moment (up to 120 seconds). `.stratrec` again or `.stoprecord` stops it.
+3. `.strat` plays it back: one bot per role, all start together. `.strat <name> me 2` lets you play role 2 yourself against the timing of the others.
+4. `.savestrat <name>` keeps it for this map (`.liststrat`, `.delstrat`). Saved strategies are in `strats/<map>.json`.
+
+**Alone, one role at a time:**
+
+1. `.createstrat <name>` creates an empty strategy.
+2. `.stratslot <name> 1` records role 1. Then `.stratslot <name> 2`: the bot for role 1 plays at the same time, so you time role 2 against it. Repeat up to 5. Recording a slot again replaces it.
+3. `.strat <name>` plays the full execute.
+
+`.strats` opens a menu for all of this: pick a strategy, start or stop it, record, replay or clear a slot, delete it. `.strat stop` ends a replay and removes its bots.
+
+## Utility helpers
+
+- `.expire`: smokes and molotovs do not run out until you type it again.
+- `.coloredsmokes`: smokes in the thrower's teammate color, on or off.
+- `.xray`: every player and bot glows through walls (T orange, CT blue), for everyone on the server.
+- `.noflash`, `.god`, `.solid`, `.break` / `.repair`: see [Utility and visuals](../reference/commands.md#utility-and-visuals).
 
 ## Positions and spawns
 
