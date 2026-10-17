@@ -20,7 +20,9 @@ MikZy is a CounterStrikeSharp plugin for running CS2 matches, scrims, pugs and p
 - **Coaches:** per-team coach lists in the match config, invisible coach slots and hand-tuned viewing spots per map.
 - **Pauses:** tactical and technical pauses with per-team budgets, overtime timeouts and automatic pausing when a player disconnects.
 - **In-game menus:** `.ma` admin menu and a `.matchsetup` wizard that builds a match without writing JSON.
-- **Practice:** grenade history with rethrow, saved and shared lineups, bots, spawns, timers and fast forward.
+- **Game modes:** competitive, wingman, rush (3v3) and 1v1, from the match config (`"game_mode"`), the `.matchsetup` wizard or `.5v5` / `.wingman` / `.1v1`. Team size, ready count and live cfg follow the mode.
+- **Practice:** grenade history with rethrow, saved and shared lineups shown on the map (`.shownades`), bots that shoot back, bot loadouts, path recording with bot replay, a team strategy recorder (`.stratrec`), `.xray`, spawns, timers and fast forward.
+- **Server hosting:** round backups with a restore picker in `.ma`, CSTV demo checks, workshop maps, and optional shutdown when a series ends or the server is empty.
 - **Players vs bots:** a match config can put a bot team against an open team of humans.
 
 ## Install
@@ -49,7 +51,7 @@ Details: [Updating](https://matchzy.miksen.me/getting-started/updating/)
 |---|---|---|
 | CS2 dedicated server | Yes | Linux or Windows. |
 | CounterStrikeSharp | Yes | Stock CounterStrikeSharp works. Developed against a .NET 10 build. |
-| CS2MenuManager 1.0.42+ | No | Only for `.ma`, `.matchsetup` and `.nades`. |
+| CS2MenuManager 1.0.42+ | No | Only for `.ma`, `.matchsetup`, `.nades` and `.strats`. |
 | MySQL / MariaDB | No | SQLite is used by default. |
 
 ## Documentation
@@ -60,6 +62,7 @@ Details: [Updating](https://matchzy.miksen.me/getting-started/updating/)
 - [Events](https://matchzy.miksen.me/reference/events/)
 - [Coaching](https://matchzy.miksen.me/guides/coaching/)
 - [Practice mode](https://matchzy.miksen.me/guides/practice/)
+- [Game modes](https://matchzy.miksen.me/guides/game-modes/)
 - [What's new](https://matchzy.miksen.me/whats-new/) and the [changelog](CHANGELOG.md)
 
 ## Build from source
@@ -71,6 +74,12 @@ dotnet build -c Release
 ```
 
 The output is `bin/Release/net10.0/MatchZy.dll` with its dependencies. The project compiles against a local CounterStrikeSharp API DLL; point it at yours with `-p:CssApiDir=/path/to/CounterStrikeSharp.API/bin/Release/net10.0`, and build against the same CounterStrikeSharp version the server runs.
+
+There is no test suite: the plugin only runs inside a CS2 dedicated server, so test changes on a server before opening a pull request.
+
+## Reporting bugs
+
+Open an [issue](https://github.com/mrc4tt/MatchZy/issues/new) with the output of `css_matchzy_version`, your CounterStrikeSharp version and the relevant server console lines. Remove tokens and passwords from logs first.
 
 ## Credits
 

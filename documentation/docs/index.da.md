@@ -14,7 +14,7 @@ hide:
 [Kom i gang](getting-started/installation.md){ .md-button }
 [Kommandoer](reference/commands.md){ .md-button }
 
-<small>[Download](https://github.com/mrc4tt/MatchZy/releases/latest) · [Changelog](https://github.com/mrc4tt/MatchZy/blob/@@MATCHZY_VERSION@@/CHANGELOG.md) · [Alle releases](https://github.com/mrc4tt/MatchZy/releases) · [Rapportér en fejl](https://github.com/mrc4tt/MatchZy/issues/new/choose)</small>
+<small>[Download](https://github.com/mrc4tt/MatchZy/releases/latest) · [Changelog](https://github.com/mrc4tt/MatchZy/blob/@@MATCHZY_VERSION@@/CHANGELOG.md) · [Alle releases](https://github.com/mrc4tt/MatchZy/releases) · [Rapportér en fejl](https://github.com/mrc4tt/MatchZy/issues/new)</small>
 
 </div>
 
