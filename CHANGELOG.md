@@ -2,6 +2,13 @@
 
 Based on [MatchZy](https://github.com/shobhit-pathak/MatchZy) by Shobhit Pathak, adapted for CS2 game-server hosting: remote log HTTP API, G5API compatibility, auto changelevel, advanced stats (HLTV 2.0 rating / KAST / clutch / opening duels), a coach system, a pause overhaul, and in-game admin and match-setup menus.
 
+# 1.0.11
+
+#### October 17, 2026
+
+- A match config with `game_mode` `rush`, `1v1` or `wingman` now always goes live with that mode's cfg (`live_rush.cfg`, `live_1v1.cfg`, `live_wingman.cfg`). The cfg was picked from the server's current `game_mode`, so a match whose game mode had not been applied yet went live with `live.cfg`.
+- A match config with `"wingman": true` and `"players_per_team": 1` and no `game_mode` is played as 1v1 (`live_1v1.cfg`) instead of wingman.
+
 # 1.0.10
 
 #### October 17, 2026

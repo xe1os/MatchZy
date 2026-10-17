@@ -77,7 +77,7 @@ Prefer an in-game flow? Admins can build the same config with the [`.matchsetup`
 | `spectators` | object | `{}` | `{ "players": { "<steamid64>": "<name>" } }`. |
 | `clinch_series` | bool | `true` | End the series once a team has won the majority of maps. |
 | `game_mode` | string | `competitive` | `competitive` (`live.cfg`), `wingman` (`live_wingman.cfg`), `rush` (`game_mode 6`, `live_rush.cfg`) or `1v1` (wingman game mode, `live_1v1.cfg`). The server switches `game_mode` before the map loads. If omitted, a maplist with only rush maps (`rush_001` and other `rush_` maps, `aim_rush`) plays as rush. |
-| `wingman` | bool | `false` | Same as `"game_mode": "wingman"`. `game_mode` wins when both are set. |
+| `wingman` | bool | `false` | Same as `"game_mode": "wingman"`. `game_mode` wins when both are set. With `"players_per_team": 1` and no `game_mode`, the match is played as 1v1. |
 | `cvars` | object | - | Cvars applied when the match loads and before each map goes live, e.g. `{ "mp_overtime_enable": "1" }`. See below. |
 
 !!! note "`cvars`"

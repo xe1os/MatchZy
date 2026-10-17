@@ -11,3 +11,4 @@ documentation/site/
 # Local backup copies
 *.bak
 *.bak.*
+tools/ship.sh

@@ -1024,6 +1024,12 @@ namespace MatchZy
                 // Rush maps only play in the rush game mode.
                 matchConfig.GameMode = "rush";
             }
+            else if (matchConfig.Wingman && jsonDataObject["players_per_team"] != null && matchConfig.PlayersPerTeam == 1)
+            {
+                // A Get5-style 1v1 config: "wingman": true with one player per team and no game_mode.
+                // Without this it played with live_wingman.cfg instead of live_1v1.cfg.
+                matchConfig.GameMode = "1v1";
+            }
             matchConfig.Wingman = MatchGameMode() == "wingman";
 
             if (jsonDataObject["players_per_team"] == null)

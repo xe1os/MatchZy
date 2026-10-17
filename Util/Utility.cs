@@ -4810,6 +4810,19 @@ namespace MatchZy
         {
             int gameMode = GetGameMode();
             bool modeFromConfig = !string.IsNullOrEmpty(matchConfig.GameMode) || matchConfig.Wingman;
+            // A loaded match config names its mode: use its cfg whatever game_mode the server reports
+            // at this moment. Going by the convar alone, a rush or 1v1 match whose game_mode had not
+            // (yet) been applied by the map reload went live with live.cfg / live_wingman.cfg.
+            if (modeFromConfig)
+            {
+                return MatchGameMode() switch
+                {
+                    "1v1" => live1v1CfgPath,
+                    "rush" => liveRushCfgPath,
+                    "wingman" => liveWingmanCfgPath,
+                    _ => liveCfgPath,
+                };
+            }
             if (MatchGameMode() == "1v1" || (!modeFromConfig && pugOneVsOneMode && gameMode == GameModeWingman))
                 return live1v1CfgPath;
             if (gameMode == GameModeRush || (!modeFromConfig && gameMode != GameModeWingman && IsRushMap(Server.MapName)))
