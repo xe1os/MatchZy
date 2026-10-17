@@ -77,13 +77,42 @@ jobs:
       - name: Write release notes
         run: |
           # Short body on purpose: the full changelog block made every release long in the release
-          # list, pushing the zip far down. CHANGELOG.md stays the only place the changes are
-          # written; the body links to it at this tag.
+          # list, pushing the zip far down. The body carries this version's short whats-new.md
+          # section (already written as a summary) and links to the full CHANGELOG.md at this tag.
           VER="${{ env.MATCHZY_VERSION }}"
           CHANGELOG_URL="${{ github.server_url }}/${{ github.repository }}/blob/$VER/CHANGELOG.md"
+          # This version's section of whats-new.md, converted from MkDocs markup to GitHub markdown:
+          # the "Action needed" admonition becomes a GitHub alert and ++key++ becomes plain text.
+          # Empty when the section is missing; the release then only gets the links.
+          python3 - "$VER" > whats-new-section.md <<'PY'
+          import re, sys
+          ver = sys.argv[1]
+          text = open("documentation/docs/whats-new.md", encoding="utf-8").read()
+          m = re.search(r"^## " + re.escape(ver) + r" <small>.*?</small>\n(.*?)(?=^## |\Z)", text, re.S | re.M)
+          if not m:
+              sys.exit(0)
+          out = []
+          alert = False
+          for line in m.group(1).strip().splitlines():
+              if line.startswith('!!! warning "Action needed"'):
+                  out += ["> [!WARNING]", "> **Action needed**"]
+                  alert = True
+              elif alert and line.startswith("    "):
+                  out.append("> " + line[4:])
+              else:
+                  alert = False
+                  out.append(line)
+          body = "\n".join(out)
+          body = re.sub(r"\+\+([^+\s][^\s]*?)\+\+", lambda k: k.group(1).replace("+", " + ").title(), body)
+          print(body)
+          PY
           {
             echo "Download \`MatchZy-$VER.zip\` below and extract it into \`game/csgo/\`. Updating never touches your \`cfg/\` files."
             echo
+            if [ -s whats-new-section.md ]; then
+              cat whats-new-section.md
+              echo
+            fi
             echo "What's new: https://matchzy.miksen.me/whats-new/ · Full changelog: [CHANGELOG.md]($CHANGELOG_URL)"
           } > notes.md
 
