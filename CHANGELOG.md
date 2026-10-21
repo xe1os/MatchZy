@@ -2,6 +2,12 @@
 
 Based on [MatchZy](https://github.com/shobhit-pathak/MatchZy) by Shobhit Pathak, adapted for CS2 game-server hosting: remote log HTTP API, G5API compatibility, auto changelevel, advanced stats (HLTV 2.0 rating / KAST / clutch / opening duels), a coach system, a pause overhaul, and in-game admin and match-setup menus.
 
+# 1.0.12
+
+#### October 21, 2026
+
+- Fixed missing or shared spawn points after an observer joined before the players. With a loaded match (`get5_loadmatch_url`, `matchzy_loadmatch`), someone not on a team roster could use the team menu's auto-select (or wait for the menu to time out) and land on a team, take a spawn, and only then be moved to Spectator. The spawn stayed blocked by their body, so at round start a player spawned on top of another or not at all. Auto-select is now refused for anyone who is not on a team roster, and anyone who goes from a team to Spectator before the match is live has their body moved off the spawn. This also covers players who pick Spectator in a `.match` or `.scrim` warmup.
+
 # 1.0.11
 
 #### October 17, 2026

@@ -5530,6 +5530,36 @@ namespace MatchZy
             }
         }
 
+        // Below any map's playable space, inside the engine's coordinate limit (16384).
+        private const float SpectatorBodyParkZ = -15000f;
+
+        /// <summary>
+        /// Moves the dead player pawn of someone who went to Spectator off the spawn point it
+        /// occupied, so that spawn is free again at the next round start. Only a dead pawn of a
+        /// controller that is still on Spectator is touched.
+        /// </summary>
+        private void ParkSpectatorBody(CCSPlayerController? player, int? userId)
+        {
+            if (player == null || !player.IsValid || player.UserId != userId || player.Connected != PlayerConnectedState.Connected)
+                return;
+            if (player.TeamNum != (byte)CsTeam.Spectator)
+                return;
+            var pawn = player.PlayerPawn.Value;
+            if (pawn == null || !pawn.IsValid || pawn.LifeState == (byte)LifeState_t.LIFE_ALIVE)
+                return;
+            var origin = pawn.AbsOrigin;
+            if (origin == null)
+                return;
+            try
+            {
+                pawn.Teleport(new Vector(origin.X, origin.Y, SpectatorBodyParkZ), null, new Vector(0, 0, 0));
+            }
+            catch (Exception ex)
+            {
+                Log($"[ParkSpectatorBody] Teleport failed: {ex.Message}");
+            }
+        }
+
         public void SetPlayerInvisible(CCSPlayerController player, bool setWeaponsInvisible)
         {
             if (!IsPlayerValid(player))

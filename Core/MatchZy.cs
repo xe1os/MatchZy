@@ -16,7 +16,7 @@ namespace MatchZy
     public partial class MatchZy : BasePlugin
     {
         public override string ModuleName => "MatchZy";
-        public override string ModuleVersion => "1.0.11";
+        public override string ModuleVersion => "1.0.12";
         public override string ModuleAuthor => "Miksen/mrc4tt (based on MatchZy by WD-)";
         public override string ModuleDescription => "A plugin for running and managing CS2 practice/pugs/scrims/matches!";
         public string chatPrefix = $"{ChatColors.Green}[MatchZy]{ChatColors.Default}";
@@ -942,6 +942,33 @@ namespace MatchZy
                 HookMode.Post
             );
 
+            // Someone who spawned on T/CT and then went to Spectator (an observer auto-assigned by the
+            // team menu timeout before the roster lock moved them, or anyone picking Spectator in a
+            // .match / .scrim warmup) leaves their dead player pawn on the spawn point it took: the
+            // controller observes through a separate observer pawn. The body kept that spawn
+            // occupied, so at the next round start a player spawned on someone else or not at all.
+            // Park the body away from the spawns. Not in practice, and not while live (a body there
+            // lies where the player died, not on a spawn).
+            RegisterEventHandler<EventPlayerTeam>(
+                (@event, info) =>
+                {
+                    if (isPractice || isMatchLive)
+                        return HookResult.Continue;
+                    if (@event.Team != (int)CsTeam.Spectator)
+                        return HookResult.Continue;
+                    if (@event.Oldteam != (int)CsTeam.Terrorist && @event.Oldteam != (int)CsTeam.CounterTerrorist)
+                        return HookResult.Continue;
+                    CCSPlayerController? player = @event.Userid;
+                    if (player == null || !player.IsValid || player.IsBot || player.IsHLTV)
+                        return HookResult.Continue;
+                    int? userId = player.UserId;
+                    // Off the event: the team change kills the pawn inside it.
+                    AddTimer(0.1f, () => ParkSpectatorBody(player, userId));
+                    return HookResult.Continue;
+                },
+                HookMode.Post
+            );
+
             AddCommandListener(
                 "jointeam",
                 (player, info) =>
@@ -958,8 +985,11 @@ namespace MatchZy
                                 return HookResult.Continue;
                             }
 
-                            // For other teams, restrict to assigned team
-                            if (joiningTeam != playerTeam)
+                            // For other teams, restrict to assigned team. Someone who is not in the
+                            // match (None) only gets Spectator: "jointeam 0" is the menu's
+                            // auto-select and used to match None, so an observer was put on a
+                            // side, took a spawn and was only then moved to Spectator.
+                            if (joiningTeam != playerTeam || (playerTeam == (int)CsTeam.None && !IsMatchCoach(player)))
                             {
                                 return HookResult.Stop;
                             }

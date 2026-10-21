@@ -2,6 +2,10 @@
 
 A short summary of each release. The [full changelog](changelog.md) has the details and background for every change.
 
+## 1.0.12 <small>October 21, 2026</small>
+
+- **Fixed:** An observer or caster who joined before the players no longer takes a player spawn. They were put on a team for a moment, and the spawn they used stayed blocked after they moved to Spectator, so a player spawned on someone else or not at all. Also applies to `.match` and `.scrim` warmups.
+
 ## 1.0.11 <small>October 17, 2026</small>
 
 - **Fixed:** a match config with `game_mode` set to `rush`, `1v1` or `wingman` always goes live with that mode's cfg (`live_rush.cfg`, `live_1v1.cfg`, `live_wingman.cfg`), even when the server's `game_mode` had not changed yet. Before, such matches could go live with `live.cfg`.
@@ -70,12 +74,12 @@ A short summary of each release. The [full changelog](changelog.md) has the deta
 
 - **Fixed:** The automatic coach kill at the end of freeze time no longer gives money to the other team.
 
-## 1.0.7 <small>October 5, 2026</small>
-
-- **Changed:** `matchzy_ready_per_team` in a loaded match waits until each team's registered players are all in; one `.ready` no longer starts the match with players missing. `.forceready` still starts without a missing player.
-- **Changed:** The missing-player hint only says how many are missing; it no longer suggests `.forceready`.
-
 ## Older releases
+
+??? note "1.0.7 - October 5, 2026"
+
+    - **Changed:** `matchzy_ready_per_team` in a loaded match waits until each team's registered players are all in; one `.ready` no longer starts the match with players missing. `.forceready` still starts without a missing player.
+    - **Changed:** The missing-player hint only says how many are missing; it no longer suggests `.forceready`.
 
 ??? note "1.0.6 - October 5, 2026"
 
