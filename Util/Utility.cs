@@ -443,6 +443,9 @@ namespace MatchZy
         private int _rpReady, _rpRequired, _rpTotal, _rpFilled, _rpCtCount, _rpCtReady, _rpTCount, _rpTReady;
         // Loaded match: players each side needs (roster-sized), 0 otherwise.
         private int _rpCtNeed, _rpTNeed;
+        // Ready count shown per side: capped at what the side needs (loaded match), so extra ready
+        // players do not show e.g. "CT 3/1".
+        private int _rpCtShown, _rpTShown;
         private string _rpWaiting = "";
         private uint _readyTickCounter;
         // Bumped every time ComputeReadyData actually recomputes. Everything the panel renders
@@ -527,8 +530,9 @@ namespace MatchZy
                 // (incl. .forceready) counts as complete.
                 _rpCtNeed = ReadyNeededOnSide((int)CsTeam.CounterTerrorist);
                 _rpTNeed = ReadyNeededOnSide((int)CsTeam.Terrorist);
-                _rpReady = (IsTeamReady((int)CsTeam.CounterTerrorist) ? _rpCtNeed : Math.Min(_rpCtReady, _rpCtNeed))
-                    + (IsTeamReady((int)CsTeam.Terrorist) ? _rpTNeed : Math.Min(_rpTReady, _rpTNeed));
+                _rpCtShown = IsTeamReady((int)CsTeam.CounterTerrorist) ? _rpCtNeed : Math.Min(_rpCtReady, _rpCtNeed);
+                _rpTShown = IsTeamReady((int)CsTeam.Terrorist) ? _rpTNeed : Math.Min(_rpTReady, _rpTNeed);
+                _rpReady = _rpCtShown + _rpTShown;
                 _rpRequired = _rpCtNeed + _rpTNeed;
             }
             else
@@ -950,7 +954,9 @@ namespace MatchZy
                     // Loaded match: ready / needed per side; otherwise ready / on the side.
                     int ctOf = _rpCtNeed > 0 ? _rpCtNeed : _rpCtCount;
                     int tOf = _rpTNeed > 0 ? _rpTNeed : _rpTCount;
-                    sb.Append($"<font class='fontSize-sm' color='#9ecbff'>CT {_rpCtReady}/{ctOf}</font><font class='fontSize-sm' color='#ffffff'> &nbsp; </font><font class='fontSize-sm' color='#ffb36b'>T {_rpTReady}/{tOf}</font>");
+                    int ctShown = _rpCtNeed > 0 ? _rpCtShown : _rpCtReady;
+                    int tShown = _rpTNeed > 0 ? _rpTShown : _rpTReady;
+                    sb.Append($"<font class='fontSize-sm' color='#9ecbff'>CT {ctShown}/{ctOf}</font><font class='fontSize-sm' color='#ffffff'> &nbsp; </font><font class='fontSize-sm' color='#ffb36b'>T {tShown}/{tOf}</font>");
 
                     // Self-status (YOU ARE (NOT) READY) is the most important line, so render it
                     // BEFORE the "waiting on" list. CS2's center-HTML panel has a size cap and drops

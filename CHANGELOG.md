@@ -2,6 +2,12 @@
 
 Based on [MatchZy](https://github.com/shobhit-pathak/MatchZy) by Shobhit Pathak, adapted for CS2 game-server hosting: remote log HTTP API, G5API compatibility, auto changelevel, advanced stats (HLTV 2.0 rating / KAST / clutch / opening duels), a coach system, a pause overhaul, and in-game admin and match-setup menus.
 
+# 1.0.15
+
+#### October 23, 2026
+
+- Ready panel in a loaded match: the per-side count no longer goes above what the side needs. With `"min_players_to_ready": 1` and three ready players on CT, the panel showed `CT 3/1`; it now shows `CT 1/1`. A side that is ready through `.forceready` shows as full.
+
 # 1.0.14
 
 #### October 23, 2026

@@ -2,6 +2,10 @@
 
 A short summary of each release. The [full changelog](changelog.md) has the details and background for every change.
 
+## 1.0.15 <small>October 23, 2026</small>
+
+- **Fixed:** The ready panel no longer shows more ready players on a side than it needs (for example `CT 3/1` with `"min_players_to_ready": 1`).
+
 ## 1.0.14 <small>October 23, 2026</small>
 
 !!! warning "Action needed"
@@ -27,20 +31,20 @@ A short summary of each release. The [full changelog](changelog.md) has the deta
 - **Fixed:** a match config with `game_mode` set to `rush`, `1v1` or `wingman` always goes live with that mode's cfg (`live_rush.cfg`, `live_1v1.cfg`, `live_wingman.cfg`), even when the server's `game_mode` had not changed yet. Before, such matches could go live with `live.cfg`.
 - **Changed:** a config with `"wingman": true` and `"players_per_team": 1` and no `game_mode` is played as 1v1.
 
-## 1.0.10 <small>October 17, 2026</small>
-
-!!! warning "Action needed"
-    - Existing servers keep their old `live_1v1.cfg`. Delete `cfg/MatchZy/live_1v1.cfg` (or put your values in `live_1v1_override.cfg`) to get the new 1v1 defaults.
-
-- **New:** `.1v1`, `.wingman` and `.5v5` switch the server's game mode and reload the map (or `.wingman <map>`). 1v1 now runs in the wingman game mode.
-- **New:** `.shownades` lineups glow through walls; `.shownades smoke` (or `flash`, `mine`, a name...) filters them.
-- **New:** Strategy recorder: `.stratrec` records your team's execute, `.strat` plays it back with bots (`me <role>` to play one role yourself). `.createstrat` + `.stratslot` build one alone, slot by slot, and `.strats` is the menu for it. `.record` / `.play` with a 3 second countdown; `.stoprecord`, a double right click or Shift + E stops a recording.
-- **New:** Practice: `.kevlar`, `.armor`, `.botgun`, `.dismiss` and `.runboost` on the bot at your aim, `.dismissall`, `.xray`, `.expire` (smokes and molotovs never run out), `.coloredsmokes`, and `.observeme` for `.fas`.
-- **Changed:** `live_1v1.cfg` uses the wingman format: MR8 (first to 9), $8000 max money, 1:30 rounds, overtime MR2.
-- **Changed:** A pug in 1v1, wingman or rush starts with 2, 4 or 6 ready players without `.readyrequired`.
-- **Fixed:** Round backups and `.restore` work again after the CS2 update of October 15, 2026 (CS2 rejected the backup path MatchZy used). `-allow_round_backup_files` is still required.
-
 ## Older releases
+
+??? note "1.0.10 - October 17, 2026"
+
+    !!! warning "Action needed"
+        - Existing servers keep their old `live_1v1.cfg`. Delete `cfg/MatchZy/live_1v1.cfg` (or put your values in `live_1v1_override.cfg`) to get the new 1v1 defaults.
+
+    - **New:** `.1v1`, `.wingman` and `.5v5` switch the server's game mode and reload the map (or `.wingman <map>`). 1v1 now runs in the wingman game mode.
+    - **New:** `.shownades` lineups glow through walls; `.shownades smoke` (or `flash`, `mine`, a name...) filters them.
+    - **New:** Strategy recorder: `.stratrec` records your team's execute, `.strat` plays it back with bots (`me <role>` to play one role yourself). `.createstrat` + `.stratslot` build one alone, slot by slot, and `.strats` is the menu for it. `.record` / `.play` with a 3 second countdown; `.stoprecord`, a double right click or Shift + E stops a recording.
+    - **New:** Practice: `.kevlar`, `.armor`, `.botgun`, `.dismiss` and `.runboost` on the bot at your aim, `.dismissall`, `.xray`, `.expire` (smokes and molotovs never run out), `.coloredsmokes`, and `.observeme` for `.fas`.
+    - **Changed:** `live_1v1.cfg` uses the wingman format: MR8 (first to 9), $8000 max money, 1:30 rounds, overtime MR2.
+    - **Changed:** A pug in 1v1, wingman or rush starts with 2, 4 or 6 ready players without `.readyrequired`.
+    - **Fixed:** Round backups and `.restore` work again after the CS2 update of October 15, 2026 (CS2 rejected the backup path MatchZy used). `-allow_round_backup_files` is still required.
 
 ??? note "1.0.9 - October 16, 2026"
 
