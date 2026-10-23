@@ -2,6 +2,16 @@
 
 Based on [MatchZy](https://github.com/shobhit-pathak/MatchZy) by Shobhit Pathak, adapted for CS2 game-server hosting: remote log HTTP API, G5API compatibility, auto changelevel, advanced stats (HLTV 2.0 rating / KAST / clutch / opening duels), a coach system, a pause overhaul, and in-game admin and match-setup menus.
 
+# 1.0.13
+
+#### October 23, 2026
+
+- When `live.cfg` or `live_wingman.cfg` is missing on disk and MatchZy falls back to its built-in live settings, the match config's `cvars` are now applied before the game restart. Before, the restart ran first, so settings it reads (such as the number of tactical timeouts from `mp_team_timeout_max`) kept the built-in value.
+- `live_wingman.cfg` and `live_rush.cfg` now set the tactical timeouts: 1 timeout of 60 seconds per team and 1 more in each overtime (`mp_team_timeout_max 1`, `mp_team_timeout_time 60`, `mp_team_timeout_ot_max 1`, `mp_team_timeout_ot_add_each 1`, `mp_team_timeout_ot_add_once 1`). Before, wingman and rush kept the values from whatever mode ran before (for example 4 x 30 seconds after a 5v5 match). Existing servers get these settings without changing their cfg files.
+- `live_wingman.cfg`: overtime has 6 rounds (`mp_overtime_maxrounds 6`, was 4), a team playing short-handed gets no extra money (`cash_team_bonus_shorthanded 0`, was 1000), and team voice is recorded in the CSTV demo (`tv_relayvoice 1`).
+- `dryrun.cfg` and `sleep.cfg`: `cash_team_bonus_shorthanded 0` (was 1000), the same as `live.cfg`.
+- Removed `sv_damage_print_enable` from the built-in settings used when a cfg file is missing. CS2 does not have this convar.
+
 # 1.0.12
 
 #### October 21, 2026

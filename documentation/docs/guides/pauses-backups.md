@@ -13,7 +13,7 @@
 !!! note "Technical pauses"
     Each team gets `matchzy_max_tech_pauses_allowed` per map. With `matchzy_tech_pause_mode 1` (Get5 rules) a tech pause never ends on its own: once it has lasted `matchzy_tech_pause_duration` seconds in freeze time either team can `.unpause`, and the pausing team can cancel it with `.unpause` before freeze time without using it up.
 
-**Overtime**: tactical timeouts (`.tac`) follow the engine settings in live.cfg: 4 per team in regulation (`mp_team_timeout_max`) and one more when overtime starts (`mp_team_timeout_ot_add_once 1`, up to `mp_team_timeout_ot_max 5`). In every overtime period each team may also use `.pause` `matchzy_overtime_pauses_per_team` times (1 by default). Admin pauses are not limited.
+**Overtime**: tactical timeouts (`.tac`) follow the engine settings in live.cfg: 4 per team in regulation (`mp_team_timeout_max`) and one more when overtime starts (`mp_team_timeout_ot_add_once 1`, up to `mp_team_timeout_ot_max 5`). Wingman and rush (`live_wingman.cfg`, `live_rush.cfg`) give 1 timeout of 60 seconds per team and 1 more in each overtime. In every overtime period each team may also use `.pause` `matchzy_overtime_pauses_per_team` times (1 by default). Admin pauses are not limited.
 
 !!! tip "Adjust to your needs"
     These are defaults. Both `config.cfg` and `live.cfg` can be edited to your needs:

@@ -2,6 +2,15 @@
 
 A short summary of each release. The [full changelog](changelog.md) has the details and background for every change.
 
+## 1.0.13 <small>October 23, 2026</small>
+
+!!! warning "Action needed"
+    - Existing servers keep their old `live_wingman.cfg`, `dryrun.cfg` and `sleep.cfg`. Delete them from `cfg/MatchZy/` (or put your values in the matching `_override.cfg`) to get the new overtime, short-handed money and CSTV voice defaults. The new wingman and rush timeouts apply without this.
+
+- **Changed:** Wingman and rush give each team 1 tactical timeout of 60 seconds and 1 more in each overtime. Before, they kept the timeouts of the mode that ran before.
+- **Changed:** Wingman overtime has 6 rounds (was 4), there is no short-handed money bonus, and team voice is recorded in the CSTV demo (`tv_relayvoice 1`).
+- **Fixed:** When `live.cfg` or `live_wingman.cfg` is missing on disk, the match config's `cvars` (for example `mp_team_timeout_max`) are applied before the game restarts, so they count from round 1.
+
 ## 1.0.12 <small>October 21, 2026</small>
 
 - **Fixed:** An observer or caster who joined before the players no longer takes a player spawn. They were put on a team for a moment, and the spawn they used stayed blocked after they moved to Spectator, so a player spawned on someone else or not at all. Also applies to `.match` and `.scrim` warmups.
@@ -70,11 +79,11 @@ A short summary of each release. The [full changelog](changelog.md) has the deta
 - **Fixed:** Round backups on servers where the game folder has another path outside the engine (for example in Docker): CS2 rejected the backup path and wrote no round files.
 - **Fixed:** `score_ct` / `score_t` on the teams of `round_end` and `map_result` were always 0. They now hold the rounds won on each side, and the teams also carry `side` and `starting_side`.
 
-## 1.0.8 <small>October 6, 2026</small>
-
-- **Fixed:** The automatic coach kill at the end of freeze time no longer gives money to the other team.
-
 ## Older releases
+
+??? note "1.0.8 - October 6, 2026"
+
+    - **Fixed:** The automatic coach kill at the end of freeze time no longer gives money to the other team.
 
 ??? note "1.0.7 - October 5, 2026"
 
