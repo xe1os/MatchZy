@@ -122,56 +122,81 @@ namespace MatchZy
                 // Fetch async to avoid blocking game thread
                 Task.Run(async () =>
                 {
-                    try
+                    // One slow or failed fetch (cold CDN edge, DNS/TLS hiccup, a 502 from the panel)
+                    // used to drop the whole match setup: the panel's RCON command had already
+                    // returned, so nothing tried again. Retry timeouts, network errors and
+                    // 5xx/408/429 a few times; each attempt gets its own time limit so the retries
+                    // still finish well within the shared client's timeout.
+                    const int maxAttempts = 3;
+                    for (int attempt = 1; attempt <= maxAttempts; attempt++)
                     {
-                        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-                        if (headerName != "")
+                        try
                         {
-                            request.Headers.TryAddWithoutValidation(headerName, headerValue);
-                        }
-
-                        using var response = await _sharedHttpClient.SendAsync(request);
-
-                        if (response.IsSuccessStatusCode)
-                        {
-                            string jsonData = await response.Content.ReadAsStringAsync();
-                            // Not the body itself: its cvars block can carry tokens (remote log header values).
-                            Log($"[LoadMatchFromURL] Received match config ({jsonData.Length} characters).");
-
-                            // LoadMatchFromJSON uses native APIs - must run on game thread
-                            Server.NextFrame(() =>
+                            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                            if (headerName != "")
                             {
-                                // The issuer may have left during the fetch; reply to the console then.
-                                if (player != null && !player.IsValid)
-                                    player = null;
-                                bool success = LoadMatchFromJSON(jsonData);
-                                if (!success)
-                                {
-                                    ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.mm.matchloadfailed"));
-                                    ResetMatch();
-                                    return;
-                                }
+                                request.Headers.TryAddWithoutValidation(headerName, headerValue);
+                            }
 
-                                loadedConfigFile = url;
-                                isG5ApiMatch = true;
-                                Log($"[LoadMatchFromURL] G5API match detected and marked");
-                            });
-                        }
-                        else
-                        {
+                            using var attemptTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                            using var response = await _sharedHttpClient.SendAsync(request, attemptTimeout.Token);
+
+                            if (response.IsSuccessStatusCode)
+                            {
+                                string jsonData = await response.Content.ReadAsStringAsync(attemptTimeout.Token);
+                                // Not the body itself: its cvars block can carry tokens (remote log header values).
+                                Log($"[LoadMatchFromURL] Received match config ({jsonData.Length} characters).");
+
+                                // LoadMatchFromJSON uses native APIs - must run on game thread
+                                Server.NextFrame(() =>
+                                {
+                                    // The issuer may have left during the fetch; reply to the console then.
+                                    if (player != null && !player.IsValid)
+                                        player = null;
+                                    bool success = LoadMatchFromJSON(jsonData);
+                                    if (!success)
+                                    {
+                                        ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.mm.matchloadfailed"));
+                                        ResetMatch();
+                                        return;
+                                    }
+
+                                    loadedConfigFile = url;
+                                    isG5ApiMatch = true;
+                                    Log($"[LoadMatchFromURL] G5API match detected and marked");
+                                });
+                                return;
+                            }
+
                             var statusCode = response.StatusCode;
+                            int code = (int)statusCode;
+                            bool transient = code >= 500 || code == 408 || code == 429;
+                            if (transient && attempt < maxAttempts)
+                            {
+                                Log($"[LoadMatchFromURL] Attempt {attempt}/{maxAttempts} got HTTP {code}; retrying in {attempt * 2}s.");
+                                await Task.Delay(TimeSpan.FromSeconds(attempt * 2));
+                                continue;
+                            }
+
                             Server.NextFrame(() =>
                             {
                                 if (player != null && !player.IsValid)
                                     player = null;
                                 ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.mm.httprequestfailed", statusCode));
                             });
-                            Log($"[LoadMatchFromURL] HTTP request failed with status code: {response.StatusCode}");
+                            Log($"[LoadMatchFromURL] HTTP request failed with status code: {statusCode}");
+                            return;
                         }
-                    }
-                    catch (Exception ex)
-                    {
-                        Log($"[LoadMatchFromURL - FATAL] Async fetch error: {ex.Message}");
+                        catch (Exception ex) when (attempt < maxAttempts && (ex is HttpRequestException || ex is TaskCanceledException))
+                        {
+                            Log($"[LoadMatchFromURL] Attempt {attempt}/{maxAttempts} failed: {ex.Message}; retrying in {attempt * 2}s.");
+                            await Task.Delay(TimeSpan.FromSeconds(attempt * 2));
+                        }
+                        catch (Exception ex)
+                        {
+                            Log($"[LoadMatchFromURL - FATAL] Async fetch error after {attempt} attempt(s): {ex.Message}");
+                            return;
+                        }
                     }
                 });
             }
