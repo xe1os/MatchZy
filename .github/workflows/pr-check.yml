@@ -76,15 +76,11 @@ jobs:
             echo "::warning file=CHANGELOG.md::code or cfg changed without a CHANGELOG.md line; add one if server owners would notice the change"
           fi
 
-  # The build restores CS2MenuManager and the CounterStrikeSharp API from a private NuGet feed,
-  # which needs repository secrets. GitHub does not give secrets to pull requests from forks, so
-  # this only runs for branches in this repository; a maintainer builds fork PRs before merging.
+  # CS2MenuManager and the CounterStrikeSharp API restore from packages/ in the repo, so the
+  # build needs no secrets and also runs for pull requests from forks.
   build:
     name: Build
-    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    env:
-      NuGetPackageSourceCredentials_forgejo: "Username=${{ secrets.FORGEJO_USER || 'mikkel' }};Password=${{ secrets.RELEASE_TOKEN }}"
     steps:
       - name: Checkout
         uses: actions/checkout@v7

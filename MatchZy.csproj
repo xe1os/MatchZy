@@ -10,9 +10,9 @@
          3.50.2 build (CVE patched, GLIBC_2.14 so it loads on old game containers). The flag
          is on the transitive package version, not the binary we actually deploy. -->
     <NoWarn>$(NoWarn);NU1903</NoWarn>
-    <!-- CounterStrikeSharp API comes from the fork package on the Forgejo feed (see nuget.config):
+    <!-- CounterStrikeSharp API comes from the fork package in packages/ (see nuget.config):
          it carries the 1.0.39x surface + the Trace natives that nuget.org's build (<=1.0.371) lacks.
-         Bump CssApiVersion when a newer fork package is published; override with -p:CssApiVersion=...
+         Bump CssApiVersion when a newer fork package is added to packages/; override with -p:CssApiVersion=...
          HAS_CSS_TRACE is always on now (the fork package has Trace), so the predictor uses real
          world-collision bounces everywhere, CI included. At RUNTIME the Trace touch points are
          additionally gated on MatchZy.HasCssTraceApi (Util/CssApiCompat.cs), so the same DLL also
@@ -26,7 +26,7 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- ExcludeAssets=runtime => not copied to output; the server loads its own CounterStrikeSharp
-         at runtime. Resolves from the Forgejo feed via the nuget.config package-source mapping. -->
+         at runtime. Resolves from packages/ via the nuget.config package-source mapping. -->
     <PackageReference Include="CounterStrikeSharp.API" Version="$(CssApiVersion)">
       <PrivateAssets>none</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>

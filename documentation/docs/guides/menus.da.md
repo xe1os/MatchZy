@@ -1,6 +1,6 @@
 # Admin-menuer
 
-Menuerne kræver det valgfrie plugin [CS2MenuManager](https://git.miksen.me/mikkel/CS2MenuManager/releases) (1.0.42+). Uden det kører MatchZy normalt, og menukommandoerne svarer med en besked.
+Menuerne kræver det valgfrie plugin [CS2MenuManager](https://github.com/mrc4tt/CS2MenuManager/releases) (1.0.42+). Uden det kører MatchZy normalt, og menukommandoerne svarer med en besked.
 
 Naviger med ++w++ / ++s++, vælg med ++e++, og gå tilbage med tilbage-punktet.
 

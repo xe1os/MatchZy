@@ -1,6 +1,6 @@
 # Admin menus
 
-The menus (`.ma`, `.matchsetup`, `.nades`, `.strats`) need the optional [CS2MenuManager](https://git.miksen.me/mikkel/CS2MenuManager/releases) plugin (1.0.42+). Without it, MatchZy runs normally and the menu commands reply with a notice.
+The menus (`.ma`, `.matchsetup`, `.nades`, `.strats`) need the optional [CS2MenuManager](https://github.com/mrc4tt/CS2MenuManager/releases) plugin (1.0.42+). Without it, MatchZy runs normally and the menu commands reply with a notice.
 
 Navigate with ++w++ / ++s++, select with ++e++, go back with the back entry.
 

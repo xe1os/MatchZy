@@ -33,7 +33,7 @@ MikZy is a CounterStrikeSharp plugin for running CS2 matches, scrims, pugs and p
 
 MatchZy writes its config files to `csgo/cfg/MatchZy/` on first load (or to `csgo/cfg/matchzy/` if that folder already exists). Edit `config.cfg` there to tune the server.
 
-*Optional:* install [CS2MenuManager](https://git.miksen.me/mikkel/CS2MenuManager/releases) (1.0.42 or newer) for the in-game menus. Everything else works without it.
+*Optional:* install [CS2MenuManager](https://github.com/mrc4tt/CS2MenuManager/releases) (1.0.42 or newer) for the in-game menus. Everything else works without it.
 
 Full guide: [Installation](https://matchzy.miksen.me/getting-started/installation/)
 

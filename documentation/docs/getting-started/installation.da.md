@@ -6,7 +6,7 @@
 |---|---|---|
 | Dedikeret CS2-server | Ja | Linux eller Windows. |
 | [CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp) | Ja | Almindelig CounterStrikeSharp virker. Forken udvikles mod et CounterStrikeSharp-build til .NET 10. |
-| [CS2MenuManager](https://git.miksen.me/mikkel/CS2MenuManager/releases) 1.0.42+ | Valgfri | Kun nødvendig for menuerne i spillet (`.ma`, `.matchsetup`, `.nades`, `.strats`). Uden den svarer de kommandoer med en besked. |
+| [CS2MenuManager](https://github.com/mrc4tt/CS2MenuManager/releases) 1.0.42+ | Valgfri | Kun nødvendig for menuerne i spillet (`.ma`, `.matchsetup`, `.nades`, `.strats`). Uden den svarer de kommandoer med en besked. |
 | MySQL / MariaDB | Valgfri | SQLite bruges som standard og kræver ingen opsætning. |
 
 ## Installer fra release-zippen
