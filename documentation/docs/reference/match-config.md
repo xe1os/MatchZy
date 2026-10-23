@@ -23,7 +23,7 @@ Prefer an in-game flow? Admins can build the same config with the [`.matchsetup`
   "veto_mode": ["team1_ban", "team2_ban", "team1_pick", "team2_pick", "team1_ban", "team2_ban"],
   "map_sides": ["knife", "team1_ct", "knife"],
   "players_per_team": 5,
-  "min_players_to_ready": 10,
+  "min_players_to_ready": 5,
   "clinch_series": true,
   "team1": {
     "id": "t1",
@@ -72,7 +72,7 @@ Prefer an in-game flow? Admins can build the same config with the [`.matchsetup`
 | `veto_mode` | string[] | generated | Veto order using `team1_ban`, `team2_ban`, `team1_pick`, `team2_pick`. Generated if omitted. |
 | `map_sides` | string[] | `knife` | Per map: `team1_ct`, `team1_t`, `team2_ct`, `team2_t` or `knife`. A fixed side means no knife round on that map. |
 | `players_per_team` | integer | by mode | Players per side at a time. Defaults to 5 for competitive, 2 for wingman, 3 for rush and 1 for 1v1. Extra roster players (substitutes) wait on Spectator while their side is full. Also the number of bots on a bot team. A team whose `players` roster has fewer players readies up with that many: 4 players listed in a 5v5 means the team is ready once those 4 have typed `.ready`, no `.forceready` needed. |
-| `min_players_to_ready` | integer | `1` | Players a team needs before `.forceready` can ready the whole team. Never fewer than `players_per_team` minus `matchzy_forceready_max_missing` (default: at most one player short, so 4 in a 5v5); a higher value here makes it stricter. In join ready mode, the players a team needs on its side (default: the team's roster size, at most `players_per_team`). |
+| `min_players_to_ready` | integer | not set | Ready players that make a team ready, when lower than `players_per_team` (or the team's roster size): `1` means one ready player on each team starts the match. Not set = every player must ready up. Also the players a team needs before `.forceready` can ready the whole team. Never fewer than `players_per_team` minus `matchzy_forceready_max_missing` (default: at most one player short, so 4 in a 5v5); a higher value here makes it stricter. In join ready mode, the players a team needs on its side (default: the team's roster size, at most `players_per_team`). |
 | `min_spectators_to_ready` | integer | `0` | Ready spectators needed. |
 | `spectators` | object | `{}` | `{ "players": { "<steamid64>": "<name>" } }`. |
 | `clinch_series` | bool | `true` | End the series once a team has won the majority of maps. |

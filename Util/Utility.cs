@@ -522,10 +522,11 @@ namespace MatchZy
             else if (isMatchSetup)
             {
                 // Loaded match: what each team needs (players_per_team, or its roster size when
-                // smaller), not matchzy_minimum_ready_required, which is the pug total. A side
-                // that is ready (incl. .forceready) counts as complete.
-                _rpCtNeed = RequiredPlayersOnSide((int)CsTeam.CounterTerrorist);
-                _rpTNeed = RequiredPlayersOnSide((int)CsTeam.Terrorist);
+                // smaller, or min_players_to_ready when the match config sets it lower), not
+                // matchzy_minimum_ready_required, which is the pug total. A side that is ready
+                // (incl. .forceready) counts as complete.
+                _rpCtNeed = ReadyNeededOnSide((int)CsTeam.CounterTerrorist);
+                _rpTNeed = ReadyNeededOnSide((int)CsTeam.Terrorist);
                 _rpReady = (IsTeamReady((int)CsTeam.CounterTerrorist) ? _rpCtNeed : Math.Min(_rpCtReady, _rpCtNeed))
                     + (IsTeamReady((int)CsTeam.Terrorist) ? _rpTNeed : Math.Min(_rpTReady, _rpTNeed));
                 _rpRequired = _rpCtNeed + _rpTNeed;

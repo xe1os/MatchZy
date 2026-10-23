@@ -79,6 +79,14 @@ public partial class MatchZy
             return true;
         }
 
+        // The match config's min_players_to_ready: that many ready players make the side ready,
+        // without .forceready and without waiting for the rest of the roster.
+        int configMin = ConfigReadyMinimum(team);
+        if (configMin > 0 && readyCount >= configMin)
+        {
+            return true;
+        }
+
         if (IsTeamForcedReady((CsTeam)team) && readyCount >= minReady)
         {
             return true;
@@ -112,6 +120,26 @@ public partial class MatchZy
         return roster > 0 ? Math.Min(perTeam, roster) : perTeam;
     }
 
+    // Players a side needs ready when the match config sets min_players_to_ready below what the
+    // side would otherwise need (players_per_team or the roster size). 0 = not set, or not lower:
+    // then every player on the side has to be ready.
+    private int ConfigReadyMinimum(int side)
+    {
+        if (!isMatchSetup || !matchConfig.MinPlayersToReadySet || matchConfig.MinPlayersToReady < 1)
+            return 0;
+        if (side != (int)CsTeam.CounterTerrorist && side != (int)CsTeam.Terrorist)
+            return 0;
+        int required = RequiredPlayersOnSide(side);
+        return matchConfig.MinPlayersToReady < required ? matchConfig.MinPlayersToReady : 0;
+    }
+
+    // Players a side must have ready before it counts as ready by .ready alone.
+    private int ReadyNeededOnSide(int side)
+    {
+        int configMin = ConfigReadyMinimum(side);
+        return configMin > 0 ? configMin : RequiredPlayersOnSide(side);
+    }
+
     private static int RosterPlayerCount(Team team)
     {
         if (team.openRoster || team.botTeam || team.teamPlayers == null)
@@ -134,7 +162,7 @@ public partial class MatchZy
             return null;
         if (side != (int)CsTeam.CounterTerrorist && side != (int)CsTeam.Terrorist)
             return null;
-        int required = RequiredPlayersOnSide(side);
+        int required = ReadyNeededOnSide(side);
         (int present, _) = GetTeamPlayerCount(side, false);
         if (present <= 0 || present >= required || IsTeamReady(side))
             return null;

@@ -65,6 +65,7 @@ I begge tilstande starter kampen aldrig, mens en registreret spiller mangler. Sp
 
 Godt at vide:
 
+- `min_players_to_ready` i match configen sænker antallet: er det lavere end det, holdet ellers skal have, gør så mange klar-spillere holdet klar, også mens registrerede spillere mangler. Med `"min_players_to_ready": 1` starter kampen, når én spiller på CT og én på T har skrevet `.ready`. Udelad det (eller sæt det til `players_per_team`) for fuld ready-up.
 - Tallet tages fra hver ny match config, så næste kamp kan være 5v5 igen.
 - Det følger holdet, ikke siden: det er ligegyldigt, om Hold A spiller CT eller T.
 - En spiller tæller, når han er helt connected og står på sit holds side. Mens han loader ind eller står på Spectator, tæller han ikke.
@@ -80,7 +81,7 @@ Kommer spilleren ikke, kan én spiller på holdet skrive `.forceready`. Det gør
 
 - `.forceready` er valgfrit. Joiner den manglende spiller, er `.ready` nok som normalt.
 - Et hold må højst mangle én spiller (`matchzy_forceready_max_missing`, standard `1`): med `players_per_team 5` skal holdet have mindst 4 spillere på serveren for at bruge `.forceready`. Tre spillere kan aldrig tvinge kampen i gang.
-- `min_players_to_ready` i match configen kan kun gøre det strengere (fx `5` betyder, at `.forceready` kræver hele holdet). En lavere værdi, som det `1` mange paneler sender, har ingen effekt.
+- `min_players_to_ready` i match configen kan kun gøre det strengere for `.forceready` (fx `5` betyder, at `.forceready` kræver hele holdet).
 - Slå `.forceready` helt fra med `matchzy_allow_force_ready false`.
 
 ## Join ready mode

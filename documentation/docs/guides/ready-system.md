@@ -65,6 +65,7 @@ In both modes the match never starts while a registered player is missing. Playe
 
 Good to know:
 
+- `min_players_to_ready` in the match config lowers the count: when it is below what a team would otherwise need, that many ready players make the team ready, even while registered players are missing. With `"min_players_to_ready": 1`, one ready player on CT and one on T start the match. Leave it out (or set it to `players_per_team`) for the full ready-up.
 - The count is taken from each new match config, so the next match can be 5v5 again.
 - It follows the team, not the side: it does not matter whether Team A plays CT or T.
 - `players_per_team` is the most a team can have on the server. A sixth registered player (a substitute) waits on Spectator, and a team with 6 registered needs 5.
@@ -79,7 +80,7 @@ If the player will not come, one player on the team can type `.forceready`. That
 
 - `.forceready` is optional. If the missing player joins, `.ready` is enough as usual.
 - A team may be at most one player short (`matchzy_forceready_max_missing`, default `1`): with `players_per_team 5`, a team needs at least 4 players on the server for `.forceready`. Three players can never force-start.
-- `min_players_to_ready` in the match config can only make that stricter (for example `5` means `.forceready` needs the whole team). A lower value, such as the `1` many panels send, has no effect.
+- `min_players_to_ready` in the match config can only make that stricter for `.forceready` (for example `5` means `.forceready` needs the whole team).
 - Turn `.forceready` off completely with `matchzy_allow_force_ready false`.
 
 ## Join ready mode

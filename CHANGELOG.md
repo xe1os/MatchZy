@@ -2,6 +2,12 @@
 
 Based on [MatchZy](https://github.com/shobhit-pathak/MatchZy) by Shobhit Pathak, adapted for CS2 game-server hosting: remote log HTTP API, G5API compatibility, auto changelevel, advanced stats (HLTV 2.0 rating / KAST / clutch / opening duels), a coach system, a pause overhaul, and in-game admin and match-setup menus.
 
+# 1.0.14
+
+#### October 23, 2026
+
+- `min_players_to_ready` in a match config now sets how many players of each team must type `.ready`, when it is lower than `players_per_team` (or the team's roster size). With `"min_players_to_ready": 1`, one ready player on CT and one on T start the match, and the ready panel shows 2 instead of 10. Before, the value only applied to `.forceready` and every player on both teams had to ready up. Leave it out (or set it to `players_per_team`) to keep the full ready-up.
+
 # 1.0.13
 
 #### October 23, 2026
