@@ -130,6 +130,8 @@ Tactical timeouts in overtime are set in `live.cfg` (`mp_team_timeout_ot_add_onc
 | `matchzy_remote_log_auth_key` | `""` | N | Name of an extra authentication header. |
 | `matchzy_remote_log_auth_value` :material-lock: | `""` | N | Value of the extra authentication header. |
 
+An empty value (`matchzy_remote_log_url ""`) clears a setting; with no value at all the command prints the current setting (header and auth values masked).
+
 ## Backups and restore
 
 | Setting | Default | cfg | Description |

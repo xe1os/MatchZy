@@ -14,6 +14,8 @@ matchzy_remote_log_header_value "Bearer <token>"
 
 A second header pair (`matchzy_remote_log_auth_key` / `matchzy_remote_log_auth_value`) is available for services that need two.
 
+To stop sending events, set the URL to an empty value: `matchzy_remote_log_url ""`. The same works for the header and auth settings. Run a setting without a value (`matchzy_remote_log_url`) to see what it is set to; header and auth values are shown masked.
+
 ## Format
 
 Live events follow [Get5's event schema](https://splewis.github.io/get5/latest/events.html) by default: players and weapons are nested objects (`player`, `attacker`, `weapon`), so a receiver built for Get5 can read them directly. `matchzy_events_format legacy` switches back to the flat format of 0.8.94 and older (`killer_name`, `victim_steamid`, ...). See the [Events reference](../reference/events.md#live-scorebot).

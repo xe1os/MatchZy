@@ -53,17 +53,32 @@ namespace MatchZy
             }
         }
 
+        // These are console commands, not ConVars, so the engine cannot print their value. Without an
+        // argument they report the current setting; an explicit empty value (matchzy_remote_log_url "")
+        // clears it. Typing the bare name to check a setting therefore never wipes it.
+        private static bool IsRemoteLogQuery(CommandInfo command) => command.ArgCount < 2;
+
+        private static string MaskSecret(string value) => value == "" ? "(not set)" : $"(set, {value.Length} characters)";
+
         [ConsoleCommand("get5_remote_log_url", "If defined, all events are sent to this URL over HTTP. If no protocol is provided")]
         [ConsoleCommand("matchzy_remote_log_url", "If defined, all events are sent to this URL over HTTP. If no protocol is provided")]
         public void RemoteLogURLCommand(CCSPlayerController? player, CommandInfo command)
         {
             if (player != null)
                 return;
-            string url = command.ArgByIndex(1);
-
-            if (!IsValidUrl(url))
+            if (IsRemoteLogQuery(command))
             {
-                //Log($"[RemoteLogURLCommand] Invalid URL: {url}. Please provide a valid URL!");
+                command.ReplyToCommand($"matchzy_remote_log_url = \"{RedactUrl(matchConfig.RemoteLogURL)}\"");
+                return;
+            }
+            string url = command.ArgByIndex(1).Trim();
+
+            // An empty value stops sending events. It used to fail the URL check and be ignored, and
+            // the server default is copied into every new match, so a server kept posting events to
+            // the previous match's webhook however often it was cleared.
+            if (url != "" && !IsValidUrl(url))
+            {
+                Log($"[RemoteLogURLCommand] Invalid URL: {RedactUrl(url)}; ignored.");
                 return;
             }
 
@@ -78,13 +93,14 @@ namespace MatchZy
         {
             if (player != null)
                 return;
-            string header = command.ArgByIndex(1).Trim();
-
-            if (header != "")
+            if (IsRemoteLogQuery(command))
             {
-                matchConfig.RemoteLogHeaderKey = header;
-                defaultRemoteLogHeaderKey = header;
+                command.ReplyToCommand($"matchzy_remote_log_header_key = \"{matchConfig.RemoteLogHeaderKey}\"");
+                return;
             }
+            string header = command.ArgByIndex(1).Trim();
+            matchConfig.RemoteLogHeaderKey = header;
+            defaultRemoteLogHeaderKey = header;
         }
 
         [ConsoleCommand("get5_remote_log_header_value", "If defined, the value of the custom header added to the events sent over HTTP")]
@@ -93,13 +109,14 @@ namespace MatchZy
         {
             if (player != null)
                 return;
-            string headerValue = command.ArgByIndex(1).Trim();
-
-            if (headerValue != "")
+            if (IsRemoteLogQuery(command))
             {
-                matchConfig.RemoteLogHeaderValue = headerValue;
-                defaultRemoteLogHeaderValue = headerValue;
+                command.ReplyToCommand($"matchzy_remote_log_header_value = {MaskSecret(matchConfig.RemoteLogHeaderValue)}");
+                return;
             }
+            string headerValue = command.ArgByIndex(1).Trim();
+            matchConfig.RemoteLogHeaderValue = headerValue;
+            defaultRemoteLogHeaderValue = headerValue;
         }
 
         [ConsoleCommand("matchzy_remote_log_auth_key", "If defined, an authentication header with this name is added to HTTP requests")]
@@ -107,13 +124,14 @@ namespace MatchZy
         {
             if (player != null)
                 return;
-            string header = command.ArgByIndex(1).Trim();
-
-            if (header != "")
+            if (IsRemoteLogQuery(command))
             {
-                matchConfig.RemoteLogAuthKey = header;
-                defaultRemoteLogAuthKey = header;
+                command.ReplyToCommand($"matchzy_remote_log_auth_key = \"{matchConfig.RemoteLogAuthKey}\"");
+                return;
             }
+            string header = command.ArgByIndex(1).Trim();
+            matchConfig.RemoteLogAuthKey = header;
+            defaultRemoteLogAuthKey = header;
         }
 
         [ConsoleCommand("matchzy_remote_log_auth_value", "If defined, the value of the authentication header added to HTTP requests")]
@@ -121,13 +139,14 @@ namespace MatchZy
         {
             if (player != null)
                 return;
-            string headerValue = command.ArgByIndex(1).Trim();
-
-            if (headerValue != "")
+            if (IsRemoteLogQuery(command))
             {
-                matchConfig.RemoteLogAuthValue = headerValue;
-                defaultRemoteLogAuthValue = headerValue;
+                command.ReplyToCommand($"matchzy_remote_log_auth_value = {MaskSecret(matchConfig.RemoteLogAuthValue)}");
+                return;
             }
+            string headerValue = command.ArgByIndex(1).Trim();
+            matchConfig.RemoteLogAuthValue = headerValue;
+            defaultRemoteLogAuthValue = headerValue;
         }
     }
 }
