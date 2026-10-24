@@ -2,6 +2,13 @@
 
 Based on [MatchZy](https://github.com/shobhit-pathak/MatchZy) by Shobhit Pathak, adapted for CS2 game-server hosting: remote log HTTP API, G5API compatibility, auto changelevel, advanced stats (HLTV 2.0 rating / KAST / clutch / opening duels), a coach system, a pause overhaul, and in-game admin and match-setup menus.
 
+# 1.0.20
+
+#### October 24, 2026
+
+- Fixed a match loaded with `matchzy_loadmatch` / `matchzy_loadmatch_url` during a running `.start` pug reusing the pug's match id when the match config has no `matchid`. Its stats, events, demo name and round backups went to the pug's match. The loaded match now gets its own id; a `matchid` in the match config is still used as before.
+- `.showspawns`: pressing E on a spawn marker now picks the marker you aim at more precisely. The aim tolerance is a fixed distance around the marker instead of an angle, so a far marker next to the one you aim at is no longer picked, and the aim is taken from your real eye height (also while crouched).
+
 # 1.0.19
 
 #### October 24, 2026

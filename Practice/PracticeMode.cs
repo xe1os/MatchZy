@@ -170,7 +170,12 @@ namespace MatchZy
         readonly List<Position> activeSpawnMarkers = new();
         readonly Dictionary<int, float> lastSpawnMarkerUseTime = new();
         const float spawnMarkerUseCooldown = 0.3f;      // seconds between accepted +use teleports
-        const float spawnMarkerAimMinDot = 0.985f;      // ~10 degree aim cone onto a marker
+        // Aim tolerance in world units around a marker's vertical line (floor box up to the number),
+        // so far markers are not easier to hit than near ones (an angular cone grew to ~350u at 2000u
+        // and could grab a marker next to the one aimed at).
+        const float spawnMarkerAimRadius = 24.0f;
+        const float spawnMarkerAimMaxDistance = 4096.0f;
+        const float spawnMarkerAimMinDot = 0.985f;      // ~10 degree aim cone, still used by the .shownades markers
         const float spawnMarkerStandRadiusSq = 8.0f * 8.0f;  // issue #11: only the spawn you're exactly on is excluded
         const float spawnMarkerStandHeight = 90.0f;     // vertical band for the standing-on check
         Dictionary<int, Dictionary<string, GrenadeThrownData>> nadeSpecificLastGrenadeData = new();
@@ -4934,18 +4939,19 @@ namespace MatchZy
             if (pawn == null || pawn.AbsOrigin == null)
                 return -1;
 
-            // Eye position + forward unit vector from the view angles.
+            // Eye position (ViewOffset: lower while crouched) + forward unit vector from the view angles.
             Vector origin = pawn.AbsOrigin;
-            Vector eye = new Vector(origin.X, origin.Y, origin.Z + 64.0f);
+            var eye = new System.Numerics.Vector3(origin.X, origin.Y, origin.Z + pawn.ViewOffset.Z);
             QAngle ang = pawn.EyeAngles;
             double pitch = ang.X * Math.PI / 180.0;
             double yaw = ang.Y * Math.PI / 180.0;
-            var forwardX = (float)(Math.Cos(pitch) * Math.Cos(yaw));
-            var forwardY = (float)(Math.Cos(pitch) * Math.Sin(yaw));
-            var forwardZ = (float)(-Math.Sin(pitch));
+            var forward = new System.Numerics.Vector3(
+                (float)(Math.Cos(pitch) * Math.Cos(yaw)),
+                (float)(Math.Cos(pitch) * Math.Sin(yaw)),
+                (float)(-Math.Sin(pitch)));
 
             int bestIndex = -1;
-            float bestDot = spawnMarkerAimMinDot;
+            float bestAlong = float.MaxValue;
             for (int i = 0; i < activeSpawnMarkers.Count; i++)
             {
                 Vector sp = activeSpawnMarkers[i].PlayerPosition;
@@ -4954,15 +4960,15 @@ namespace MatchZy
                 float hdx = sp.X - origin.X, hdy = sp.Y - origin.Y, vdz = sp.Z - origin.Z;
                 if (hdx * hdx + hdy * hdy <= spawnMarkerStandRadiusSq && Math.Abs(vdz) <= spawnMarkerStandHeight)
                     continue;
-                // Aiming at either the floor box or the number above it registers. Pick the
-                // marker with the tightest aim cone (largest dot with the view forward).
+                // Aiming anywhere between the floor box and the number above it registers. When
+                // several markers are in tolerance, the nearest along the view wins, so a marker
+                // behind another one is not picked.
                 float floorZ = i < spawnMarkerVisuals.Count ? spawnMarkerVisuals[i].FloorZ : sp.Z;
-                float dot = Math.Max(
-                    AimDot(eye, forwardX, forwardY, forwardZ, sp.X, sp.Y, floorZ + spawnMarkerFloorLift),
-                    AimDot(eye, forwardX, forwardY, forwardZ, sp.X, sp.Y, floorZ + spawnMarkerLabelHeight));
-                if (dot > bestDot)
+                var (dist, along) = RayToVerticalSegment(eye, forward, spawnMarkerAimMaxDistance,
+                    sp.X, sp.Y, floorZ + spawnMarkerFloorLift, floorZ + spawnMarkerLabelHeight);
+                if (dist <= spawnMarkerAimRadius && along < bestAlong)
                 {
-                    bestDot = dot;
+                    bestAlong = along;
                     bestIndex = i;
                 }
             }
@@ -4991,14 +4997,26 @@ namespace MatchZy
             return bestIndex;
         }
 
-        // Cosine between the view forward and the direction eye -> target (-1 when on top of it).
-        private static float AimDot(Vector eye, float fx, float fy, float fz, float x, float y, float z)
+        // Closest distance between the view ray (eye + forward * t, 0 <= t <= maxDistance, forward a
+        // unit vector) and the vertical segment (x, y, zBottom..zTop), and the ray distance t at
+        // that point.
+        private static (float Distance, float Along) RayToVerticalSegment(System.Numerics.Vector3 eye,
+            System.Numerics.Vector3 forward, float maxDistance, float x, float y, float zBottom, float zTop)
         {
-            float tx = x - eye.X, ty = y - eye.Y, tz = z - eye.Z;
-            float dist = (float)Math.Sqrt(tx * tx + ty * ty + tz * tz);
-            if (dist < 1.0f)
-                return -1.0f;
-            return (tx * fx + ty * fy + tz * fz) / dist;
+            var a = new System.Numerics.Vector3(x, y, zBottom);
+            float height = zTop - zBottom;
+            System.Numerics.Vector3 w = eye - a;
+            float fz = forward.Z;               // forward . (0, 0, 1)
+            float fw = System.Numerics.Vector3.Dot(forward, w);
+            float denom = 1.0f - fz * fz;       // 0 when looking straight up/down along the segment
+            float t = denom < 1e-6f ? 0.0f : Math.Clamp((fz * w.Z - fw) / denom, 0.0f, maxDistance);
+            // Clamp onto the segment, then re-project the ray onto that point.
+            float s = Math.Clamp(w.Z + fz * t, 0.0f, height);
+            var onSegment = new System.Numerics.Vector3(x, y, zBottom + s);
+            t = Math.Clamp(System.Numerics.Vector3.Dot(onSegment - eye, forward), 0.0f, maxDistance);
+            s = Math.Clamp(w.Z + fz * t, 0.0f, height);
+            onSegment = new System.Numerics.Vector3(x, y, zBottom + s);
+            return (System.Numerics.Vector3.Distance(eye + forward * t, onSegment), t);
         }
 
         [ConsoleCommand("css_hidespawns", "Hides the highlighted spawns")]

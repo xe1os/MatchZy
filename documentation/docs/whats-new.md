@@ -2,6 +2,11 @@
 
 A short summary of each release. The [full changelog](changelog.md) has the details and background for every change.
 
+## 1.0.20 <small>October 24, 2026</small>
+
+- **Fixed:** A match config loaded during a `.start` pug no longer reuses the pug's match id (stats, events, demo name and backups went to the pug).
+- **Changed:** `.showspawns`: E on a spawn marker picks the marker you aim at more precisely, also at a distance and while crouched.
+
 ## 1.0.19 <small>October 24, 2026</small>
 
 - **Fixed:** GOTV demos are recorded again on Windows servers. The current CS2 build rejected the demo path MatchZy sent (`couldn't open file ... for writing`), so no demo was saved.
@@ -25,11 +30,11 @@ A short summary of each release. The [full changelog](changelog.md) has the deta
 - **Fixed:** In a series, a `mp_match_restart_delay` below 18 in the match config no longer lets the game load another map before the next map of the series.
 - **Fixed:** The hostname set by `matchzy_hostname_format` is put back to the one from before the match when the series ends or the match is stopped (with `matchzy_reset_cvars_on_series_end`).
 
-## 1.0.15 <small>October 23, 2026</small>
-
-- **Fixed:** The ready panel no longer shows more ready players on a side than it needs (for example `CT 3/1` with `"min_players_to_ready": 1`).
-
 ## Older releases
+
+??? note "1.0.15 - October 23, 2026"
+
+    - **Fixed:** The ready panel no longer shows more ready players on a side than it needs (for example `CT 3/1` with `"min_players_to_ready": 1`).
 
 ??? note "1.0.14 - October 23, 2026"
 
