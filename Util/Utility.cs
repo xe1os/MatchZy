@@ -308,6 +308,11 @@ namespace MatchZy
         {
             if (!isWarmup || matchStarted || !readyAvailable || isDryRun || readyHintStyle.Value != 2)
                 return;
+            if (!readyEnabled.Value)
+            {
+                PrintLocalizedToAll("matchzy.ready.waitingforadmin");
+                return;
+            }
             List<string> unreadyPlayers = new();
             int perTeam = EffectiveReadyPerTeam();
 
@@ -650,6 +655,8 @@ namespace MatchZy
 
         private string BuildClassicReadyHint(CCSPlayerController player)
         {
+            if (!readyEnabled.Value)
+                return Localizer.ForPlayer(player, "matchzy.ready.waitingforadmin");
             string line1 = Localizer.ForPlayer(player, "matchzy.hint.waitingforplayers", _rpReady, _rpTotal);
             string line2 = Localizer.ForPlayer(player, "matchzy.hint.usereadycommand");
             if (ShortHandedSide(player.TeamNum) is (int shortPresent, int shortRequired))
@@ -948,38 +955,45 @@ namespace MatchZy
                     // the panel carries its own indicator. Static (no per-tick change) so it does not
                     // defeat the change-detection below and re-trigger the panel's show animation.
                     sb.Append($"<font class='fontSize-l' color='#ff9a3c'>&#9679; {PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.warmuptag"))}</font><br>");
-                    sb.Append($"<font class='fontSize-m' color='#ffcf3f'>{PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.title"))}</font><br>");
-                    sb.Append($"<font class='fontSize-sm' color='#c8c8c8'>{PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.mode", mode))}</font><br>");
-                    sb.Append($"{bar} <font class='fontSize-m' color='#ffffff'>{_rpReady} / {_rpRequired}</font><br>");
-                    // Loaded match: ready / needed per side; otherwise ready / on the side.
-                    int ctOf = _rpCtNeed > 0 ? _rpCtNeed : _rpCtCount;
-                    int tOf = _rpTNeed > 0 ? _rpTNeed : _rpTCount;
-                    int ctShown = _rpCtNeed > 0 ? _rpCtShown : _rpCtReady;
-                    int tShown = _rpTNeed > 0 ? _rpTShown : _rpTReady;
-                    sb.Append($"<font class='fontSize-sm' color='#9ecbff'>CT {ctShown}/{ctOf}</font><font class='fontSize-sm' color='#ffffff'> &nbsp; </font><font class='fontSize-sm' color='#ffb36b'>T {tShown}/{tOf}</font>");
-
-                    // Self-status (YOU ARE (NOT) READY) is the most important line, so render it
-                    // BEFORE the "waiting on" list. CS2's center-HTML panel has a size cap and drops
-                    // the tail when a long localized string + player names push it over; keeping the
-                    // status ahead of the expendable waiting-on line means the status always shows.
-                    bool isPlaying = isPlayingNow;
-                    if (isPlaying)
+                    // matchzy_ready_enabled false: the title says an admin starts the match, and the
+                    // ready counts and status below are left out.
+                    string titleKey = readyEnabled.Value ? "matchzy.ready.title" : "matchzy.ready.waitingforadmin";
+                    sb.Append($"<font class='fontSize-m' color='#ffcf3f'>{PanelSafe(Localizer.ForPlayer(target, titleKey))}</font><br>");
+                    sb.Append($"<font class='fontSize-sm' color='#c8c8c8'>{PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.mode", mode))}</font>");
+                    if (readyEnabled.Value)
                     {
-                        if (isReadyNow)
-                            sb.Append($"<br><font class='fontSize-m' color='#37ff8b'>&#10004; {PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.youready"))}</font>");
-                        else if (notReadyVisible)
-                            sb.Append($"<br><font class='fontSize-m' color='#ff3b3b'>&#10008; {PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.notready"))}</font>");
-                        else
-                            sb.Append("<br><font class='fontSize-m' color='#ff3b3b'>&nbsp;</font>"); // blink off-frame: keep height
+                        sb.Append("<br>");
+                        sb.Append($"{bar} <font class='fontSize-m' color='#ffffff'>{_rpReady} / {_rpRequired}</font><br>");
+                        // Loaded match: ready / needed per side; otherwise ready / on the side.
+                        int ctOf = _rpCtNeed > 0 ? _rpCtNeed : _rpCtCount;
+                        int tOf = _rpTNeed > 0 ? _rpTNeed : _rpTCount;
+                        int ctShown = _rpCtNeed > 0 ? _rpCtShown : _rpCtReady;
+                        int tShown = _rpTNeed > 0 ? _rpTShown : _rpTReady;
+                        sb.Append($"<font class='fontSize-sm' color='#9ecbff'>CT {ctShown}/{ctOf}</font><font class='fontSize-sm' color='#ffffff'> &nbsp; </font><font class='fontSize-sm' color='#ffb36b'>T {tShown}/{tOf}</font>");
+
+                        // Self-status (YOU ARE (NOT) READY) is the most important line, so render it
+                        // BEFORE the "waiting on" list. CS2's center-HTML panel has a size cap and drops
+                        // the tail when a long localized string + player names push it over; keeping the
+                        // status ahead of the expendable waiting-on line means the status always shows.
+                        bool isPlaying = isPlayingNow;
+                        if (isPlaying)
+                        {
+                            if (isReadyNow)
+                                sb.Append($"<br><font class='fontSize-m' color='#37ff8b'>&#10004; {PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.youready"))}</font>");
+                            else if (notReadyVisible)
+                                sb.Append($"<br><font class='fontSize-m' color='#ff3b3b'>&#10008; {PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.notready"))}</font>");
+                            else
+                                sb.Append("<br><font class='fontSize-m' color='#ff3b3b'>&nbsp;</font>"); // blink off-frame: keep height
+                        }
+
+                        // A registered player is missing: how many. After
+                        // the self-status so the panel's size cap can only drop this and the list below.
+                        if (ShortHandedSide(target.TeamNum) is (int shortPresent, int shortRequired))
+                            sb.Append($"<br><font class='fontSize-sm' color='#ffcf3f'>{PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.shorthanded", shortPresent, shortRequired, shortRequired - shortPresent))}</font>");
+
+                        if (_rpWaiting.Length > 0)
+                            sb.Append($"<br><font class='fontSize-sm' color='#9a9a9a'>{PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.waitingon", _rpWaiting))}</font>");
                     }
-
-                    // A registered player is missing: how many. After
-                    // the self-status so the panel's size cap can only drop this and the list below.
-                    if (ShortHandedSide(target.TeamNum) is (int shortPresent, int shortRequired))
-                        sb.Append($"<br><font class='fontSize-sm' color='#ffcf3f'>{PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.shorthanded", shortPresent, shortRequired, shortRequired - shortPresent))}</font>");
-
-                    if (_rpWaiting.Length > 0)
-                        sb.Append($"<br><font class='fontSize-sm' color='#9a9a9a'>{PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.waitingon", _rpWaiting))}</font>");
 
                     // Only re-send when the content changed (or on the keepalive tick). Re-sending
                     // identical HTML every tick re-triggers the panel's show animation -> flashing.
@@ -2181,6 +2195,9 @@ namespace MatchZy
         {
             if (!readyAvailable || matchStarted)
                 return;
+            // matchzy_ready_enabled false: only an admin starts the match (.start calls HandleMatchStart).
+            if (!readyEnabled.Value)
+                return;
             // Join ready mode starts the match from its own countdown (HandleJoinStartCountdown), not
             // the moment the last player joins or someone types .ready.
             if (IsJoinReadyMode() && !fromJoinCountdown)
@@ -2491,8 +2508,9 @@ namespace MatchZy
                 return;
             }
 
-            // [READY]/[UNREADY] scoreboard tags disabled by convar - strip any and stop.
-            if (!readyClanTagEnabled.Value)
+            // [READY]/[UNREADY] scoreboard tags disabled by convar, or nobody can ready up
+            // (matchzy_ready_enabled false) - strip any and stop.
+            if (!readyClanTagEnabled.Value || !readyEnabled.Value)
             {
                 ClearClanTags();
                 return;

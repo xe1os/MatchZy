@@ -16,7 +16,7 @@ namespace MatchZy
     public partial class MatchZy : BasePlugin
     {
         public override string ModuleName => "MatchZy";
-        public override string ModuleVersion => "1.0.17";
+        public override string ModuleVersion => "1.0.18";
         public override string ModuleAuthor => "Miksen/mrc4tt (based on MatchZy by WD-)";
         public override string ModuleDescription => "A plugin for running and managing CS2 practice/pugs/scrims/matches!";
         public string chatPrefix = $"{ChatColors.Green}[MatchZy]{ChatColors.Default}";
@@ -409,6 +409,8 @@ namespace MatchZy
                 _cvMatchEndRestart = ConVar.Find("mp_match_end_restart");
 
                 autoStartModeCvar.ValueChanged += OnAutoStartModeCvarChanged;
+                // Ready panel, hints and clan tags follow matchzy_ready_enabled at once, not on the next ready toggle.
+                readyEnabled.ValueChanged += (_, _) => _readyStatusDirty = true;
 
                 _loadedMidMap = !hotReload && AreServerGlobalsReady();
                 if (!hotReload)
@@ -678,6 +680,7 @@ namespace MatchZy
 
             RegisterEventHandler<EventPlayerConnectFull>(EventPlayerConnectFullHandler);
             RegisterEventHandler<EventPlayerDisconnect>(EventPlayerDisconnectHandler);
+            RegisterEventHandler<EventPlayerDisconnect>(EventPlayerDisconnectPreHandler, hookMode: HookMode.Pre);
             RegisterEventHandler<EventCsWinPanelRound>(EventCsWinPanelRoundHandler, hookMode: HookMode.Pre);
             RegisterEventHandler<EventCsWinPanelMatch>(EventCsWinPanelMatchHandler);
             RegisterEventHandler<EventRoundStart>(EventRoundStartHandler);

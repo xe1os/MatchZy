@@ -8,6 +8,7 @@ Før en kamp, scrim eller hill går live, venter serveren i warmup. Spillerne fo
 - `.readycheck` viser, hvem serveren stadig venter på.
 - Coaches tæller aldrig med og skal ikke skrive `.ready`.
 - Admins kan springe det hele over med `.start`.
+- `matchzy_ready_enabled false` slår spillernes klarmelding fra: kun en admin starter kampen med `.start`, også før map veto, og klar-tidsgrænsen kører ikke.
 
 Hvor mange der skal være klar, afhænger af, om der er loadet en match config.
 

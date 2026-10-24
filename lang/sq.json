@@ -1,6 +1,8 @@
 {
     "matchzy.minimum.ready.required": "[Kërkohet numri minimal i lojtarëve gati: {0}]",
     "matchzy.ready.markedready": "Ju jeni shënuar si gati.",
+    "matchzy.ready.disabled": "Gatishmëria është e çaktivizuar në këtë server. Një admin e nis ndeshjen.",
+    "matchzy.ready.waitingforadmin": "Në pritje që një admin të nisë ndeshjen",
     "matchzy.ready.matchedreadyonteam": "Jeni shënuar gati në skuadrën {green}{0}{default}!",
     "matchzy.ready.markedunready": "Jeni shënuar si JO gati.",
     "matchzy.ready.readytotestorebackupinfomessage": "Lojtarë jo-gati: {0}. Ju lutem shkruani .ready kur jeni gati për të rikthyer rezervën e ndeshjes. {1}",

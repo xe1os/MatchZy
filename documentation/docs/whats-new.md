@@ -2,6 +2,11 @@
 
 A short summary of each release. The [full changelog](changelog.md) has the details and background for every change.
 
+## 1.0.18 <small>October 24, 2026</small>
+
+- **New:** `matchzy_ready_enabled false` turns off the player ready-up (`.ready`, `.forceready`, ping, join ready mode). Only an admin starts the match with `.start`, and the ready time limit does not run.
+- **New:** `matchzy_hide_failed_connect_messages true` hides the chat line for players who leave before they were fully connected ("failed to connect").
+
 ## 1.0.17 <small>October 24, 2026</small>
 
 - **Fixed:** `matchzy_remote_log_url ""` clears the remote log URL and stops sending events (also the header and auth settings). Before, the old webhook kept receiving events.
@@ -27,16 +32,16 @@ A short summary of each release. The [full changelog](changelog.md) has the deta
 
 - **Changed:** `min_players_to_ready` in the match config sets how many players of each team must type `.ready`. With `1`, one ready player on CT and one on T start the match. Before, it only applied to `.forceready`.
 
-## 1.0.13 <small>October 23, 2026</small>
-
-!!! warning "Action needed"
-    - Existing servers keep their old `live_wingman.cfg`, `dryrun.cfg` and `sleep.cfg`. Delete them from `cfg/MatchZy/` (or put your values in the matching `_override.cfg`) to get the new overtime, short-handed money and CSTV voice defaults. The new wingman and rush timeouts apply without this.
-
-- **Changed:** Wingman and rush give each team 1 tactical timeout of 60 seconds and 1 more in each overtime. Before, they kept the timeouts of the mode that ran before.
-- **Changed:** Wingman overtime has 6 rounds (was 4), there is no short-handed money bonus, and team voice is recorded in the CSTV demo (`tv_relayvoice 1`).
-- **Fixed:** When `live.cfg` or `live_wingman.cfg` is missing on disk, the match config's `cvars` (for example `mp_team_timeout_max`) are applied before the game restarts, so they count from round 1.
-
 ## Older releases
+
+??? note "1.0.13 - October 23, 2026"
+
+    !!! warning "Action needed"
+        - Existing servers keep their old `live_wingman.cfg`, `dryrun.cfg` and `sleep.cfg`. Delete them from `cfg/MatchZy/` (or put your values in the matching `_override.cfg`) to get the new overtime, short-handed money and CSTV voice defaults. The new wingman and rush timeouts apply without this.
+
+    - **Changed:** Wingman and rush give each team 1 tactical timeout of 60 seconds and 1 more in each overtime. Before, they kept the timeouts of the mode that ran before.
+    - **Changed:** Wingman overtime has 6 rounds (was 4), there is no short-handed money bonus, and team voice is recorded in the CSTV demo (`tv_relayvoice 1`).
+    - **Fixed:** When `live.cfg` or `live_wingman.cfg` is missing on disk, the match config's `cvars` (for example `mp_team_timeout_max`) are applied before the game restarts, so they count from round 1.
 
 ??? note "1.0.12 - October 21, 2026"
 

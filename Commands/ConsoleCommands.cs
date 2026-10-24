@@ -66,6 +66,8 @@ namespace MatchZy
         {
             if (readyAvailable && !matchStarted)
             {
+                if (ReplyReadyDisabled(player))
+                    return;
                 int perTeam = EffectiveReadyPerTeam();
                 int totalPlayers = perTeam > 0 ? perTeam * 2 : EffectiveMinimumReadyRequired();
 
@@ -104,6 +106,8 @@ namespace MatchZy
 
             if (readyAvailable && !matchStarted)
             {
+                if (ReplyReadyDisabled(player))
+                    return;
                 if (player.UserId.HasValue)
                 {
                     int userId = player.UserId.Value;
@@ -158,6 +162,8 @@ namespace MatchZy
 
             if (readyAvailable && !matchStarted)
             {
+                if (ReplyReadyDisabled(player))
+                    return;
                 if (player.UserId.HasValue)
                 {
                     if (!playerReadyStatus.ContainsKey(player.UserId.Value))

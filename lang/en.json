@@ -1,6 +1,8 @@
 {
     "matchzy.minimum.ready.required": "[Minimum ready players required: {0}]",
     "matchzy.ready.markedready": "You have been marked as {green}ready{default}.",
+    "matchzy.ready.disabled": "Ready-up is turned off on this server. An admin starts the match.",
+    "matchzy.ready.waitingforadmin": "Waiting for an admin to start the match",
     "matchzy.ready.matchedreadyonteam": "You have been marked ready on team {green}{0}{default}!",
     "matchzy.ready.markedunready": "You have been marked as {red}not ready{default}.",
     "matchzy.ready.readytotestorebackupinfomessage": "Waiting for ready from: {0} to restore the match backup. {1}",

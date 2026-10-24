@@ -2,6 +2,13 @@
 
 Based on [MatchZy](https://github.com/shobhit-pathak/MatchZy) by Shobhit Pathak, adapted for CS2 game-server hosting: remote log HTTP API, G5API compatibility, auto changelevel, advanced stats (HLTV 2.0 rating / KAST / clutch / opening duels), a coach system, a pause overhaul, and in-game admin and match-setup menus.
 
+# 1.0.18
+
+#### October 24, 2026
+
+- New `matchzy_ready_enabled` (default `true`). Set it to `false` and players can no longer ready up: `.ready`, `.r`, `.unready`, `.forceready`, `.readycheck`, ready by ping and join ready mode are turned off, and only an admin starts the match with `.start` / `.forcestart`. This also applies before the map veto and to pugs. The ready time limit does not run, the `[READY]` / `[UNREADY]` clan tags are hidden, and the ready hint says the server is waiting for an admin.
+- New `matchzy_hide_failed_connect_messages` (default `false`). Set it to `true` to hide the chat line when a player leaves before they were fully connected, such as "failed to connect" or a cancelled join. Leave messages of players who were in the game are still shown.
+
 # 1.0.17
 
 #### October 24, 2026

@@ -46,6 +46,7 @@ namespace MatchZy
 
         public FakeConVar<bool> coachListedOnly = new("matchzy_coach_listed_only", "In a match loaded from a match config, only the SteamIDs in a team's \"coaches\" list may coach that team; teams without a list have no coach. Default: false", false);
 
+        public FakeConVar<bool> hideFailedConnectMessages = new("matchzy_hide_failed_connect_messages", "Hide the chat line when a player leaves before they were fully connected (\"failed to connect\", a timed out or cancelled join). Leave messages of players who were in the game are still shown. Default: false", false);
         public FakeConVar<bool> loadedMatchHideModeHints = new("matchzy_loaded_match_hide_mode_hints", "In a match loaded from a match config, show only the ready-up hint when a player joins, not the mode hints (.scrim / .prac / .knife) and the admin help line. Default: true", true);
 
         public FakeConVar<int> overtimePausesPerTeam = new("matchzy_overtime_pauses_per_team", "How many times each team may use .pause in each overtime period. 0 = no limit. Admin pauses are not counted. Default: 1", 1);
@@ -113,6 +114,7 @@ namespace MatchZy
         // distance (but huge up close). Re-run .shownades after changing. Default: 0.2
         public FakeConVar<float> grenadeLibraryLabelScale = new("matchzy_grenadelibrary_label_scale", "World scale (world units per pixel) of the .shownades text label. Bigger = more readable from distance. Default: 0.2", 0.2f);
 
+        public FakeConVar<bool> readyEnabled = new("matchzy_ready_enabled", "Whether players can ready up (.ready, .r, .unready, .forceready, ping, join ready mode). false = only an admin starts the match with .start / .forcestart, and every phase that waits for a ready-up (veto, map start) waits for the admin. The ready time limit (matchzy_forfeit_ready_timeout) does not run. Default: true", true);
         public FakeConVar<bool> readyUpByPing = new("matchzy_ready_up_by_ping", "Whether pinging (middle-mouse / scroll button) toggles your ready status during warmup. Set false if players ready up by accident when pinging. Default: true", true);
 
         public FakeConVar<bool> everyoneIsAdmin = new("matchzy_everyone_is_admin", "If set to true, all the players will have admin privilege. Default: false", false);

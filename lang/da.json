@@ -1,6 +1,8 @@
 {
     "matchzy.minimum.ready.required": "[Minimum klar spillere krævet: {0}]",
     "matchzy.ready.markedready": "Du er blevet markeret som klar.",
+    "matchzy.ready.disabled": "Klarmelding er slået fra på denne server. En admin starter kampen.",
+    "matchzy.ready.waitingforadmin": "Venter på at en admin starter kampen",
     "matchzy.ready.matchedreadyonteam": "Du er blevet markeret som klar på holdet {green}{0}{default}!",
     "matchzy.ready.markedunready": "Du er blevet markeret som IKKE klar.",
     "matchzy.ready.readytotestorebackupinfomessage": "Ikke-klar spillere: {0}. Skriv .ready, når du er klar til at gendanne match-backuppen. {1}",
