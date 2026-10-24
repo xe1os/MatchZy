@@ -2,6 +2,12 @@
 
 A short summary of each release. The [full changelog](changelog.md) has the details and background for every change.
 
+## 1.0.17 <small>October 24, 2026</small>
+
+- **Fixed:** `matchzy_remote_log_url ""` clears the remote log URL and stops sending events (also the header and auth settings). Before, the old webhook kept receiving events.
+- **Changed:** A remote log setting run without a value prints what it is set to (header and auth values masked).
+- **Changed:** `matchzy_loadmatch_url` tries the match config download up to 3 times on timeouts, network errors and HTTP 5xx/408/429.
+
 ## 1.0.16 <small>October 24, 2026</small>
 
 - **New:** `.ffire nades` and `"friendly_fire": "grenades"` in the match config: only HE and molotov/incendiary damage teammates. `.ffire on` / `.ffire off` and `"friendly_fire": true` / `false` also work.
@@ -30,11 +36,11 @@ A short summary of each release. The [full changelog](changelog.md) has the deta
 - **Changed:** Wingman overtime has 6 rounds (was 4), there is no short-handed money bonus, and team voice is recorded in the CSTV demo (`tv_relayvoice 1`).
 - **Fixed:** When `live.cfg` or `live_wingman.cfg` is missing on disk, the match config's `cvars` (for example `mp_team_timeout_max`) are applied before the game restarts, so they count from round 1.
 
-## 1.0.12 <small>October 21, 2026</small>
-
-- **Fixed:** An observer or caster who joined before the players no longer takes a player spawn. They were put on a team for a moment, and the spawn they used stayed blocked after they moved to Spectator, so a player spawned on someone else or not at all. Also applies to `.match` and `.scrim` warmups.
-
 ## Older releases
+
+??? note "1.0.12 - October 21, 2026"
+
+    - **Fixed:** An observer or caster who joined before the players no longer takes a player spawn. They were put on a team for a moment, and the spawn they used stayed blocked after they moved to Spectator, so a player spawned on someone else or not at all. Also applies to `.match` and `.scrim` warmups.
 
 ??? note "1.0.11 - October 17, 2026"
 

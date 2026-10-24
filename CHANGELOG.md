@@ -2,6 +2,14 @@
 
 Based on [MatchZy](https://github.com/shobhit-pathak/MatchZy) by Shobhit Pathak, adapted for CS2 game-server hosting: remote log HTTP API, G5API compatibility, auto changelevel, advanced stats (HLTV 2.0 rating / KAST / clutch / opening duels), a coach system, a pause overhaul, and in-game admin and match-setup menus.
 
+# 1.0.17
+
+#### October 24, 2026
+
+- `matchzy_remote_log_url ""` now clears the remote log URL and stops sending events. Before, the empty value was ignored and the server kept sending every later match's events to the old webhook until the plugin was reloaded. The same works for `matchzy_remote_log_header_key`, `matchzy_remote_log_header_value`, `matchzy_remote_log_auth_key`, `matchzy_remote_log_auth_value` and the `get5_` names. An empty value in a match config's `cvars` is still ignored.
+- Running a remote log setting without a value (`matchzy_remote_log_url`) prints what it is set to. Header and auth values are shown masked. An invalid URL is now logged instead of ignored without a message.
+- `matchzy_loadmatch_url` / `get5_loadmatch_url` tries the download up to 3 times when it times out, hits a network error or gets HTTP 5xx, 408 or 429, with 2 and 4 seconds between attempts and 20 seconds per attempt. Other errors such as 404 or invalid JSON still fail at once.
+
 # 1.0.16
 
 #### October 24, 2026
