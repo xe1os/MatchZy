@@ -105,7 +105,7 @@ public partial class MatchZy
                     // Also on a match-only server (matchzy_kick_when_no_match_loaded): .scrim / .prac
                     // are not how that server is used, and only admins get in before a match loads.
                     bool hideModeHints = (IsMatchLoadedOrPending() && loadedMatchHideModeHints.Value) || matchModeOnly;
-                    PrintToPlayerChat(player, Localizer.ForPlayer(player, "matchzy.eh.start"));
+                    PrintToPlayerChat(player, Localizer.ForPlayer(player, readyEnabled.Value ? "matchzy.eh.start" : "matchzy.ready.waitingforadmin"));
                     // The mode commands (.scrim / .match / .knife / .prac) are admin-only, so only the
                     // joining player sees them, and only if they are an admin. They used to go to every
                     // player (.scrim) and to every admin on the server on each join (.prac / .knife).
@@ -153,6 +153,25 @@ public partial class MatchZy
         catch (Exception e)
         {
             Log($"[EventPlayerConnectFull FATAL] An error occurred: {e.Message}");
+            return HookResult.Continue;
+        }
+    }
+
+    // matchzy_hide_failed_connect_messages: the client prints the leave line from the broadcast
+    // player_disconnect event, so a join that never completed ("failed to connect") is hidden by not
+    // broadcasting it. Pre only: DontBroadcast has no effect once the event has been sent. The
+    // event still fires for plugins, so the Post handler's cleanup runs as before.
+    public HookResult EventPlayerDisconnectPreHandler(EventPlayerDisconnect @event, GameEventInfo info)
+    {
+        try
+        {
+            if (hideFailedConnectMessages.Value && !@event.EverFullyConnected)
+                info.DontBroadcast = true;
+            return HookResult.Continue;
+        }
+        catch (Exception e)
+        {
+            Log($"[EventPlayerDisconnectPre FATAL] {e.Message}");
             return HookResult.Continue;
         }
     }
@@ -795,7 +814,7 @@ public partial class MatchZy
 
             // Opt-out: some players ready up by accident when pinging. matchzy_ready_up_by_ping
             // false disables the ping->ready toggle (they use .ready / the ready panel instead).
-            if (!readyUpByPing.Value)
+            if (!readyUpByPing.Value || !readyEnabled.Value)
                 return HookResult.Continue;
 
             CCSPlayerController? player = @event.Userid;

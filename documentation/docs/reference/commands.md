@@ -106,7 +106,7 @@ Before a match goes live, players ready up. How many must be ready is explained 
 | `.start` `.force` `.forcestart` | Config | Starts the match now, skipping the ready check. Not in practice or dryrun. |
 | `.readyrequired [n]` `.teamsize [n]` | Config | Sets how many ready players are needed (0 to 32). `0` = everyone connected. Without a number it shows the current value. |
 | `.knife` `.rk` `.kr` `.kniferound` | Config | Turns the knife round on or off for this match. Also `!roundknife`. From the server or panel console: `css_knife` toggles it (also `css_rk`, `css_kr`, `css_kniferound`, `css_roundknife`). |
-| `.friendlyfire` `.ffire` `.ff` | Config | Turns friendly fire on or off for the coming match, scrim or hill, before it starts. Kept for every map of the series. In practice mode `.ff` is fast-forward instead. |
+| `.friendlyfire` `.ffire` `.ff` | Config | Turns friendly fire on or off for the coming match, scrim or hill, before it starts. Kept for every map of the series. `.ffire on`, `.ffire off` or `.ffire nades` sets the mode; with `nades` only HE and molotov/incendiary damage teammates. In practice mode `.ff` is fast-forward instead. |
 | `.team1 <name>` `.ctname <name>` | Config | Sets the name of the team currently on CT. |
 | `.team2 <name>` `.tname <name>` | Config | Sets the name of the team currently on T. |
 | `.whitelist` | Config | Turns the whitelist on or off (`whitelist.cfg`). Also `!wl`. |

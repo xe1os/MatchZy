@@ -1,6 +1,8 @@
 {
     "matchzy.minimum.ready.required": "[Minimum ready players required: {0}]",
     "matchzy.ready.markedready": "You have been marked as {green}ready{default}.",
+    "matchzy.ready.disabled": "Ready-up is turned off on this server. An admin starts the match.",
+    "matchzy.ready.waitingforadmin": "Waiting for an admin to start the match",
     "matchzy.ready.matchedreadyonteam": "You have been marked ready on team {green}{0}{default}!",
     "matchzy.ready.markedunready": "You have been marked as {red}not ready{default}.",
     "matchzy.ready.readytotestorebackupinfomessage": "Waiting for ready from: {0} to restore the match backup. {1}",
@@ -12,6 +14,7 @@
     "matchzy.pause.teamsunpausedthematch": "Match has resumed!",
     "matchzy.pause.teamwantstounpause": "{green}{0}{default} wants to unpause the match. Waiting for unpause from: {green}{1}{default}.",
     "matchzy.pause.adminpausedthematch": "{green}Admin{default} has paused the match!",
+    "matchzy.pause.carriedtolive": "{silver}The pause could not start yet. It starts in the first live round.",
     "matchzy.pause.adminunpausedthematch": "{green}Admin{default} has unpaused the match!",
     "matchzy.pause.onlyadmincanunpause": "Match has been paused by an {red}admin{default}, hence it can be unpaused by an admin only.",
     "matchzy.pause.pausedbecauserestore": "The match has been paused due to a round restore. Both teams must type {green}.unpause{silver} to continue.",
@@ -665,5 +668,7 @@
     "matchzy.pause.unpausedby": "{green}{0}{default} ended the technical pause.",
     "matchzy.cc.friendlyfire": "Friendly fire for the match is now {green}{0}{default}.",
     "matchzy.cc.friendlyfirestarted": "Friendly fire can only be changed before the match starts.",
-    "matchzy.cc.friendlyfirepractice": "Friendly fire is set by the match mode, not in practice."
+    "matchzy.cc.friendlyfirepractice": "Friendly fire is set by the match mode, not in practice.",
+    "matchzy.cc.friendlyfireusage": "Usage: .ffire [on|off|nades]",
+    "matchzy.cc.friendlyfiregrenades": "{green}on for grenades only{default} (HE and molotov)"
 }

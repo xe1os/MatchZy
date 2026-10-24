@@ -1,6 +1,8 @@
 {
     "matchzy.minimum.ready.required": "[Minimum klar spillere krævet: {0}]",
     "matchzy.ready.markedready": "Du er blevet markeret som klar.",
+    "matchzy.ready.disabled": "Klarmelding er slået fra på denne server. En admin starter kampen.",
+    "matchzy.ready.waitingforadmin": "Venter på at en admin starter kampen",
     "matchzy.ready.matchedreadyonteam": "Du er blevet markeret som klar på holdet {green}{0}{default}!",
     "matchzy.ready.markedunready": "Du er blevet markeret som IKKE klar.",
     "matchzy.ready.readytotestorebackupinfomessage": "Ikke-klar spillere: {0}. Skriv .ready, når du er klar til at gendanne match-backuppen. {1}",
@@ -12,6 +14,7 @@
     "matchzy.pause.teamsunpausedthematch": "Begge hold har afbrudt pausen, kampen genoptages!",
     "matchzy.pause.teamwantstounpause": "{green}{0}{default} ønsker at genoptage kampen. {green}{1}{default}, skriv venligst !unpause for at bekræfte.",
     "matchzy.pause.adminpausedthematch": "{green}Admin{default} har sat kampen på pause!",
+    "matchzy.pause.carriedtolive": "{silver}Pausen kunne ikke starte endnu. Den starter i den første live-runde.",
     "matchzy.pause.adminunpausedthematch": "{green}Admin{default} har afbrudt pausen, kampen genoptages!",
     "matchzy.pause.onlyadmincanunpause": "Kampen er blevet sat på pause af en administrator, derfor kan kun en administrator genoptage den.",
     "matchzy.pause.pausedbecauserestore": "Kampen er sat på pause på grund af rundegendannelse. Begge hold skal skrive {green}.unpause{default} for at genoptage kampen.",
@@ -665,5 +668,7 @@
     "matchzy.pause.unpausedby": "{green}{0}{default} afsluttede den tekniske pause.",
     "matchzy.cc.friendlyfire": "Friendly fire for kampen er nu {green}{0}{default}.",
     "matchzy.cc.friendlyfirestarted": "Friendly fire kan kun ændres, før kampen starter.",
-    "matchzy.cc.friendlyfirepractice": "Friendly fire styres af kamptilstanden, ikke i practice."
+    "matchzy.cc.friendlyfirepractice": "Friendly fire styres af kamptilstanden, ikke i practice.",
+    "matchzy.cc.friendlyfireusage": "Brug: .ffire [on|off|nades]",
+    "matchzy.cc.friendlyfiregrenades": "{green}kun til for granater{default} (HE og molotov)"
 }

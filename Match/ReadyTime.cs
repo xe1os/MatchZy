@@ -41,6 +41,9 @@ namespace MatchZy
         // (-1 = the same as the map's), else matchzy_forfeit_ready_timeout. 0 = no limit.
         private int CurrentReadyTimeout()
         {
+            // Players cannot ready up (matchzy_ready_enabled false), so nobody can lose on time.
+            if (!readyEnabled.Value)
+                return 0;
             if (isPreVeto && forfeitVetoReadyTimeout.Value >= 0)
                 return forfeitVetoReadyTimeout.Value;
             return forfeitReadyTimeout.Value;
@@ -128,7 +131,7 @@ namespace MatchZy
         // matchzy_join_start_delay seconds after everyone has joined; someone leaving stops it.
         private void HandleJoinStartCountdown()
         {
-            if (!IsJoinReadyMode() || matchStarted || !readyAvailable || matchStartInProgress || mapChangePending)
+            if (!IsJoinReadyMode() || !readyEnabled.Value || matchStarted || !readyAvailable || matchStartInProgress || mapChangePending)
             {
                 joinStartAt = null;
                 return;

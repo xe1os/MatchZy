@@ -278,7 +278,7 @@ namespace MatchZy
                 demoWatchdogTimer?.Kill();
                 demoWatchdogTimer = null;
                 // Keep what was recorded up to the kick: it is uploaded with the next segment.
-                string fullPath = Path.Join(EngineCsgoDirectory(), activeDemoFile);
+                string fullPath = EngineDemoPath(activeDemoFile);
                 if (!string.IsNullOrEmpty(activeDemoFile) && File.Exists(fullPath) && !previousDemoSegments.Contains(activeDemoFile))
                     previousDemoSegments.Add(activeDemoFile);
                 isDemoRecording = false;
@@ -324,7 +324,9 @@ namespace MatchZy
             }
 
             demoStartAttempts++;
-            string demoFileName = FormatCvarValue(demoNameFormat).Replace(" ", "_") + ".dem";
+            // ASCII only: the upload sends the file name in the MatchZy-FileName / Get5-FileName headers,
+            // and .NET refuses a header with non-ASCII characters, so a team name such as "Ærø" lost the upload.
+            string demoFileName = ToAsciiFileName(FormatCvarValue(demoNameFormat).Replace(" ", "_")) + ".dem";
             string tempDemoPath = demoPath == "" ? demoFileName : demoPath + demoFileName;
 
             // Never record over an existing demo. A name format without {TIME} gives the watchdog
@@ -333,7 +335,7 @@ namespace MatchZy
             try
             {
                 string baseDemoPath = tempDemoPath.Substring(0, tempDemoPath.Length - ".dem".Length);
-                for (int part = 2; File.Exists(Path.Join(EngineCsgoDirectory(), tempDemoPath)) && part < 100; part++)
+                for (int part = 2; EngineDemoDirs().Any(dir => File.Exists(Path.Join(dir, tempDemoPath))) && part < 100; part++)
                     tempDemoPath = $"{baseDemoPath}_part{part}.dem";
                 demoFileName = Path.GetFileName(tempDemoPath);
             }
@@ -343,13 +345,14 @@ namespace MatchZy
             }
             try
             {
-                string? directoryPath = Path.GetDirectoryName(Path.Join(EngineCsgoDirectory(), demoPath));
-                if (directoryPath != null)
+                // Every folder the engine may write the demo to (Windows: csgo/ and csgo/addons/metamod/).
+                foreach (string dir in EngineDemoDirs())
                 {
-                    if (!Directory.Exists(directoryPath))
-                    {
+                    if (!Directory.Exists(dir))
+                        continue;
+                    string? directoryPath = Path.GetDirectoryName(Path.Join(dir, demoPath));
+                    if (directoryPath != null && !Directory.Exists(directoryPath))
                         Directory.CreateDirectory(directoryPath);
-                    }
                 }
             }
             catch (Exception ex)
@@ -395,7 +398,7 @@ namespace MatchZy
                 // Something else already stopped or replaced the recording - nothing to verify.
                 if (!isDemoRecording || activeDemoFile != expectedDemoFile) return;
 
-                string fullPath = Path.Join(EngineCsgoDirectory(), expectedDemoFile);
+                string fullPath = EngineDemoPath(expectedDemoFile);
                 if (!File.Exists(fullPath))
                 {
                     HandleDemoStartFailure(expectedDemoFile, "never appeared on disk");
@@ -484,34 +487,45 @@ namespace MatchZy
         /// <summary>
         /// Console argument for a file the engine writes under csgo/ (tv_record). Not for round backups:
         /// since CS2 1.41.9.1 the engine rejects an absolute mp_backup_round_file (see SetupRoundBackupFile).
-        /// Always an absolute path: the engine resolves a relative path against the first Game search
-        /// path in gameinfo.gi, which is csgo/addons/metamod on Metamod servers. On Windows the drive
-        /// letter is dropped ("D:/Steam/..." -> "/Steam/..."): the engine's record command rejects any
-        /// path containing ':', '\\' or ".." ("record D:/...: invalid path"), and a root-relative path
-        /// resolves on the drive of the server's working directory. Always quoted, with forward
+        /// On Linux an absolute path: the engine resolves a relative path against the first Game search
+        /// path in gameinfo.gi, which is csgo/addons/metamod on Metamod servers. On Windows the path is
+        /// csgo-relative: the record command rejects a drive letter ("record D:/...: invalid path"), and
+        /// since the October 2026 updates also a drive-less root path ("/Steam/...": "is a current-drive-root
+        /// path ... cannot be prefixed"), so no absolute form is left. The file then lands in csgo/ or
+        /// csgo/addons/metamod/, and EngineDemoPath finds it in either. Always quoted, with forward
         /// slashes: the console tokenizer splits an unquoted argument at a space.
         /// </summary>
         public string CsgoPathArg(string csgoRelativePath)
         {
-            string path = Path.Join(EngineCsgoDirectory(), csgoRelativePath);
-            if (OperatingSystem.IsWindows())
-            {
-                string gameRoot = Path.GetPathRoot(path) ?? "";
-                string cwdRoot = Path.GetPathRoot(Environment.CurrentDirectory) ?? "";
-                if (gameRoot.Length >= 2 && gameRoot[1] == ':' && string.Equals(gameRoot, cwdRoot, StringComparison.OrdinalIgnoreCase))
-                {
-                    path = path.Substring(2);
-                }
-                else
-                {
-                    // Game on another drive than the working directory, or a UNC path: a root-relative
-                    // path would point at the wrong drive. Fall back to csgo-relative, which lands under
-                    // csgo/addons/metamod on Metamod servers.
-                    Log($"[CsgoPathArg] Cannot build a drive-less path for {path} (working directory {Environment.CurrentDirectory}). Using the csgo-relative path {csgoRelativePath}.");
-                    path = csgoRelativePath;
-                }
-            }
+            string path = OperatingSystem.IsWindows()
+                ? csgoRelativePath
+                : Path.Join(EngineCsgoDirectory(), csgoRelativePath);
             return $"\"{path.Replace('\\', '/')}\"";
+        }
+
+        // Folders a recorded demo can be in: csgo/, and on Windows (csgo-relative tv_record, see
+        // CsgoPathArg) also csgo/addons/metamod/, the first Game search path on Metamod servers.
+        private string[] EngineDemoDirs()
+        {
+            string csgoDir = EngineCsgoDirectory();
+            return OperatingSystem.IsWindows()
+                ? new[] { csgoDir, Path.Combine(csgoDir, "addons", "metamod") }
+                : new[] { csgoDir };
+        }
+
+        /// <summary>
+        /// Full path of a csgo-relative demo file as the engine wrote it: the first folder from
+        /// EngineDemoDirs that has it, else the csgo/ path (for a file not written yet).
+        /// </summary>
+        private string EngineDemoPath(string csgoRelativePath)
+        {
+            foreach (string dir in EngineDemoDirs())
+            {
+                string candidate = Path.Join(dir, csgoRelativePath);
+                if (File.Exists(candidate))
+                    return candidate;
+            }
+            return Path.Join(EngineCsgoDirectory(), csgoRelativePath);
         }
 
         /// <summary>
@@ -564,7 +578,7 @@ namespace MatchZy
                     return;
                 }
 
-                string fullPath = Path.Join(EngineCsgoDirectory(), expectedDemoFile);
+                string fullPath = EngineDemoPath(expectedDemoFile);
                 long sizeNow = -1;
                 try { if (File.Exists(fullPath)) sizeNow = new FileInfo(fullPath).Length; } catch { }
 
@@ -668,7 +682,7 @@ namespace MatchZy
                 segmentFiles.Add(activeDemoFile);
             previousDemoSegments.Clear();
             lastStoppedDemoFile = segmentFiles.Count > 0 ? segmentFiles[^1] : "";
-            var segmentPaths = segmentFiles.Select(f => Path.Join(EngineCsgoDirectory(), f)).ToList();
+            var segmentPaths = segmentFiles.Select(f => EngineDemoPath(f)).ToList();
             (int t1score, int t2score) = GetTeamsScore();
             int roundNumber = t1score + t2score;
 

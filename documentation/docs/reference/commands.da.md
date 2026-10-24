@@ -106,7 +106,7 @@ Før en kamp går live, gør spillerne sig klar. Hvor mange der skal være klar,
 | `.start` `.force` `.forcestart` | Config | Starter kampen nu og springer ready-check over. Ikke i practice eller dryrun. |
 | `.readyrequired [n]` `.teamsize [n]` | Config | Sætter, hvor mange klare spillere der skal til (0 til 32). `0` = alle på serveren. Uden et tal vises den nuværende værdi. |
 | `.knife` `.rk` `.kr` `.kniferound` | Config | Slår knife-runden til eller fra for denne kamp. Også `!roundknife`. Fra server- eller panelkonsollen: `css_knife` skifter den (også `css_rk`, `css_kr`, `css_kniferound`, `css_roundknife`). |
-| `.friendlyfire` `.ffire` `.ff` | Config | Slår friendly fire til eller fra for den kommende kamp, scrim eller hill, før den starter. Gælder alle baner i serien. I practice mode er `.ff` i stedet fast-forward. |
+| `.friendlyfire` `.ffire` `.ff` | Config | Slår friendly fire til eller fra for den kommende kamp, scrim eller hill, før den starter. Gælder alle baner i serien. `.ffire on`, `.ffire off` eller `.ffire nades` vælger tilstanden; med `nades` skader kun HE og molotov/incendiary holdkammerater. I practice mode er `.ff` i stedet fast-forward. |
 | `.team1 <navn>` `.ctname <navn>` | Config | Sætter navnet på holdet, der lige nu er CT. |
 | `.team2 <navn>` `.tname <navn>` | Config | Sætter navnet på holdet, der lige nu er T. |
 | `.whitelist` | Config | Slår whitelisten til eller fra (`whitelist.cfg`). Også `!wl`. |

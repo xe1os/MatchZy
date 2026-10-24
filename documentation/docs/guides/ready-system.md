@@ -8,6 +8,7 @@ Before a match, scrim or hill goes live, the server waits in warmup. Players tel
 - `.readycheck` shows who the server is still waiting for.
 - Coaches never count and do not need to ready.
 - Admins can skip the whole thing with `.start`.
+- `matchzy_ready_enabled false` turns the player ready-up off: only an admin starts the match with `.start`, also before the map veto, and the ready time limit does not run.
 
 How many players must be ready depends on whether a match config is loaded.
 

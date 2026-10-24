@@ -1,6 +1,8 @@
 {
     "matchzy.minimum.ready.required": "[Kërkohet numri minimal i lojtarëve gati: {0}]",
     "matchzy.ready.markedready": "Ju jeni shënuar si gati.",
+    "matchzy.ready.disabled": "Gatishmëria është e çaktivizuar në këtë server. Një admin e nis ndeshjen.",
+    "matchzy.ready.waitingforadmin": "Në pritje që një admin të nisë ndeshjen",
     "matchzy.ready.matchedreadyonteam": "Jeni shënuar gati në skuadrën {green}{0}{default}!",
     "matchzy.ready.markedunready": "Jeni shënuar si JO gati.",
     "matchzy.ready.readytotestorebackupinfomessage": "Lojtarë jo-gati: {0}. Ju lutem shkruani .ready kur jeni gati për të rikthyer rezervën e ndeshjes. {1}",
@@ -12,6 +14,7 @@
     "matchzy.pause.teamsunpausedthematch": "Të dyja skuadrat kanë hequr ndërprerjen, ndeshja po rifillon!",
     "matchzy.pause.teamwantstounpause": "{green}{0}{silver} dëshiron të heqë ndërprerjen. {green}{1}{silver}, ju lutem shkruani !unpause për të konfirmuar.",
     "matchzy.pause.adminpausedthematch": "{green}Admini{silver} ka ndërprerë ndeshjen!",
+    "matchzy.pause.carriedtolive": "{silver}Pauza nuk mund të fillonte ende. Ajo fillon në raundin e parë live.",
     "matchzy.pause.adminunpausedthematch": "{green}Admini{silver} ka hequr ndërprerjen, ndeshja po rifillon!",
     "matchzy.pause.onlyadmincanunpause": "Ndeshja u ndërpre nga një admin, vetëm një admin mund të heqë ndërprerjen.",
     "matchzy.pause.pausedbecauserestore": "Ndeshja është ndërprerë për shkak të një rikthimi të raundit. Të dyja skuadrat duhet të shkruajnë {green}.unpause{silver} për të vazhduar.",
@@ -665,5 +668,7 @@
     "matchzy.pause.unpausedby": "{green}{0}{default} përfundoi pauzën teknike.",
     "matchzy.cc.friendlyfire": "Friendly fire për ndeshjen tani është {green}{0}{default}.",
     "matchzy.cc.friendlyfirestarted": "Friendly fire mund të ndryshohet vetëm para se të fillojë ndeshja.",
-    "matchzy.cc.friendlyfirepractice": "Friendly fire caktohet nga modaliteti i ndeshjes, jo në praktikë."
+    "matchzy.cc.friendlyfirepractice": "Friendly fire caktohet nga modaliteti i ndeshjes, jo në praktikë.",
+    "matchzy.cc.friendlyfireusage": "Përdorimi: .ffire [on|off|nades]",
+    "matchzy.cc.friendlyfiregrenades": "{green}aktiv vetëm për granatat{default} (HE dhe molotov)"
 }

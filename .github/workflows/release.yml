@@ -46,6 +46,9 @@ jobs:
         with:
           dotnet-version: "10.0"
 
+      - name: Unit tests
+        run: dotnet test tests/MatchZy.Tests -c Release
+
       - name: Build MatchZy package
         run: |
           set -e

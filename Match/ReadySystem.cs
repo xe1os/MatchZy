@@ -224,6 +224,17 @@ public partial class MatchZy
         return Math.Min(sideReady, perTeam);
     }
 
+    // matchzy_ready_enabled false: players cannot ready up, only an admin starts the match (.start).
+    // Tells the player so. True when the ready-up is off (the caller then stops).
+    private bool ReplyReadyDisabled(CCSPlayerController? player)
+    {
+        if (readyEnabled.Value)
+            return false;
+        if (player != null && player.IsValid)
+            PrintToPlayerChat(player, Localizer.ForPlayer(player, "matchzy.ready.disabled"));
+        return true;
+    }
+
     public bool IsTeamForcedReady(CsTeam team)
     {
         return teamReadyOverride[team];
@@ -234,6 +245,8 @@ public partial class MatchZy
     {
         Log($"{readyAvailable} {isMatchSetup} {allowForceReady} {IsPlayerValid(player)}");
         if (!readyAvailable || !isMatchSetup || !allowForceReady || !IsPlayerValid(player))
+            return;
+        if (matchStarted || ReplyReadyDisabled(player))
             return;
 
         int minReady = ForceReadyMinimum(player!.TeamNum);

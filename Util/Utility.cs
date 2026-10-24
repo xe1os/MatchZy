@@ -308,6 +308,11 @@ namespace MatchZy
         {
             if (!isWarmup || matchStarted || !readyAvailable || isDryRun || readyHintStyle.Value != 2)
                 return;
+            if (!readyEnabled.Value)
+            {
+                PrintLocalizedToAll("matchzy.ready.waitingforadmin");
+                return;
+            }
             List<string> unreadyPlayers = new();
             int perTeam = EffectiveReadyPerTeam();
 
@@ -650,6 +655,8 @@ namespace MatchZy
 
         private string BuildClassicReadyHint(CCSPlayerController player)
         {
+            if (!readyEnabled.Value)
+                return Localizer.ForPlayer(player, "matchzy.ready.waitingforadmin");
             string line1 = Localizer.ForPlayer(player, "matchzy.hint.waitingforplayers", _rpReady, _rpTotal);
             string line2 = Localizer.ForPlayer(player, "matchzy.hint.usereadycommand");
             if (ShortHandedSide(player.TeamNum) is (int shortPresent, int shortRequired))
@@ -948,38 +955,45 @@ namespace MatchZy
                     // the panel carries its own indicator. Static (no per-tick change) so it does not
                     // defeat the change-detection below and re-trigger the panel's show animation.
                     sb.Append($"<font class='fontSize-l' color='#ff9a3c'>&#9679; {PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.warmuptag"))}</font><br>");
-                    sb.Append($"<font class='fontSize-m' color='#ffcf3f'>{PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.title"))}</font><br>");
-                    sb.Append($"<font class='fontSize-sm' color='#c8c8c8'>{PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.mode", mode))}</font><br>");
-                    sb.Append($"{bar} <font class='fontSize-m' color='#ffffff'>{_rpReady} / {_rpRequired}</font><br>");
-                    // Loaded match: ready / needed per side; otherwise ready / on the side.
-                    int ctOf = _rpCtNeed > 0 ? _rpCtNeed : _rpCtCount;
-                    int tOf = _rpTNeed > 0 ? _rpTNeed : _rpTCount;
-                    int ctShown = _rpCtNeed > 0 ? _rpCtShown : _rpCtReady;
-                    int tShown = _rpTNeed > 0 ? _rpTShown : _rpTReady;
-                    sb.Append($"<font class='fontSize-sm' color='#9ecbff'>CT {ctShown}/{ctOf}</font><font class='fontSize-sm' color='#ffffff'> &nbsp; </font><font class='fontSize-sm' color='#ffb36b'>T {tShown}/{tOf}</font>");
-
-                    // Self-status (YOU ARE (NOT) READY) is the most important line, so render it
-                    // BEFORE the "waiting on" list. CS2's center-HTML panel has a size cap and drops
-                    // the tail when a long localized string + player names push it over; keeping the
-                    // status ahead of the expendable waiting-on line means the status always shows.
-                    bool isPlaying = isPlayingNow;
-                    if (isPlaying)
+                    // matchzy_ready_enabled false: the title says an admin starts the match, and the
+                    // ready counts and status below are left out.
+                    string titleKey = readyEnabled.Value ? "matchzy.ready.title" : "matchzy.ready.waitingforadmin";
+                    sb.Append($"<font class='fontSize-m' color='#ffcf3f'>{PanelSafe(Localizer.ForPlayer(target, titleKey))}</font><br>");
+                    sb.Append($"<font class='fontSize-sm' color='#c8c8c8'>{PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.mode", mode))}</font>");
+                    if (readyEnabled.Value)
                     {
-                        if (isReadyNow)
-                            sb.Append($"<br><font class='fontSize-m' color='#37ff8b'>&#10004; {PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.youready"))}</font>");
-                        else if (notReadyVisible)
-                            sb.Append($"<br><font class='fontSize-m' color='#ff3b3b'>&#10008; {PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.notready"))}</font>");
-                        else
-                            sb.Append("<br><font class='fontSize-m' color='#ff3b3b'>&nbsp;</font>"); // blink off-frame: keep height
+                        sb.Append("<br>");
+                        sb.Append($"{bar} <font class='fontSize-m' color='#ffffff'>{_rpReady} / {_rpRequired}</font><br>");
+                        // Loaded match: ready / needed per side; otherwise ready / on the side.
+                        int ctOf = _rpCtNeed > 0 ? _rpCtNeed : _rpCtCount;
+                        int tOf = _rpTNeed > 0 ? _rpTNeed : _rpTCount;
+                        int ctShown = _rpCtNeed > 0 ? _rpCtShown : _rpCtReady;
+                        int tShown = _rpTNeed > 0 ? _rpTShown : _rpTReady;
+                        sb.Append($"<font class='fontSize-sm' color='#9ecbff'>CT {ctShown}/{ctOf}</font><font class='fontSize-sm' color='#ffffff'> &nbsp; </font><font class='fontSize-sm' color='#ffb36b'>T {tShown}/{tOf}</font>");
+
+                        // Self-status (YOU ARE (NOT) READY) is the most important line, so render it
+                        // BEFORE the "waiting on" list. CS2's center-HTML panel has a size cap and drops
+                        // the tail when a long localized string + player names push it over; keeping the
+                        // status ahead of the expendable waiting-on line means the status always shows.
+                        bool isPlaying = isPlayingNow;
+                        if (isPlaying)
+                        {
+                            if (isReadyNow)
+                                sb.Append($"<br><font class='fontSize-m' color='#37ff8b'>&#10004; {PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.youready"))}</font>");
+                            else if (notReadyVisible)
+                                sb.Append($"<br><font class='fontSize-m' color='#ff3b3b'>&#10008; {PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.notready"))}</font>");
+                            else
+                                sb.Append("<br><font class='fontSize-m' color='#ff3b3b'>&nbsp;</font>"); // blink off-frame: keep height
+                        }
+
+                        // A registered player is missing: how many. After
+                        // the self-status so the panel's size cap can only drop this and the list below.
+                        if (ShortHandedSide(target.TeamNum) is (int shortPresent, int shortRequired))
+                            sb.Append($"<br><font class='fontSize-sm' color='#ffcf3f'>{PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.shorthanded", shortPresent, shortRequired, shortRequired - shortPresent))}</font>");
+
+                        if (_rpWaiting.Length > 0)
+                            sb.Append($"<br><font class='fontSize-sm' color='#9a9a9a'>{PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.waitingon", _rpWaiting))}</font>");
                     }
-
-                    // A registered player is missing: how many. After
-                    // the self-status so the panel's size cap can only drop this and the list below.
-                    if (ShortHandedSide(target.TeamNum) is (int shortPresent, int shortRequired))
-                        sb.Append($"<br><font class='fontSize-sm' color='#ffcf3f'>{PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.shorthanded", shortPresent, shortRequired, shortRequired - shortPresent))}</font>");
-
-                    if (_rpWaiting.Length > 0)
-                        sb.Append($"<br><font class='fontSize-sm' color='#9a9a9a'>{PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.waitingon", _rpWaiting))}</font>");
 
                     // Only re-send when the content changed (or on the keepalive tick). Re-sending
                     // identical HTML every tick re-triggers the panel's show animation -> flashing.
@@ -1488,6 +1502,8 @@ namespace MatchZy
 
         private void StartLive()
         {
+            // An admin pause from side selection has not landed either (warmup has no freeze time).
+            CarryPendingPauseToLive();
             // Coming out of the knife round's side selection: report the winner and its choice.
             if (isSideSelectionPhase)
                 SendKnifeWonEvent();
@@ -1513,6 +1529,7 @@ namespace MatchZy
             PrintLocalizedToAll("matchzy.util.live3");
 
             PrintPauseHintsDelayed();
+            ApplyPauseCarriedToLive();
 
             // Only show OT notice for match mode (scrim/hill have OT disabled)
             if (!isPlayOutEnabled && !isPlayOutEnabled2)
@@ -1674,6 +1691,7 @@ namespace MatchZy
                 seriesEnded = false;
                 currentMapFinished = false;
                 matchLoadGeneration++;
+                pauseCarriedToLive = null;
                 // Send match_cancelled whenever a loaded or started match is stopped with a reason:
                 // also in warmup, veto, knife and between the maps of a series, where the panel
                 // otherwise never learnt that the match it created was gone.
@@ -1780,6 +1798,7 @@ namespace MatchZy
                 // After the restore above, which can put back matchzy_knife_enabled_default.
                 isKnifeRequired = knifeEnabledDefault;
                 friendlyFireOverride = null;
+                friendlyFireGrenadesOnly = false;
                 CancelVetoStepTimer();
                 readyPhaseStartedAt = null;
 
@@ -2176,6 +2195,9 @@ namespace MatchZy
         {
             if (!readyAvailable || matchStarted)
                 return;
+            // matchzy_ready_enabled false: only an admin starts the match (.start calls HandleMatchStart).
+            if (!readyEnabled.Value)
+                return;
             // Join ready mode starts the match from its own countdown (HandleJoinStartCountdown), not
             // the moment the last player joins or someone types .ready.
             if (IsJoinReadyMode() && !fromJoinCountdown)
@@ -2486,8 +2508,9 @@ namespace MatchZy
                 return;
             }
 
-            // [READY]/[UNREADY] scoreboard tags disabled by convar - strip any and stop.
-            if (!readyClanTagEnabled.Value)
+            // [READY]/[UNREADY] scoreboard tags disabled by convar, or nobody can ready up
+            // (matchzy_ready_enabled false) - strip any and stop.
+            if (!readyClanTagEnabled.Value || !readyEnabled.Value)
             {
                 ClearClanTags();
                 return;
@@ -2772,8 +2795,10 @@ namespace MatchZy
                 Server.ExecuteCommand("mp_match_end_restart 0");
             }
 
-            // For multi-map series, change map after exactly 15 seconds
-            float mapChangeDelay = 15.0f;
+            // For multi-map series, change map after 15 seconds, or earlier when a match config or
+            // override cfg lowered mp_match_restart_delay: the engine's own map change at the end of
+            // the intermission must never beat ours (it picks the next mapgroup map, not the series map).
+            float mapChangeDelay = Math.Clamp(restartDelay - 3, 3, 15);
             matchEndMapChangeTimer = AddTimer(
                 mapChangeDelay,
                 () =>
@@ -2802,17 +2827,8 @@ namespace MatchZy
             );
         }
 
-        private static readonly System.Text.RegularExpressions.Regex SafeMapNameRegex = new(@"^[A-Za-z0-9_\-\./:]+$");
-
-        /// <summary>
-        /// Map names end up in changelevel / host_workshop_map / ds_workshop_changelevel console
-        /// commands. Only plain map tokens (letters, digits, _ - . / :) are allowed, so a name from a
-        /// match config, a veto, a backup or chat cannot carry a quote or ';' into the console.
-        /// </summary>
-        public static bool IsSafeMapName(string? mapName)
-        {
-            return !string.IsNullOrWhiteSpace(mapName) && mapName.Length <= 128 && SafeMapNameRegex.IsMatch(mapName);
-        }
+        // See MatchConfigLogic.IsSafeMapName (Logic/, unit tested).
+        public static bool IsSafeMapName(string? mapName) => MatchConfigLogic.IsSafeMapName(mapName);
 
         private void ChangeMap(string mapName, float delay)
         {
@@ -2993,13 +3009,15 @@ namespace MatchZy
             TryStartPendingDemo();
 
             HandleCoaches();
+            // Before the backup: the first call saves the hostname from before the match into the
+            // match config, so the first round's backup already carries it.
+            UpdateHostname();
             CreateMatchZyRoundDataBackup();
             // The restored round has started, so the restore is done. Clearing the flag only at the
             // next round end (as before) made a restore of a half's last round skip the halftime
             // side swap, which inverted team1/team2 scores and stats for the whole second half.
             isRoundRestoring = false;
             InitPlayerDamageInfo();
-            UpdateHostname();
             // Set team names immediately
             SetTeamNames();
             // Also set with a delay to handle engine halftime processing that may override our names
@@ -3401,6 +3419,51 @@ namespace MatchZy
 
                 PublishEvent(unpauseEvent);
             }
+        }
+
+        // A pause asked for before the match went live: (pauseTeam, pauseType). mp_pause_match only
+        // takes effect at the next freeze time, and after the knife round that is the first live
+        // round, with the side-selection warmup and live.cfg's mp_restartgame in between.
+        private (string Team, string Type)? pauseCarriedToLive = null;
+
+        // live.cfg restarts with mp_restartgame 1 (3 s on the inline fallback), so by then the first
+        // live round's freeze time has begun.
+        private const float CarriedPauseApplyDelaySeconds = 3.5f;
+
+        private void CarryPendingPauseToLive()
+        {
+            if (!isPaused)
+                return;
+            string team = (string)(unpauseData["pauseTeam"] ?? "Admin");
+            string type = team == "Admin" ? "admin" : "pause";
+            UnpauseMatch();
+            pauseCarriedToLive = (team, type);
+            Log($"[Pause] {type} pause by {team} had not taken effect yet; asking again in the first live round.");
+            PrintLocalizedToAll("matchzy.pause.carriedtolive");
+        }
+
+        private void ApplyPauseCarriedToLive()
+        {
+            if (pauseCarriedToLive == null)
+                return;
+            int generation = matchLoadGeneration;
+            AddTimer(CarriedPauseApplyDelaySeconds, () =>
+            {
+                if (pauseCarriedToLive is not { } carried || generation != matchLoadGeneration)
+                    return;
+                pauseCarriedToLive = null;
+                if (!isMatchLive || isPaused || IsTacticalTimeoutActive())
+                {
+                    Log("[Pause] Pause carried from before live dropped: match not live or already paused.");
+                    return;
+                }
+                unpauseData["pauseTeam"] = carried.Team;
+                if (carried.Type == "admin")
+                    PrintLocalizedToAll("matchzy.pause.adminpausedthematch");
+                else
+                    PrintLocalizedToAll("matchzy.pause.pausedthematch", carried.Team);
+                SetMatchPausedFlags(carried.Type);
+            }, TimerFlags.STOP_ON_MAPCHANGE);
         }
 
         private void SetMatchPausedFlags(string pauseType = "tech")
@@ -4308,15 +4371,35 @@ namespace MatchZy
 
         public void UpdateHostname()
         {
-            string hostname = hostnameFormat.Value.Trim();
-            if (hostname == "" || hostname == "\"\"")
-                return;
-            string formattedHostname = FormatCvarValue(hostname).Replace("\"", "");
-            // Runs every round start; skip the console command when the hostname is already set.
-            if (ConVar.Find("hostname")?.StringValue == formattedHostname)
-                return;
-            // Quoted: team names keep their spaces here (only the demo file name replaces them).
-            Server.ExecuteCommand($"hostname \"{formattedHostname}\"");
+            // Caught here: at round start this runs before the round backup, which an error must not skip.
+            try
+            {
+                // The series is over and its settings may already be restored: leave the hostname
+                // alone until the match is reset.
+                if (seriesEnded)
+                    return;
+                string hostname = hostnameFormat.Value.Trim();
+                if (hostname == "" || hostname == "\"\"")
+                    return;
+                string formattedHostname = FormatCvarValue(hostname).Replace("\"", "");
+                var hostnameCvar = ConVar.Find("hostname");
+                // Runs every round start; skip the console command when the hostname is already set.
+                if (hostnameCvar?.StringValue == formattedHostname)
+                    return;
+                // Remember the hostname from before the match so the series end (or a match reset)
+                // puts it back with the match config's cvars. Stored in the match config, so round
+                // backups keep it. Only the first value is kept: a hostname from the match config's
+                // "cvars" block (any casing) already holds the server's original.
+                if (hostnameCvar != null
+                    && !matchConfig.OriginalCvars.Keys.Any(k => k.Equals("hostname", StringComparison.OrdinalIgnoreCase)))
+                    matchConfig.OriginalCvars["hostname"] = hostnameCvar.StringValue;
+                // Quoted: team names keep their spaces here (only the demo file name replaces them).
+                Server.ExecuteCommand($"hostname \"{formattedHostname}\"");
+            }
+            catch (Exception e)
+            {
+                Log($"[UpdateHostname FATAL] An error occurred: {e.Message}");
+            }
         }
 
         // Cached cs_gamerules proxy. FindAllEntitiesByDesignerName walks the WHOLE active
@@ -4617,6 +4700,41 @@ namespace MatchZy
             return regex.Replace(input, "");
         }
 
+        // Letters that do not decompose into an ASCII letter plus an accent.
+        private static readonly Dictionary<char, string> AsciiLetterMap = new()
+        {
+            { 'æ', "ae" }, { 'Æ', "AE" }, { 'ø', "oe" }, { 'Ø', "OE" }, { 'å', "aa" }, { 'Å', "AA" },
+            { 'ß', "ss" }, { 'œ', "oe" }, { 'Œ', "OE" }, { 'đ', "d" }, { 'Đ', "D" }, { 'ł', "l" }, { 'Ł', "L" },
+            { 'þ', "th" }, { 'Þ', "TH" }, { 'ð', "d" }, { 'Ð', "D" },
+        };
+
+        // Keeps ASCII as is, transliterates common accented letters (é -> e, æ -> ae) and drops
+        // anything else that is not ASCII (Cyrillic, CJK, emoji).
+        public static string ToAsciiFileName(string input)
+        {
+            var sb = new StringBuilder(input.Length);
+            foreach (char c in input.Normalize(NormalizationForm.FormC))
+            {
+                if (c < 128)
+                {
+                    sb.Append(c);
+                    continue;
+                }
+                if (AsciiLetterMap.TryGetValue(c, out string? mapped))
+                {
+                    sb.Append(mapped);
+                    continue;
+                }
+                foreach (char d in c.ToString().Normalize(NormalizationForm.FormD))
+                {
+                    if (d < 128)
+                        sb.Append(d);
+                }
+            }
+            string result = Regex.Replace(sb.ToString(), "_{2,}", "_");
+            return result.Trim('_') == "" ? "demo" : result;
+        }
+
         private void Log(string message)
         {
             Console.WriteLine("[MatchZy] " + message);
@@ -4774,7 +4892,7 @@ namespace MatchZy
         public const int GameModeWingman = 2;
         public const int GameModeRush = 6;
 
-        public static readonly string[] MatchGameModes = { "competitive", "wingman", "rush", "1v1" };
+        public static readonly string[] MatchGameModes = MatchConfigLogic.GameModes;
 
         // The loaded match's mode: its "game_mode", else "wingman" when "wingman" is set (configs and
         // backups from before "game_mode" existed), else competitive.

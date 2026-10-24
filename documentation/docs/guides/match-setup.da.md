@@ -73,7 +73,7 @@ Det ene hold kan være `"players": "any"` (alle mennesker) og det andet `"bots":
 - Statistik skrives til databasen og en CSV. Se [Statistik](stats.md).
 - Demoen stopper og uploades, hvis det er sat op. Se [Demoer](demos.md).
 - Med `matchzy_match_end_auto_changelevel` skifter serveren selv til næste bane. Kampe loadet fra et panel (`matchzy_loadmatch_url`) overlader baneskiftet til panelet.
-- Cvars fra match configens `cvars`-blok sættes tilbage (`matchzy_reset_cvars_on_series_end`).
+- Cvars fra match configens `cvars`-blok og hostnavnet fra før kampen sættes tilbage (`matchzy_reset_cvars_on_series_end`).
 
 ## Stop en kamp
 

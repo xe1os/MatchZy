@@ -2,36 +2,64 @@
 
 A short summary of each release. The [full changelog](changelog.md) has the details and background for every change.
 
-## 1.0.15 <small>October 23, 2026</small>
+## 1.0.20 <small>October 24, 2026</small>
 
-- **Fixed:** The ready panel no longer shows more ready players on a side than it needs (for example `CT 3/1` with `"min_players_to_ready": 1`).
+- **Fixed:** A match config loaded during a `.start` pug no longer reuses the pug's match id (stats, events, demo name and backups went to the pug).
+- **Changed:** `.showspawns`: E on a spawn marker picks the marker you aim at more precisely, also at a distance and while crouched.
 
-## 1.0.14 <small>October 23, 2026</small>
+## 1.0.19 <small>October 24, 2026</small>
 
-!!! warning "Action needed"
-    - Check the `min_players_to_ready` your match panel sends. Many send `1`, which now starts a match as soon as one player on each team is ready. Send `players_per_team` (for example `5`) or leave it out to keep the full ready-up.
+- **Fixed:** GOTV demos are recorded again on Windows servers. The current CS2 build rejected the demo path MatchZy sent (`couldn't open file ... for writing`), so no demo was saved.
 
-- **Changed:** `min_players_to_ready` in the match config sets how many players of each team must type `.ready`. With `1`, one ready player on CT and one on T start the match. Before, it only applied to `.forceready`.
+## 1.0.18 <small>October 24, 2026</small>
 
-## 1.0.13 <small>October 23, 2026</small>
+- **New:** `matchzy_ready_enabled false` turns off the player ready-up (`.ready`, `.forceready`, ping, join ready mode). Only an admin starts the match with `.start`, and the ready time limit does not run.
+- **New:** `matchzy_hide_failed_connect_messages true` hides the chat line for players who leave before they were fully connected ("failed to connect").
 
-!!! warning "Action needed"
-    - Existing servers keep their old `live_wingman.cfg`, `dryrun.cfg` and `sleep.cfg`. Delete them from `cfg/MatchZy/` (or put your values in the matching `_override.cfg`) to get the new overtime, short-handed money and CSTV voice defaults. The new wingman and rush timeouts apply without this.
+## 1.0.17 <small>October 24, 2026</small>
 
-- **Changed:** Wingman and rush give each team 1 tactical timeout of 60 seconds and 1 more in each overtime. Before, they kept the timeouts of the mode that ran before.
-- **Changed:** Wingman overtime has 6 rounds (was 4), there is no short-handed money bonus, and team voice is recorded in the CSTV demo (`tv_relayvoice 1`).
-- **Fixed:** When `live.cfg` or `live_wingman.cfg` is missing on disk, the match config's `cvars` (for example `mp_team_timeout_max`) are applied before the game restarts, so they count from round 1.
+- **Fixed:** `matchzy_remote_log_url ""` clears the remote log URL and stops sending events (also the header and auth settings). Before, the old webhook kept receiving events.
+- **Changed:** A remote log setting run without a value prints what it is set to (header and auth values masked).
+- **Changed:** `matchzy_loadmatch_url` tries the match config download up to 3 times on timeouts, network errors and HTTP 5xx/408/429.
 
-## 1.0.12 <small>October 21, 2026</small>
+## 1.0.16 <small>October 24, 2026</small>
 
-- **Fixed:** An observer or caster who joined before the players no longer takes a player spawn. They were put on a team for a moment, and the spawn they used stayed blocked after they moved to Spectator, so a player spawned on someone else or not at all. Also applies to `.match` and `.scrim` warmups.
-
-## 1.0.11 <small>October 17, 2026</small>
-
-- **Fixed:** a match config with `game_mode` set to `rush`, `1v1` or `wingman` always goes live with that mode's cfg (`live_rush.cfg`, `live_1v1.cfg`, `live_wingman.cfg`), even when the server's `game_mode` had not changed yet. Before, such matches could go live with `live.cfg`.
-- **Changed:** a config with `"wingman": true` and `"players_per_team": 1` and no `game_mode` is played as 1v1.
+- **New:** `.ffire nades` and `"friendly_fire": "grenades"` in the match config: only HE and molotov/incendiary damage teammates. `.ffire on` / `.ffire off` and `"friendly_fire": true` / `false` also work.
+- **Fixed:** Demo uploads no longer fail for team names with letters outside ASCII (for example `Ærø`).
+- **Fixed:** A pause asked for during the knife round or side selection starts in the first live round.
+- **Fixed:** In a series, a `mp_match_restart_delay` below 18 in the match config no longer lets the game load another map before the next map of the series.
+- **Fixed:** The hostname set by `matchzy_hostname_format` is put back to the one from before the match when the series ends or the match is stopped (with `matchzy_reset_cvars_on_series_end`).
 
 ## Older releases
+
+??? note "1.0.15 - October 23, 2026"
+
+    - **Fixed:** The ready panel no longer shows more ready players on a side than it needs (for example `CT 3/1` with `"min_players_to_ready": 1`).
+
+??? note "1.0.14 - October 23, 2026"
+
+    !!! warning "Action needed"
+        - Check the `min_players_to_ready` your match panel sends. Many send `1`, which now starts a match as soon as one player on each team is ready. Send `players_per_team` (for example `5`) or leave it out to keep the full ready-up.
+
+    - **Changed:** `min_players_to_ready` in the match config sets how many players of each team must type `.ready`. With `1`, one ready player on CT and one on T start the match. Before, it only applied to `.forceready`.
+
+??? note "1.0.13 - October 23, 2026"
+
+    !!! warning "Action needed"
+        - Existing servers keep their old `live_wingman.cfg`, `dryrun.cfg` and `sleep.cfg`. Delete them from `cfg/MatchZy/` (or put your values in the matching `_override.cfg`) to get the new overtime, short-handed money and CSTV voice defaults. The new wingman and rush timeouts apply without this.
+
+    - **Changed:** Wingman and rush give each team 1 tactical timeout of 60 seconds and 1 more in each overtime. Before, they kept the timeouts of the mode that ran before.
+    - **Changed:** Wingman overtime has 6 rounds (was 4), there is no short-handed money bonus, and team voice is recorded in the CSTV demo (`tv_relayvoice 1`).
+    - **Fixed:** When `live.cfg` or `live_wingman.cfg` is missing on disk, the match config's `cvars` (for example `mp_team_timeout_max`) are applied before the game restarts, so they count from round 1.
+
+??? note "1.0.12 - October 21, 2026"
+
+    - **Fixed:** An observer or caster who joined before the players no longer takes a player spawn. They were put on a team for a moment, and the spawn they used stayed blocked after they moved to Spectator, so a player spawned on someone else or not at all. Also applies to `.match` and `.scrim` warmups.
+
+??? note "1.0.11 - October 17, 2026"
+
+    - **Fixed:** a match config with `game_mode` set to `rush`, `1v1` or `wingman` always goes live with that mode's cfg (`live_rush.cfg`, `live_1v1.cfg`, `live_wingman.cfg`), even when the server's `game_mode` had not changed yet. Before, such matches could go live with `live.cfg`.
+    - **Changed:** a config with `"wingman": true` and `"players_per_team": 1` and no `game_mode` is played as 1v1.
 
 ??? note "1.0.10 - October 17, 2026"
 

@@ -16,35 +16,12 @@ namespace MatchZy
     // always counts as ready/unpaused, and autopause never counts it short.
     public partial class MatchZy
     {
-        private static bool IsOpenRosterToken(JToken? players)
-        {
-            if (players is not JValue { Type: JTokenType.String } value)
-                return false;
-            string text = ((string?)value ?? "").Trim();
-            return text.Equals("any", StringComparison.OrdinalIgnoreCase) || text == "*";
-        }
+        // Token rules live in MatchConfigLogic (Logic/, unit tested).
+        private static bool IsOpenRosterToken(JToken? players) => MatchConfigLogic.IsOpenRosterToken(players);
 
-        private static bool IsBotTeamToken(JToken? team)
-        {
-            JToken? bots = team?["bots"];
-            if (bots == null)
-                return false;
-            return bots.Type switch
-            {
-                JTokenType.Boolean => bots.Value<bool>(),
-                JTokenType.Integer => bots.Value<long>() > 0,
-                JTokenType.String => bool.TryParse(bots.ToString(), out bool b) ? b : int.TryParse(bots.ToString(), out int n) && n > 0,
-                _ => false,
-            };
-        }
+        private static bool IsBotTeamToken(JToken? team) => MatchConfigLogic.IsBotTeamToken(team);
 
-        private static int BotDifficultyFrom(JToken? team)
-        {
-            JToken? token = team?["bot_difficulty"];
-            if (token != null && int.TryParse(token.ToString(), out int difficulty))
-                return Math.Clamp(difficulty, 0, 3);
-            return 2;
-        }
+        private static int BotDifficultyFrom(JToken? team) => MatchConfigLogic.BotDifficultyFrom(team);
 
         private Team? BotTeam() => matchzyTeam1.botTeam ? matchzyTeam1 : matchzyTeam2.botTeam ? matchzyTeam2 : null;
 

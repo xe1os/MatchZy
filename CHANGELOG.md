@@ -2,6 +2,44 @@
 
 Based on [MatchZy](https://github.com/shobhit-pathak/MatchZy) by Shobhit Pathak, adapted for CS2 game-server hosting: remote log HTTP API, G5API compatibility, auto changelevel, advanced stats (HLTV 2.0 rating / KAST / clutch / opening duels), a coach system, a pause overhaul, and in-game admin and match-setup menus.
 
+# 1.0.20
+
+#### October 24, 2026
+
+- Fixed a match loaded with `matchzy_loadmatch` / `matchzy_loadmatch_url` during a running `.start` pug reusing the pug's match id when the match config has no `matchid`. Its stats, events, demo name and round backups went to the pug's match. The loaded match now gets its own id; a `matchid` in the match config is still used as before.
+- `.showspawns`: pressing E on a spawn marker now picks the marker you aim at more precisely. The aim tolerance is a fixed distance around the marker instead of an angle, so a far marker next to the one you aim at is no longer picked, and the aim is taken from your real eye height (also while crouched).
+
+# 1.0.19
+
+#### October 24, 2026
+
+- Fixed GOTV demos not being recorded on Windows servers. The current CS2 build rejects the drive-less `/csserver/game/csgo/demos/...` path that `tv_record` was given ("is a current-drive-root path", "couldn't open file ... for writing"), so every attempt failed. On Windows the demo path is now relative to `csgo/`, and MatchZy finds the file in `csgo/` or `csgo/addons/metamod/` for the recording check and the upload. Linux servers are unchanged.
+
+# 1.0.18
+
+#### October 24, 2026
+
+- New `matchzy_ready_enabled` (default `true`). Set it to `false` and players can no longer ready up: `.ready`, `.r`, `.unready`, `.forceready`, `.readycheck`, ready by ping and join ready mode are turned off, and only an admin starts the match with `.start` / `.forcestart`. This also applies before the map veto and to pugs. The ready time limit does not run, the `[READY]` / `[UNREADY]` clan tags are hidden, and the ready hint says the server is waiting for an admin.
+- New `matchzy_hide_failed_connect_messages` (default `false`). Set it to `true` to hide the chat line when a player leaves before they were fully connected, such as "failed to connect" or a cancelled join. Leave messages of players who were in the game are still shown.
+
+# 1.0.17
+
+#### October 24, 2026
+
+- `matchzy_remote_log_url ""` now clears the remote log URL and stops sending events. Before, the empty value was ignored and the server kept sending every later match's events to the old webhook until the plugin was reloaded. The same works for `matchzy_remote_log_header_key`, `matchzy_remote_log_header_value`, `matchzy_remote_log_auth_key`, `matchzy_remote_log_auth_value` and the `get5_` names. An empty value in a match config's `cvars` is still ignored.
+- Running a remote log setting without a value (`matchzy_remote_log_url`) prints what it is set to. Header and auth values are shown masked. An invalid URL is now logged instead of ignored without a message.
+- `matchzy_loadmatch_url` / `get5_loadmatch_url` tries the download up to 3 times when it times out, hits a network error or gets HTTP 5xx, 408 or 429, with 2 and 4 seconds between attempts and 20 seconds per attempt. Other errors such as 404 or invalid JSON still fail at once.
+
+# 1.0.16
+
+#### October 24, 2026
+
+- The hostname set by `matchzy_hostname_format` no longer stays on the server after a series. The hostname from before the match is saved and put back together with the match config's `cvars` when the series ends or the match is stopped (unless `matchzy_reset_cvars_on_series_end` is false). Round backups keep it, so it is also put back after a `.restore` or a server restart.
+- Demo uploads no longer fail for team names with letters outside ASCII (for example `Ærø`). The demo file name now converts them (`æ` to `ae`, `é` to `e`) or drops them; before, the upload request was refused because the file name is sent in the `MatchZy-FileName` / `Get5-FileName` headers.
+- A `.pause` or `.forcepause` during the knife round (or `.forcepause` during side selection) now starts in the first live round. The engine only pauses at the next freeze time, so the pause used to hang over side selection, where `.unpause` does not work.
+- Series: when a match config or override cfg sets `mp_match_restart_delay` below 18, the change to the next map now happens 3 seconds before the game's own restart. Before, the fixed 15 second change could come too late and the game loaded another map.
+- Added `.ffire nades` and `"friendly_fire": "grenades"` in the match config: only HE and molotov/incendiary damage teammates, bullets, knife and zeus do not. `.ffire on` / `.ffire off` and `"friendly_fire": true` / `false` set friendly fire directly; `.ffire` without an argument still toggles it.
+
 # 1.0.15
 
 #### October 23, 2026
