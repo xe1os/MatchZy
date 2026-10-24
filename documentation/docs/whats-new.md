@@ -2,6 +2,10 @@
 
 A short summary of each release. The [full changelog](changelog.md) has the details and background for every change.
 
+## 1.0.19 <small>October 24, 2026</small>
+
+- **Fixed:** GOTV demos are recorded again on Windows servers. The current CS2 build rejected the demo path MatchZy sent (`couldn't open file ... for writing`), so no demo was saved.
+
 ## 1.0.18 <small>October 24, 2026</small>
 
 - **New:** `matchzy_ready_enabled false` turns off the player ready-up (`.ready`, `.forceready`, ping, join ready mode). Only an admin starts the match with `.start`, and the ready time limit does not run.
@@ -25,14 +29,14 @@ A short summary of each release. The [full changelog](changelog.md) has the deta
 
 - **Fixed:** The ready panel no longer shows more ready players on a side than it needs (for example `CT 3/1` with `"min_players_to_ready": 1`).
 
-## 1.0.14 <small>October 23, 2026</small>
-
-!!! warning "Action needed"
-    - Check the `min_players_to_ready` your match panel sends. Many send `1`, which now starts a match as soon as one player on each team is ready. Send `players_per_team` (for example `5`) or leave it out to keep the full ready-up.
-
-- **Changed:** `min_players_to_ready` in the match config sets how many players of each team must type `.ready`. With `1`, one ready player on CT and one on T start the match. Before, it only applied to `.forceready`.
-
 ## Older releases
+
+??? note "1.0.14 - October 23, 2026"
+
+    !!! warning "Action needed"
+        - Check the `min_players_to_ready` your match panel sends. Many send `1`, which now starts a match as soon as one player on each team is ready. Send `players_per_team` (for example `5`) or leave it out to keep the full ready-up.
+
+    - **Changed:** `min_players_to_ready` in the match config sets how many players of each team must type `.ready`. With `1`, one ready player on CT and one on T start the match. Before, it only applied to `.forceready`.
 
 ??? note "1.0.13 - October 23, 2026"
 

@@ -2,6 +2,12 @@
 
 Based on [MatchZy](https://github.com/shobhit-pathak/MatchZy) by Shobhit Pathak, adapted for CS2 game-server hosting: remote log HTTP API, G5API compatibility, auto changelevel, advanced stats (HLTV 2.0 rating / KAST / clutch / opening duels), a coach system, a pause overhaul, and in-game admin and match-setup menus.
 
+# 1.0.19
+
+#### October 24, 2026
+
+- Fixed GOTV demos not being recorded on Windows servers. The current CS2 build rejects the drive-less `/csserver/game/csgo/demos/...` path that `tv_record` was given ("is a current-drive-root path", "couldn't open file ... for writing"), so every attempt failed. On Windows the demo path is now relative to `csgo/`, and MatchZy finds the file in `csgo/` or `csgo/addons/metamod/` for the recording check and the upload. Linux servers are unchanged.
+
 # 1.0.18
 
 #### October 24, 2026
