@@ -12,6 +12,7 @@
     "matchzy.pause.teamsunpausedthematch": "Match has resumed!",
     "matchzy.pause.teamwantstounpause": "{green}{0}{default} wants to unpause the match. Waiting for unpause from: {green}{1}{default}.",
     "matchzy.pause.adminpausedthematch": "{green}Admin{default} has paused the match!",
+    "matchzy.pause.carriedtolive": "{silver}The pause could not start yet. It starts in the first live round.",
     "matchzy.pause.adminunpausedthematch": "{green}Admin{default} has unpaused the match!",
     "matchzy.pause.onlyadmincanunpause": "Match has been paused by an {red}admin{default}, hence it can be unpaused by an admin only.",
     "matchzy.pause.pausedbecauserestore": "The match has been paused due to a round restore. Both teams must type {green}.unpause{silver} to continue.",
@@ -665,5 +666,7 @@
     "matchzy.pause.unpausedby": "{green}{0}{default} ended the technical pause.",
     "matchzy.cc.friendlyfire": "Friendly fire for the match is now {green}{0}{default}.",
     "matchzy.cc.friendlyfirestarted": "Friendly fire can only be changed before the match starts.",
-    "matchzy.cc.friendlyfirepractice": "Friendly fire is set by the match mode, not in practice."
+    "matchzy.cc.friendlyfirepractice": "Friendly fire is set by the match mode, not in practice.",
+    "matchzy.cc.friendlyfireusage": "Usage: .ffire [on|off|nades]",
+    "matchzy.cc.friendlyfiregrenades": "{green}on for grenades only{default} (HE and molotov)"
 }

@@ -10,6 +10,8 @@ matchzy_loadmatch_url "https://example.com/match.json" "Authorization" "Bearer <
 
 `get5_loadmatch_url` is an alias of `matchzy_loadmatch_url`. A match loaded by URL is treated as a panel match (no automatic map change at series end). If the first map is not the current map, MatchZy changes map and loads the match again on the new map.
 
+Ready-made BO1 to BO5 configs, a bot test and G5API notes: [Match config examples](match-examples.md).
+
 Prefer an in-game flow? Admins can build the same config with the [`.matchsetup` wizard](../guides/menus.md).
 
 ## Full example
@@ -78,6 +80,7 @@ Prefer an in-game flow? Admins can build the same config with the [`.matchsetup`
 | `clinch_series` | bool | `true` | End the series once a team has won the majority of maps. |
 | `game_mode` | string | `competitive` | `competitive` (`live.cfg`), `wingman` (`live_wingman.cfg`), `rush` (`game_mode 6`, `live_rush.cfg`) or `1v1` (wingman game mode, `live_1v1.cfg`). The server switches `game_mode` before the map loads. If omitted, a maplist with only rush maps (`rush_001` and other `rush_` maps, `aim_rush`) plays as rush. |
 | `wingman` | bool | `false` | Same as `"game_mode": "wingman"`. `game_mode` wins when both are set. With `"players_per_team": 1` and no `game_mode`, the match is played as 1v1. |
+| `friendly_fire` | bool or string | mode cfg | `true` or `false` turns friendly fire on or off, like `.ffire on` / `.ffire off`. `"grenades"` keeps `mp_friendlyfire 1` but only HE and molotov/incendiary damage teammates; bullets, knife and zeus do no team damage. Applied on every map of the series. |
 | `cvars` | object | - | Cvars applied when the match loads and before each map goes live, e.g. `{ "mp_overtime_enable": "1" }`. See below. |
 
 !!! note "`cvars`"

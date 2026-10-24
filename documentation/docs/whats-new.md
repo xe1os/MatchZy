@@ -2,6 +2,14 @@
 
 A short summary of each release. The [full changelog](changelog.md) has the details and background for every change.
 
+## 1.0.16 <small>October 24, 2026</small>
+
+- **New:** `.ffire nades` and `"friendly_fire": "grenades"` in the match config: only HE and molotov/incendiary damage teammates. `.ffire on` / `.ffire off` and `"friendly_fire": true` / `false` also work.
+- **Fixed:** Demo uploads no longer fail for team names with letters outside ASCII (for example `Ærø`).
+- **Fixed:** A pause asked for during the knife round or side selection starts in the first live round.
+- **Fixed:** In a series, a `mp_match_restart_delay` below 18 in the match config no longer lets the game load another map before the next map of the series.
+- **Fixed:** The hostname set by `matchzy_hostname_format` is put back to the one from before the match when the series ends or the match is stopped (with `matchzy_reset_cvars_on_series_end`).
+
 ## 1.0.15 <small>October 23, 2026</small>
 
 - **Fixed:** The ready panel no longer shows more ready players on a side than it needs (for example `CT 3/1` with `"min_players_to_ready": 1`).
@@ -26,12 +34,12 @@ A short summary of each release. The [full changelog](changelog.md) has the deta
 
 - **Fixed:** An observer or caster who joined before the players no longer takes a player spawn. They were put on a team for a moment, and the spawn they used stayed blocked after they moved to Spectator, so a player spawned on someone else or not at all. Also applies to `.match` and `.scrim` warmups.
 
-## 1.0.11 <small>October 17, 2026</small>
-
-- **Fixed:** a match config with `game_mode` set to `rush`, `1v1` or `wingman` always goes live with that mode's cfg (`live_rush.cfg`, `live_1v1.cfg`, `live_wingman.cfg`), even when the server's `game_mode` had not changed yet. Before, such matches could go live with `live.cfg`.
-- **Changed:** a config with `"wingman": true` and `"players_per_team": 1` and no `game_mode` is played as 1v1.
-
 ## Older releases
+
+??? note "1.0.11 - October 17, 2026"
+
+    - **Fixed:** a match config with `game_mode` set to `rush`, `1v1` or `wingman` always goes live with that mode's cfg (`live_rush.cfg`, `live_1v1.cfg`, `live_wingman.cfg`), even when the server's `game_mode` had not changed yet. Before, such matches could go live with `live.cfg`.
+    - **Changed:** a config with `"wingman": true` and `"players_per_team": 1` and no `game_mode` is played as 1v1.
 
 ??? note "1.0.10 - October 17, 2026"
 

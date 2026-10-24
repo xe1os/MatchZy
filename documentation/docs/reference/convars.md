@@ -18,7 +18,7 @@ Legend: **cfg** = present in the generated `config.cfg`.
 | `matchzy_autostart_mode` | `1` | Y | Mode on map load: `0` none (sleep), `1` match/warmup, `2` practice. Mode commands (`css_prac`, `css_match`, ...) also write it, so a chosen mode survives a map change. |
 | `matchzy_whitelist_enabled_default` | `false` | Y | Enforce `whitelist.cfg` on connect. Admins can toggle with `.whitelist`. |
 | `matchzy_kick_when_no_match_loaded` | `false` | Y | Kick players who are not on the loaded match's roster (everyone if no match is loaded). Also kicks the players left on the server when a series ends (not after `get5_endmatch`), unless a new match is loaded within the reset delay. Admins are exempt. |
-| `matchzy_hostname_format` | `""` | Y | Hostname template, e.g. `MatchZy \| {TEAM1} vs {TEAM2}`. Empty keeps your hostname. |
+| `matchzy_hostname_format` | `""` | Y | Hostname template, e.g. `MatchZy \| {TEAM1} vs {TEAM2}`. Empty keeps your hostname. The hostname from before the match is put back at series end or when the match is stopped (`matchzy_reset_cvars_on_series_end`). |
 | `matchzy_map_console_command_enabled` | `true` | Y | Register `css_map` / `!map`. Set `false` when another plugin owns it. `.map` always works. |
 | `matchzy_asay_console_enabled` | `true` | Y | Register `css_asay` / `!asay`. Set `false` when another plugin owns it. |
 | `matchzy_dot_trigger_dedupe` | `true` | Y | When `.` is a CounterStrikeSharp chat trigger in `core.json`, let CounterStrikeSharp handle dot commands so they do not run twice. |
@@ -82,7 +82,7 @@ Tactical timeouts in overtime are set in `live.cfg` (`mp_team_timeout_ot_add_onc
 | Setting | Default | cfg | Description |
 |---|---|---|---|
 | `matchzy_playout_enabled_default` | `false` | Y | Play all max rounds (no early win). Toggle with `.playout`. |
-| `matchzy_reset_cvars_on_series_end` | `true` | Y | Restore cvars changed by a match config's `cvars` block when the series ends. |
+| `matchzy_reset_cvars_on_series_end` | `true` | Y | Restore cvars changed by a match config's `cvars` block, and the hostname set by `matchzy_hostname_format`, when the series ends or the match is stopped. |
 | `matchzy_match_start_message` | `""` | Y | Chat message at match start. `$$$` = new line. Supports `{TIME}`, `{MATCH_ID}`, `{MAP}`, `{MAPNUMBER}`, `{TEAM1}`, `{TEAM2}` and color tags. |
 | `matchzy_match_end_auto_changelevel` | `true` | Y | Change map automatically after a match ends. Disable for panel-driven servers (G5API). |
 | `matchzy_empty_shutdown_seconds` | `0` | Y | Close the server (`quit`) after it has had no players for this many seconds. `0` = off. |
@@ -114,7 +114,7 @@ Tactical timeouts in overtime are set in `live.cfg` (`mp_team_timeout_ot_add_onc
 | Setting | Default | cfg | Description |
 |---|---|---|---|
 | `matchzy_demo_path` | `demos/` | Y | Demo folder relative to `csgo/`. Must end with `/`. |
-| `matchzy_demo_name_format` | `{TIME}_{MATCH_ID}_{MAP}_{TEAM1}_vs_{TEAM2}` | Y | Demo file name. Also `{MAPNUMBER}`. |
+| `matchzy_demo_name_format` | `{TIME}_{MATCH_ID}_{MAP}_{TEAM1}_vs_{TEAM2}` | Y | Demo file name. Also `{MAPNUMBER}`. Non-ASCII letters are converted (`æ` to `ae`) or dropped. |
 | `matchzy_demo_upload_url` :material-lock: | `""` | N | Upload the demo here when the map ends. Alias `get5_demo_upload_url`. |
 | `matchzy_demo_upload_s3` | `false` | Y | Upload with HTTP `PUT` and the raw `.dem` as body, for S3 presigned URLs (sign with `Content-Type: application/octet-stream`). Alias `get5_demo_upload_s3`. |
 | `matchzy_demo_upload_header_key` | `""` | N | Custom header name on the upload. Alias `get5_demo_upload_header_key`. |

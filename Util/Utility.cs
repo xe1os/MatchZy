@@ -1488,6 +1488,8 @@ namespace MatchZy
 
         private void StartLive()
         {
+            // An admin pause from side selection has not landed either (warmup has no freeze time).
+            CarryPendingPauseToLive();
             // Coming out of the knife round's side selection: report the winner and its choice.
             if (isSideSelectionPhase)
                 SendKnifeWonEvent();
@@ -1513,6 +1515,7 @@ namespace MatchZy
             PrintLocalizedToAll("matchzy.util.live3");
 
             PrintPauseHintsDelayed();
+            ApplyPauseCarriedToLive();
 
             // Only show OT notice for match mode (scrim/hill have OT disabled)
             if (!isPlayOutEnabled && !isPlayOutEnabled2)
@@ -1674,6 +1677,7 @@ namespace MatchZy
                 seriesEnded = false;
                 currentMapFinished = false;
                 matchLoadGeneration++;
+                pauseCarriedToLive = null;
                 // Send match_cancelled whenever a loaded or started match is stopped with a reason:
                 // also in warmup, veto, knife and between the maps of a series, where the panel
                 // otherwise never learnt that the match it created was gone.
@@ -1780,6 +1784,7 @@ namespace MatchZy
                 // After the restore above, which can put back matchzy_knife_enabled_default.
                 isKnifeRequired = knifeEnabledDefault;
                 friendlyFireOverride = null;
+                friendlyFireGrenadesOnly = false;
                 CancelVetoStepTimer();
                 readyPhaseStartedAt = null;
 
@@ -2772,8 +2777,10 @@ namespace MatchZy
                 Server.ExecuteCommand("mp_match_end_restart 0");
             }
 
-            // For multi-map series, change map after exactly 15 seconds
-            float mapChangeDelay = 15.0f;
+            // For multi-map series, change map after 15 seconds, or earlier when a match config or
+            // override cfg lowered mp_match_restart_delay: the engine's own map change at the end of
+            // the intermission must never beat ours (it picks the next mapgroup map, not the series map).
+            float mapChangeDelay = Math.Clamp(restartDelay - 3, 3, 15);
             matchEndMapChangeTimer = AddTimer(
                 mapChangeDelay,
                 () =>
@@ -2993,13 +3000,15 @@ namespace MatchZy
             TryStartPendingDemo();
 
             HandleCoaches();
+            // Before the backup: the first call saves the hostname from before the match into the
+            // match config, so the first round's backup already carries it.
+            UpdateHostname();
             CreateMatchZyRoundDataBackup();
             // The restored round has started, so the restore is done. Clearing the flag only at the
             // next round end (as before) made a restore of a half's last round skip the halftime
             // side swap, which inverted team1/team2 scores and stats for the whole second half.
             isRoundRestoring = false;
             InitPlayerDamageInfo();
-            UpdateHostname();
             // Set team names immediately
             SetTeamNames();
             // Also set with a delay to handle engine halftime processing that may override our names
@@ -3401,6 +3410,51 @@ namespace MatchZy
 
                 PublishEvent(unpauseEvent);
             }
+        }
+
+        // A pause asked for before the match went live: (pauseTeam, pauseType). mp_pause_match only
+        // takes effect at the next freeze time, and after the knife round that is the first live
+        // round, with the side-selection warmup and live.cfg's mp_restartgame in between.
+        private (string Team, string Type)? pauseCarriedToLive = null;
+
+        // live.cfg restarts with mp_restartgame 1 (3 s on the inline fallback), so by then the first
+        // live round's freeze time has begun.
+        private const float CarriedPauseApplyDelaySeconds = 3.5f;
+
+        private void CarryPendingPauseToLive()
+        {
+            if (!isPaused)
+                return;
+            string team = (string)(unpauseData["pauseTeam"] ?? "Admin");
+            string type = team == "Admin" ? "admin" : "pause";
+            UnpauseMatch();
+            pauseCarriedToLive = (team, type);
+            Log($"[Pause] {type} pause by {team} had not taken effect yet; asking again in the first live round.");
+            PrintLocalizedToAll("matchzy.pause.carriedtolive");
+        }
+
+        private void ApplyPauseCarriedToLive()
+        {
+            if (pauseCarriedToLive == null)
+                return;
+            int generation = matchLoadGeneration;
+            AddTimer(CarriedPauseApplyDelaySeconds, () =>
+            {
+                if (pauseCarriedToLive is not { } carried || generation != matchLoadGeneration)
+                    return;
+                pauseCarriedToLive = null;
+                if (!isMatchLive || isPaused || IsTacticalTimeoutActive())
+                {
+                    Log("[Pause] Pause carried from before live dropped: match not live or already paused.");
+                    return;
+                }
+                unpauseData["pauseTeam"] = carried.Team;
+                if (carried.Type == "admin")
+                    PrintLocalizedToAll("matchzy.pause.adminpausedthematch");
+                else
+                    PrintLocalizedToAll("matchzy.pause.pausedthematch", carried.Team);
+                SetMatchPausedFlags(carried.Type);
+            }, TimerFlags.STOP_ON_MAPCHANGE);
         }
 
         private void SetMatchPausedFlags(string pauseType = "tech")
@@ -4308,15 +4362,35 @@ namespace MatchZy
 
         public void UpdateHostname()
         {
-            string hostname = hostnameFormat.Value.Trim();
-            if (hostname == "" || hostname == "\"\"")
-                return;
-            string formattedHostname = FormatCvarValue(hostname).Replace("\"", "");
-            // Runs every round start; skip the console command when the hostname is already set.
-            if (ConVar.Find("hostname")?.StringValue == formattedHostname)
-                return;
-            // Quoted: team names keep their spaces here (only the demo file name replaces them).
-            Server.ExecuteCommand($"hostname \"{formattedHostname}\"");
+            // Caught here: at round start this runs before the round backup, which an error must not skip.
+            try
+            {
+                // The series is over and its settings may already be restored: leave the hostname
+                // alone until the match is reset.
+                if (seriesEnded)
+                    return;
+                string hostname = hostnameFormat.Value.Trim();
+                if (hostname == "" || hostname == "\"\"")
+                    return;
+                string formattedHostname = FormatCvarValue(hostname).Replace("\"", "");
+                var hostnameCvar = ConVar.Find("hostname");
+                // Runs every round start; skip the console command when the hostname is already set.
+                if (hostnameCvar?.StringValue == formattedHostname)
+                    return;
+                // Remember the hostname from before the match so the series end (or a match reset)
+                // puts it back with the match config's cvars. Stored in the match config, so round
+                // backups keep it. Only the first value is kept: a hostname from the match config's
+                // "cvars" block (any casing) already holds the server's original.
+                if (hostnameCvar != null
+                    && !matchConfig.OriginalCvars.Keys.Any(k => k.Equals("hostname", StringComparison.OrdinalIgnoreCase)))
+                    matchConfig.OriginalCvars["hostname"] = hostnameCvar.StringValue;
+                // Quoted: team names keep their spaces here (only the demo file name replaces them).
+                Server.ExecuteCommand($"hostname \"{formattedHostname}\"");
+            }
+            catch (Exception e)
+            {
+                Log($"[UpdateHostname FATAL] An error occurred: {e.Message}");
+            }
         }
 
         // Cached cs_gamerules proxy. FindAllEntitiesByDesignerName walks the WHOLE active
@@ -4615,6 +4689,41 @@ namespace MatchZy
 
             Regex regex = new("[^\\p{L}0-9 _-]");
             return regex.Replace(input, "");
+        }
+
+        // Letters that do not decompose into an ASCII letter plus an accent.
+        private static readonly Dictionary<char, string> AsciiLetterMap = new()
+        {
+            { 'æ', "ae" }, { 'Æ', "AE" }, { 'ø', "oe" }, { 'Ø', "OE" }, { 'å', "aa" }, { 'Å', "AA" },
+            { 'ß', "ss" }, { 'œ', "oe" }, { 'Œ', "OE" }, { 'đ', "d" }, { 'Đ', "D" }, { 'ł', "l" }, { 'Ł', "L" },
+            { 'þ', "th" }, { 'Þ', "TH" }, { 'ð', "d" }, { 'Ð', "D" },
+        };
+
+        // Keeps ASCII as is, transliterates common accented letters (é -> e, æ -> ae) and drops
+        // anything else that is not ASCII (Cyrillic, CJK, emoji).
+        public static string ToAsciiFileName(string input)
+        {
+            var sb = new StringBuilder(input.Length);
+            foreach (char c in input.Normalize(NormalizationForm.FormC))
+            {
+                if (c < 128)
+                {
+                    sb.Append(c);
+                    continue;
+                }
+                if (AsciiLetterMap.TryGetValue(c, out string? mapped))
+                {
+                    sb.Append(mapped);
+                    continue;
+                }
+                foreach (char d in c.ToString().Normalize(NormalizationForm.FormD))
+                {
+                    if (d < 128)
+                        sb.Append(d);
+                }
+            }
+            string result = Regex.Replace(sb.ToString(), "_{2,}", "_");
+            return result.Trim('_') == "" ? "demo" : result;
         }
 
         private void Log(string message)

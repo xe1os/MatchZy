@@ -324,7 +324,9 @@ namespace MatchZy
             }
 
             demoStartAttempts++;
-            string demoFileName = FormatCvarValue(demoNameFormat).Replace(" ", "_") + ".dem";
+            // ASCII only: the upload sends the file name in the MatchZy-FileName / Get5-FileName headers,
+            // and .NET refuses a header with non-ASCII characters, so a team name such as "Ærø" lost the upload.
+            string demoFileName = ToAsciiFileName(FormatCvarValue(demoNameFormat).Replace(" ", "_")) + ".dem";
             string tempDemoPath = demoPath == "" ? demoFileName : demoPath + demoFileName;
 
             // Never record over an existing demo. A name format without {TIME} gives the watchdog

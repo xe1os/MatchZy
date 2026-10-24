@@ -5,7 +5,7 @@ When GOTV is enabled (`tv_enable 1`, from the launch options or any cfg), MatchZ
 | Setting | Default | Purpose |
 |---|---|---|
 | `matchzy_demo_path` | `demos/` | Folder relative to `csgo/`. |
-| `matchzy_demo_name_format` | `{TIME}_{MATCH_ID}_{MAP}_{TEAM1}_vs_{TEAM2}` | File name. Also `{MAPNUMBER}`. |
+| `matchzy_demo_name_format` | `{TIME}_{MATCH_ID}_{MAP}_{TEAM1}_vs_{TEAM2}` | File name. Also `{MAPNUMBER}`. Letters outside ASCII are converted (`æ` to `ae`, `é` to `e`) or dropped, so the upload headers stay valid. |
 
 ## Reliable recording
 

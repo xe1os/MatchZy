@@ -70,7 +70,7 @@ One team can be `"players": "any"` (any human) and the other `"bots": true`. Bot
 - Stats are written to the database and a CSV. See [Stats](stats.md).
 - The demo stops and is uploaded if configured. See [Demos](demos.md).
 - With `matchzy_match_end_auto_changelevel` the server changes to the next map by itself. Panel-loaded matches (`matchzy_loadmatch_url`) leave the map change to the panel.
-- Cvars from the match config's `cvars` block are restored (`matchzy_reset_cvars_on_series_end`).
+- Cvars from the match config's `cvars` block and the hostname from before the match are restored (`matchzy_reset_cvars_on_series_end`).
 
 ## Stopping a match
 

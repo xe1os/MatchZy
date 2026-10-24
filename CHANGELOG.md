@@ -2,6 +2,16 @@
 
 Based on [MatchZy](https://github.com/shobhit-pathak/MatchZy) by Shobhit Pathak, adapted for CS2 game-server hosting: remote log HTTP API, G5API compatibility, auto changelevel, advanced stats (HLTV 2.0 rating / KAST / clutch / opening duels), a coach system, a pause overhaul, and in-game admin and match-setup menus.
 
+# 1.0.16
+
+#### October 24, 2026
+
+- The hostname set by `matchzy_hostname_format` no longer stays on the server after a series. The hostname from before the match is saved and put back together with the match config's `cvars` when the series ends or the match is stopped (unless `matchzy_reset_cvars_on_series_end` is false). Round backups keep it, so it is also put back after a `.restore` or a server restart.
+- Demo uploads no longer fail for team names with letters outside ASCII (for example `Ærø`). The demo file name now converts them (`æ` to `ae`, `é` to `e`) or drops them; before, the upload request was refused because the file name is sent in the `MatchZy-FileName` / `Get5-FileName` headers.
+- A `.pause` or `.forcepause` during the knife round (or `.forcepause` during side selection) now starts in the first live round. The engine only pauses at the next freeze time, so the pause used to hang over side selection, where `.unpause` does not work.
+- Series: when a match config or override cfg sets `mp_match_restart_delay` below 18, the change to the next map now happens 3 seconds before the game's own restart. Before, the fixed 15 second change could come too late and the game loaded another map.
+- Added `.ffire nades` and `"friendly_fire": "grenades"` in the match config: only HE and molotov/incendiary damage teammates, bullets, knife and zeus do not. `.ffire on` / `.ffire off` and `"friendly_fire": true` / `false` set friendly fire directly; `.ffire` without an argument still toggles it.
+
 # 1.0.15
 
 #### October 23, 2026

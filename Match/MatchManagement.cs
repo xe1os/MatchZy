@@ -907,6 +907,11 @@ namespace MatchZy
 
                     var cvar = ConVar.Find(cvarName);
                     matchConfig.ChangedCvars[cvarName] = cvarValue;
+                    // Only the first value from before the match is kept. Names are compared without
+                    // case like convar names, so "HOSTNAME" and "hostname" in one cvars block do not
+                    // save the match's own value as the original.
+                    if (matchConfig.OriginalCvars.Keys.Any(k => k.Equals(cvarName, StringComparison.OrdinalIgnoreCase)))
+                        continue;
                     if (cvar != null)
                     {
                         // An empty read of a non-string convar means the value could not be read;
@@ -945,6 +950,20 @@ namespace MatchZy
 
         public void GetOptionalMatchValues(JObject jsonDataObject)
         {
+            // "friendly_fire": true / false / "grenades" (team damage from HE and molotov only).
+            // Same as .ffire on / off / nades; applied after the mode cfg on every map.
+            if (jsonDataObject["friendly_fire"] is JToken ffToken && ffToken.Type != JTokenType.Null)
+            {
+                string ff = ffToken.ToString().Trim().ToLowerInvariant();
+                if (ff is "grenades" or "nades")
+                    SetFriendlyFireMode("grenades");
+                else if (ff is "true" or "1")
+                    SetFriendlyFireMode("on");
+                else if (ff is "false" or "0")
+                    SetFriendlyFireMode("off");
+                else
+                    Log($"[LoadMatch] Ignoring friendly_fire \"{ff}\": use true, false or \"grenades\".");
+            }
             if (jsonDataObject["map_sides"] != null)
             {
                 matchConfig.MapSides = jsonDataObject["map_sides"]!.ToObject<List<string>>()!;

@@ -16,7 +16,7 @@ namespace MatchZy
     public partial class MatchZy : BasePlugin
     {
         public override string ModuleName => "MatchZy";
-        public override string ModuleVersion => "1.0.15";
+        public override string ModuleVersion => "1.0.16";
         public override string ModuleAuthor => "Miksen/mrc4tt (based on MatchZy by WD-)";
         public override string ModuleDescription => "A plugin for running and managing CS2 practice/pugs/scrims/matches!";
         public string chatPrefix = $"{ChatColors.Green}[MatchZy]{ChatColors.Default}";
@@ -713,6 +713,7 @@ namespace MatchZy
             });
 
             RegisterListener<Listeners.OnEntitySpawned>(OnEntitySpawnedHandler);
+            RegisterListener<Listeners.OnPlayerTakeDamagePre>(OnPlayerTakeDamagePreFriendlyFire);
             RegisterListener<Listeners.OnEntityDeleted>(OnEntityDeletedHandler);
             // Ready-panel HTML render: runs every tick but early-outs cheaply unless the ready
             // phase is active (matchzy_ready_hint_style = 1). Per-tick re-send keeps the panel
@@ -1026,6 +1027,9 @@ namespace MatchZy
                         finalEvent = 9;
                     }
                     @event.Reason = finalEvent;
+                    // A pause requested while the knife was being played never got a freeze time to
+                    // land in; release it so side selection is not paused, and ask again once live.
+                    CarryPendingPauseToLive();
                     isSideSelectionPhase = true;
                     isKnifeRound = false;
                     StartAfterKnifeWarmup();
@@ -1753,6 +1757,12 @@ namespace MatchZy
                     if (cmdWord == ".rr" && messageCommandArg != "" && isDryRun)
                     {
                         HandleDryRunRestartRound(player, messageCommandArg);
+                        return HookResult.Continue;
+                    }
+
+                    if ((cmdWord == ".ffire" || cmdWord == ".friendlyfire") && messageCommandArg != "")
+                    {
+                        HandleFriendlyFireCommand(player, messageCommandArg);
                         return HookResult.Continue;
                     }
 

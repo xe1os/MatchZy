@@ -5,7 +5,7 @@ Når GOTV er slået til (`tv_enable 1`, fra startparametrene eller en cfg), opta
 | Indstilling | Standard | Formål |
 |---|---|---|
 | `matchzy_demo_path` | `demos/` | Mappe i forhold til `csgo/`. |
-| `matchzy_demo_name_format` | `{TIME}_{MATCH_ID}_{MAP}_{TEAM1}_vs_{TEAM2}` | Filnavn. Også `{MAPNUMBER}`. |
+| `matchzy_demo_name_format` | `{TIME}_{MATCH_ID}_{MAP}_{TEAM1}_vs_{TEAM2}` | Filnavn. Også `{MAPNUMBER}`. Bogstaver uden for ASCII omskrives (`æ` til `ae`, `é` til `e`) eller fjernes, så upload-headerne er gyldige. |
 
 ## Pålidelig optagelse { #reliable-recording }
 

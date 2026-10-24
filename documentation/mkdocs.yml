@@ -172,6 +172,7 @@ nav:
       - Commands: reference/commands.md
       - Configuration (convars): reference/convars.md
       - Match config JSON: reference/match-config.md
+      - Match config examples: reference/match-examples.md
       - Events: reference/events.md
       - Files and folders: reference/files.md
   - Changelog:
