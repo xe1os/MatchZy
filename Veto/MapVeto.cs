@@ -662,37 +662,12 @@ namespace MatchZy
 
         public bool ValidateMapBanLogic()
         {
-            int numberOfPicks = 0;
-            string option;
-            for (int i = 0; i < matchConfig.MapBanOrder.Count; i++)
-            {
-                option = matchConfig.MapBanOrder[i];
-                if (option == "team1_pick" || option == "team2_pick")
-                {
-                    numberOfPicks++;
-                }
-
-                if (numberOfPicks == matchConfig.NumMaps || i == matchConfig.MapsPool.Count - 2)
-                {
-                    break;
-                }
-            }
-
-            // Example: In a Bo3, at least 2 of the options must be picks to avoid randomly selecting map order of remaining maps.
-            if (matchConfig.NumMaps > 1 && numberOfPicks < matchConfig.NumMaps - 1)
-            {
-                Log($"[ValidateMapBanLogic] In a series of {matchConfig.NumMaps} maps, at least {matchConfig.NumMaps - 1} veto options must be picks. Found {numberOfPicks} pick(s).");
-                return false;
-            }
-
-            if (matchConfig.MapsPool.Count - 1 != matchConfig.MapBanOrder.Count && numberOfPicks != matchConfig.NumMaps)
-            {
-                // Example: Map pool of 7 requires 6 picks/bans *unless* we have picks for all maps.
-                Log($"[ValidateMapBanLogic] The number of maps in the pool {matchConfig.MapsPool.Count} must be one larger than the number of map picks/bans {matchConfig.MapBanOrder.Count}, unless the number of picks {numberOfPicks} matches the series length {matchConfig.NumMaps}.");
-                return false;
-            }
-
-            return true;
+            // Rules live in MatchConfigLogic (Logic/, unit tested).
+            string error = MatchConfigLogic.ValidateMapBanOrder(matchConfig.MapBanOrder, matchConfig.MapsPool.Count, matchConfig.NumMaps);
+            if (error == "")
+                return true;
+            Log($"[ValidateMapBanLogic] {error}");
+            return false;
         }
 
         public void HandleSideChoice(CsTeam side, int client)

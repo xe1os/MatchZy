@@ -92,3 +92,6 @@ jobs:
 
       - name: Build
         run: dotnet build -c Release
+
+      - name: Unit tests
+        run: dotnet test tests/MatchZy.Tests -c Release

@@ -2827,17 +2827,8 @@ namespace MatchZy
             );
         }
 
-        private static readonly System.Text.RegularExpressions.Regex SafeMapNameRegex = new(@"^[A-Za-z0-9_\-\./:]+$");
-
-        /// <summary>
-        /// Map names end up in changelevel / host_workshop_map / ds_workshop_changelevel console
-        /// commands. Only plain map tokens (letters, digits, _ - . / :) are allowed, so a name from a
-        /// match config, a veto, a backup or chat cannot carry a quote or ';' into the console.
-        /// </summary>
-        public static bool IsSafeMapName(string? mapName)
-        {
-            return !string.IsNullOrWhiteSpace(mapName) && mapName.Length <= 128 && SafeMapNameRegex.IsMatch(mapName);
-        }
+        // See MatchConfigLogic.IsSafeMapName (Logic/, unit tested).
+        public static bool IsSafeMapName(string? mapName) => MatchConfigLogic.IsSafeMapName(mapName);
 
         private void ChangeMap(string mapName, float delay)
         {
@@ -4901,7 +4892,7 @@ namespace MatchZy
         public const int GameModeWingman = 2;
         public const int GameModeRush = 6;
 
-        public static readonly string[] MatchGameModes = { "competitive", "wingman", "rush", "1v1" };
+        public static readonly string[] MatchGameModes = MatchConfigLogic.GameModes;
 
         // The loaded match's mode: its "game_mode", else "wingman" when "wingman" is set (configs and
         // backups from before "game_mode" existed), else competitive.

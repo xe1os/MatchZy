@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Unit tests for the plugin logic that does not need a running CS2 server. Only files under
+       Logic/ (no CounterStrikeSharp dependency) are compiled in; the rest of the plugin runs only
+       inside the game. Run: dotnet test tests/MatchZy.Tests -c Release -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Compile Include="../../Logic/**/*.cs" Link="Plugin/%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Include="../../cfg/config.cfg" Link="cfg/config.cfg" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

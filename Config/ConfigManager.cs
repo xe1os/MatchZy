@@ -287,6 +287,7 @@ to compare with.
             File.WriteAllText(path, content);
         }
 
+        // The merge itself is ConfigCfgMerge.Merge (Logic/, unit tested); this only does the file I/O.
         private void MergeMissingConfigCvars(string templateContent, ISet<string>? registeredNames)
         {
             try
@@ -297,187 +298,21 @@ to compare with.
                     return;
                 }
 
-                string existing = File.ReadAllText(filePath);
-                var existingCvars = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var rawLine in existing.Split('\n'))
-                {
-                    var line = rawLine.Trim();
-                    if (line.Length == 0)
-                    {
-                        continue;
-                    }
-                    if (line.StartsWith("//"))
-                    {
-                        // Treat a commented-out cvar (e.g. "// matchzy_x true") as present so
-                        // we do not re-append something the admin deliberately disabled. Only
-                        // when the cvar name is the FIRST token after //, not a passing mention
-                        // in prose (e.g. "// Example matchzy_hostname_format ...").
-                        var commented = line.TrimStart('/').Trim();
-                        var commentedName = commented.Split(new[] { ' ', '\t' }, 2)[0];
-                        if (commentedName.StartsWith("matchzy_", StringComparison.OrdinalIgnoreCase))
-                        {
-                            existingCvars.Add(commentedName);
-                        }
-                        continue;
-                    }
-                    var name = line.Split(new[] { ' ', '\t' }, 2)[0];
-                    if (name.Length > 0)
-                    {
-                        existingCvars.Add(name);
-                    }
-                }
-
-                var missingBlocks = new List<string>();
-                var currentBlock = new List<string>();
-
-                void FlushBlock()
-                {
-                    if (currentBlock.Count == 0)
-                    {
-                        return;
-                    }
-                    string? cvarName = null;
-                    foreach (var bl in currentBlock)
-                    {
-                        var t = bl.Trim();
-                        if (t.Length == 0 || t.StartsWith("//"))
-                        {
-                            continue;
-                        }
-                        cvarName = t.Split(new[] { ' ', '\t' }, 2)[0];
-                        break;
-                    }
-                    if (cvarName != null && !existingCvars.Contains(cvarName))
-                    {
-                        missingBlocks.Add(string.Join("\n", currentBlock));
-                    }
-                    currentBlock.Clear();
-                }
-
-                foreach (var rawLine in templateContent.Split('\n'))
-                {
-                    var line = rawLine.TrimEnd('\r');
-                    if (string.IsNullOrWhiteSpace(line))
-                    {
-                        FlushBlock();
-                    }
-                    else
-                    {
-                        currentBlock.Add(line);
-                    }
-                }
-                FlushBlock();
-
-                const string header = "// --- Added by MatchZy update (missing cvars appended) ---";
-
-                // Collapse duplicate update headers left by older builds, which appended a FRESH
-                // header on every load (one per newly-added cvar). Keep the first; removing the
-                // rest only drops redundant comment lines, never a cvar. Ensures there is only ever
-                // ONE "Added by MatchZy update" header in the file.
-                var lines = existing.Replace("\r\n", "\n").Split('\n').ToList();
-                int firstHeaderIdx = lines.FindIndex(l => l.Trim() == header);
-                bool removedDuplicateHeaders = false;
-                if (firstHeaderIdx >= 0)
-                {
-                    for (int i = lines.Count - 1; i > firstHeaderIdx; i--)
-                    {
-                        if (lines[i].Trim() == header)
-                        {
-                            lines.RemoveAt(i);
-                            removedDuplicateHeaders = true;
-                        }
-                    }
-                }
-
-                // Prune retired cvars: a convar that was renamed/removed leaves a dead line in old
-                // config.cfg files that spams "Unknown command '<name>'!" every time config.cfg execs.
-                // Remove the active setting line only; comment lines stay. Only matchzy_* names are touched: the listed ones, plus any the plugin no longer
-                // registers (see autoPrune). The current replacement (if any) is appended by the
-                // missing-cvar pass above, so this migrates the file cleanly.
-                var retiredCvars = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    "matchzy_ready_hint_suppress_warmup", // renamed -> matchzy_ready_hide_warmup_hud (itself now retired)
-                    "matchzy_ready_hide_warmup_hud",      // folded into matchzy_ready_hint_style modes 1/2
-                    "matchzy_ready_block_warmup_announce",// removed: experimental warmup-announce block (dead end)
-                    "matchzy_random_spawns",              // removed with the old random-spawn option
-                };
-
-                // Automatic pruning: a matchzy_* name that the plugin no longer registers (no
-                // FakeConVar, no [ConsoleCommand]) and that is not in the template was removed from
-                // the source, so it is pruned like the names above without having to be listed.
-                // Only trusted when every template cvar resolved to a registered name - if the
-                // reflection scan came back incomplete, it would otherwise delete live settings.
-                var templateNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var rawLine in templateContent.Split('\n'))
-                {
-                    var t = rawLine.Trim();
-                    if (t.Length == 0)
-                        continue;
-                    string first = t.StartsWith("//")
-                        ? t.TrimStart('/').Trim().Split(new[] { ' ', '\t' }, 2)[0]
-                        : t.Split(new[] { ' ', '\t' }, 2)[0];
-                    if (first.StartsWith("matchzy_", StringComparison.OrdinalIgnoreCase))
-                        templateNames.Add(first);
-                }
-                bool autoPrune = registeredNames != null && registeredNames.Count > 0 && templateNames.All(registeredNames.Contains);
-                if (registeredNames != null && !autoPrune)
+                var result = ConfigCfgMerge.Merge(File.ReadAllText(filePath), templateContent, registeredNames);
+                if (result.PruneSkipped)
                     Console.WriteLine($"[MatchZy] Skipped pruning removed cvars from {ConfigFiles.Paths.Config}: the registered cvar list is incomplete.");
-                bool IsRetired(string name) =>
-                    retiredCvars.Contains(name)
-                    || (autoPrune
-                        && name.StartsWith("matchzy_", StringComparison.OrdinalIgnoreCase)
-                        && !templateNames.Contains(name)
-                        && !registeredNames!.Contains(name));
-                var removedNames = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-                bool removedRetired = false;
-                for (int i = lines.Count - 1; i >= 0; i--)
-                {
-                    var t = lines[i].Trim();
-                    // Comment lines are never touched: help text, the admin's own notes and
-                    // commented-out settings are harmless (only an active line prints
-                    // "Unknown command"), and help text often spans several lines.
-                    if (t.Length == 0 || t.StartsWith("//"))
-                        continue;
-                    string first = t.Split(new[] { ' ', '\t' }, 2)[0];
-                    if (!IsRetired(first))
-                        continue;
-                    removedNames.Add(first);
-                    lines.RemoveAt(i);
-                    removedRetired = true;
-                }
-
-                // Nothing new to add and nothing to clean -> leave the file untouched.
-                if (missingBlocks.Count == 0 && !removedDuplicateHeaders && !removedRetired)
-                {
+                if (result.NewContent == null)
                     return;
-                }
 
-                var sb = new System.Text.StringBuilder(string.Join("\n", lines).TrimEnd('\n'));
-                sb.Append('\n');
-                if (missingBlocks.Count > 0)
-                {
-                    sb.Append('\n');
-                    // Add the header only when the file has none (after the dedup above).
-                    if (firstHeaderIdx < 0)
-                    {
-                        sb.Append(header).Append('\n');
-                    }
-                    foreach (var block in missingBlocks)
-                    {
-                        sb.Append(block);
-                        sb.Append("\n\n");
-                    }
-                }
-
-                // Rewrite (not append): only redundant header comment lines were removed, so admin
-                // edits to actual cvars are preserved.
-                File.WriteAllText(filePath, sb.ToString());
-                if (missingBlocks.Count > 0)
-                    Console.WriteLine($"[MatchZy] Appended {missingBlocks.Count} missing cvar(s) to {ConfigFiles.Paths.Config}.");
-                if (removedDuplicateHeaders)
+                // Rewrite (not append): only redundant header comment lines and retired settings were
+                // removed, so admin edits to actual cvars are preserved.
+                File.WriteAllText(filePath, result.NewContent);
+                if (result.AppendedCount > 0)
+                    Console.WriteLine($"[MatchZy] Appended {result.AppendedCount} missing cvar(s) to {ConfigFiles.Paths.Config}.");
+                if (result.CollapsedDuplicateHeaders)
                     Console.WriteLine($"[MatchZy] Collapsed duplicate update headers in {ConfigFiles.Paths.Config}.");
-                if (removedRetired)
-                    Console.WriteLine($"[MatchZy] Removed cvar(s) no longer in MatchZy from {ConfigFiles.Paths.Config}: {string.Join(", ", removedNames)}");
+                if (result.RemovedNames.Count > 0)
+                    Console.WriteLine($"[MatchZy] Removed cvar(s) no longer in MatchZy from {ConfigFiles.Paths.Config}: {string.Join(", ", result.RemovedNames)}");
             }
             catch (Exception ex)
             {

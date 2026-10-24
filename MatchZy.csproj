@@ -52,6 +52,12 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
+    <!-- The unit tests are their own project (dotnet test tests/MatchZy.Tests); keep them out of the
+         plugin, which otherwise compiles every .cs under the repo. -->
+    <Compile Remove="tests/**" />
+    <None Remove="tests/**" />
+  </ItemGroup>
+  <ItemGroup>
     <None Include="lang\**\*.*" CopyToOutputDirectory="PreserveNewest" />
     <!-- Default cfgs: written by ConfigManager.InitializeConfigs when a server has none. -->
     <EmbeddedResource Include="cfg\*.cfg" LogicalName="MatchZy.cfg.%(Filename)%(Extension)" />
