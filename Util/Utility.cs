@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Drawing;
 using System.Text;
 using System.Text.Json;
@@ -131,6 +132,14 @@ namespace MatchZy
         // included), not only where a caller re-applies them.
         private void ExecModeCfg(string cfgPath, string extraCommands = "")
         {
+            // matchzy_warmup_instant_respawn changed friendly fire, buy time and respawn cash for the
+            // warmup; give the next mode the values from before (knife.cfg, prac.cfg and most live
+            // cfgs do not set all of them).
+            if (_cvarsBeforeWarmup != null && cfgPath != warmupCfgPath)
+            {
+                Server.ExecuteCommand(_cvarsBeforeWarmup);
+                _cvarsBeforeWarmup = null;
+            }
             // The cfg's bot_quota 0 must not find leftover bots, or the engine's quota sweep can
             // kick the CSTV bot along with them.
             KickBotsBeforeQuotaReset();
@@ -315,14 +324,15 @@ namespace MatchZy
             }
             List<string> unreadyPlayers = new();
             int perTeam = EffectiveReadyPerTeam();
+            (bool ctDone, bool tDone) = ReadySidesDone();
 
             foreach (var key in playerReadyStatus.Keys)
             {
                 if (playerReadyStatus[key] == false && playerData.TryGetValue(key, out var p) && p != null && p.IsValid)
                 {
-                    // Per-team mode: a side that already has N ready players is done, so its
-                    // remaining players are not holding anything up.
-                    if (perTeam > 0 && (p.TeamNum == (int)CsTeam.CounterTerrorist || p.TeamNum == (int)CsTeam.Terrorist) && IsTeamReady(p.TeamNum))
+                    // A side that is already ready (N ready players, min_players_to_ready, .forceready)
+                    // is done, so its remaining players are not holding anything up.
+                    if ((p.TeamNum == (int)CsTeam.CounterTerrorist && ctDone) || (p.TeamNum == (int)CsTeam.Terrorist && tDone))
                         continue;
                     // Coaches do not count towards the ready-up (GetTeamPlayerCount), so they hold nothing up.
                     if (matchzyTeam1.coach.Contains(p) || matchzyTeam2.coach.Contains(p))
@@ -338,7 +348,11 @@ namespace MatchZy
                 {
                     if (player == null || !player.IsValid || player.IsBot || player.IsHLTV)
                         continue;
-                    string minimumReadyRequiredMessage = isMatchSetup || EffectiveReadyPerTeam() > 0 ? "" : Localizer.ForPlayer(player, "matchzy.minimum.ready.required", $"{ChatColors.Green}{EffectiveMinimumReadyRequired()}{ChatColors.Default}");
+                    // Loaded match: say how many each side needs, so a list of every unready player
+                    // does not read as "everyone has to type .ready" when fewer are enough.
+                    string minimumReadyRequiredMessage = isMatchSetup
+                        ? Localizer.ForPlayer(player, "matchzy.ready.neededperside", ReadyNeededOnSide((int)CsTeam.CounterTerrorist), ReadyNeededOnSide((int)CsTeam.Terrorist))
+                        : EffectiveReadyPerTeam() > 0 ? "" : Localizer.ForPlayer(player, "matchzy.minimum.ready.required", $"{ChatColors.Green}{EffectiveMinimumReadyRequired()}{ChatColors.Default}");
                     player.PrintToChat($"{chatPrefix} {Localizer.ForPlayer(player, key, unreadyPlayerList, minimumReadyRequiredMessage)}");
                 }
             }
@@ -445,7 +459,7 @@ namespace MatchZy
 
         // Cached ready-panel DATA (recomputed only on change). Localized HTML is built per
         // player each tick so every player sees the panel in their own language.
-        private int _rpReady, _rpRequired, _rpTotal, _rpFilled, _rpCtCount, _rpCtReady, _rpTCount, _rpTReady;
+        private int _rpReady, _rpRequired, _rpFilled, _rpCtCount, _rpCtReady, _rpTCount, _rpTReady;
         // Loaded match: players each side needs (roster-sized), 0 otherwise.
         private int _rpCtNeed, _rpTNeed;
         // Ready count shown per side: capped at what the side needs (loaded match), so extra ready
@@ -490,6 +504,16 @@ namespace MatchZy
         // convars). Reset when leaving the ready phase so it never leaks into live play.
         private bool _fakeWarmupActive;
 
+        // Sides that are already ready, so their unready players are not listed as holding the start
+        // up. Loaded match or matchzy_ready_per_team only: a pug without it counts ready players in
+        // total, not per side.
+        private (bool Ct, bool T) ReadySidesDone()
+        {
+            if (!isMatchSetup && EffectiveReadyPerTeam() <= 0)
+                return (false, false);
+            return (IsTeamReady((int)CsTeam.CounterTerrorist), IsTeamReady((int)CsTeam.Terrorist));
+        }
+
         // Recompute the shared ready numbers only when ready status changed.
         private void ComputeReadyData()
         {
@@ -498,6 +522,7 @@ namespace MatchZy
 
             int readyCount = 0, totalPlayers = 0;
             List<string> notReady = new();
+            (bool ctDone, bool tDone) = ReadySidesDone();
             foreach (var key in playerReadyStatus.Keys)
             {
                 if (playerData.TryGetValue(key, out var p) && p != null && p.IsValid)
@@ -508,7 +533,7 @@ namespace MatchZy
                     totalPlayers++;
                     if (playerReadyStatus[key])
                         readyCount++;
-                    else
+                    else if (!(p.TeamNum == (int)CsTeam.CounterTerrorist ? ctDone : tDone))
                         notReady.Add(p.PlayerName);
                 }
             }
@@ -547,7 +572,6 @@ namespace MatchZy
                 int minReady = EffectiveMinimumReadyRequired();
                 _rpRequired = minReady > 0 ? minReady : totalPlayers;
             }
-            _rpTotal = totalPlayers;
             _rpFilled = Math.Clamp((int)Math.Round(12.0 * _rpReady / Math.Max(1, _rpRequired)), 0, 12);
 
             string list = string.Join(", ", notReady.Take(6));
@@ -657,7 +681,8 @@ namespace MatchZy
         {
             if (!readyEnabled.Value)
                 return Localizer.ForPlayer(player, "matchzy.ready.waitingforadmin");
-            string line1 = Localizer.ForPlayer(player, "matchzy.hint.waitingforplayers", _rpReady, _rpTotal);
+            // Ready against what the start needs (as the HTML panel), not against everyone present.
+            string line1 = Localizer.ForPlayer(player, "matchzy.hint.waitingforplayers", _rpReady, _rpRequired);
             string line2 = Localizer.ForPlayer(player, "matchzy.hint.usereadycommand");
             if (ShortHandedSide(player.TeamNum) is (int shortPresent, int shortRequired))
                 line2 += "\n" + Localizer.ForPlayer(player, "matchzy.ready.shorthanded", shortPresent, shortRequired, shortRequired - shortPresent);
@@ -800,7 +825,7 @@ namespace MatchZy
                             // behaviour - the round would start counting and could end. Re-create a
                             // "fake warmup" so the ready phase still plays like warmup: round never
                             // ends, no time expiry, respawn on death. Reset on leaving ready (above).
-                            Server.ExecuteCommand("mp_ignore_round_win_conditions 1; mp_respawn_on_death_ct 1; mp_respawn_on_death_t 1; mp_roundtime 60; mp_roundtime_defuse 60; mp_roundtime_hostage 60");
+                            Server.ExecuteCommand(FakeWarmupCommands);
                             _fakeWarmupActive = true;
                         }
                     }
@@ -1089,6 +1114,46 @@ namespace MatchZy
             }
         }
 
+        // Fake-warmup rules (matchzy_ready_hint_style 1/2 with real warmup forced off): the round never
+        // ends or times out, and the dead respawn.
+        private const string FakeWarmupCommands = "mp_ignore_round_win_conditions 1; mp_respawn_on_death_ct 1; mp_respawn_on_death_t 1; mp_roundtime 60; mp_roundtime_defuse 60; mp_roundtime_hostage 60";
+
+        // Commands that put back what matchzy_warmup_instant_respawn changed and no mode cfg resets
+        // everywhere (friendly fire, buy time, respawn cash); null = nothing changed.
+        private string? _cvarsBeforeWarmup;
+
+        // matchzy_warmup_instant_respawn: instant-respawn warmup, run after warmup.cfg and its override
+        // (a match config's "cvars" still win). Instant respawn at the team spawns with 2 s spawn
+        // protection, no bomb, no friendly fire, buying all the time, and full money again on every
+        // respawn (up to mp_maxmoney). Every other mode cfg sets mp_respawn_immunitytime back to 0.
+        // Empty when off: warmup.cfg decides.
+        private string WarmupInstantRespawnCommands()
+        {
+            if (!warmupInstantRespawn.Value)
+                return "";
+            if (_cvarsBeforeWarmup == null)
+            {
+                bool friendlyFire = ConVar.Find("mp_friendlyfire")?.GetPrimitiveValue<bool>() ?? true;
+                float buyTime = ConVar.Find("mp_buytime")?.GetPrimitiveValue<float>() ?? 15f;
+                int respawnCash = ConVar.Find("cash_player_respawn_amount")?.GetPrimitiveValue<int>() ?? 0;
+                _cvarsBeforeWarmup = string.Create(CultureInfo.InvariantCulture,
+                    $"mp_friendlyfire {(friendlyFire ? 1 : 0)};mp_buytime {buyTime};cash_player_respawn_amount {respawnCash}");
+            }
+            return ";mp_respawn_on_death_ct 1;mp_respawn_on_death_t 1;mp_respawnwavetime_ct 0;mp_respawnwavetime_t 0;mp_respawn_immunitytime 2;mp_give_player_c4 0;mp_friendlyfire 0;mp_buytime 999999;cash_player_respawn_amount 16000";
+        }
+
+        // warmup.cfg (with mp_respawn_on_death 0 and mp_ignore_round_win_conditions 0) also runs
+        // when a warmup restarts while the fake warmup is already active (match loaded during
+        // warmup, veto ended, map reload). The fake-warmup rules were only set when it began, so
+        // the cfg left them off: rounds ended on eliminations and the dead waited for the next
+        // round. Put them back after the cfg.
+        private void ExecWarmupModeCfg(string extraCommands = "")
+        {
+            ExecModeCfg(warmupCfgPath, extraCommands + WarmupInstantRespawnCommands());
+            if (_fakeWarmupActive)
+                Server.ExecuteCommand(FakeWarmupCommands);
+        }
+
         private void ExecWarmupCfg()
         {
             if (!warmupEnabled.Value)
@@ -1100,12 +1165,14 @@ namespace MatchZy
             var absolutePath = Path.Join(Server.GameDirectory, "csgo", "cfg", warmupCfgPath);
             if (File.Exists(Path.Join(Server.GameDirectory + "/csgo/cfg", warmupCfgPath)))
             {
-                ExecModeCfg(warmupCfgPath);
+                ExecWarmupModeCfg();
             }
             else
             {
                 KickAllBotsProtectCSTV();
-                Server.ExecuteCommand("mp_autokick 0;mp_autoteambalance 0;mp_buy_anywhere 0;mp_buytime 15;mp_death_drop_gun 0;mp_free_armor 1;mp_ignore_round_win_conditions 0;mp_limitteams 0;mp_radar_showall 0;mp_respawn_on_death_ct 0;mp_respawn_on_death_t 0;mp_solid_teammates 0;mp_spectators_max 20;mp_maxmoney 16000;mp_startmoney 16000;mp_timelimit 0;sv_alltalk 0;sv_auto_full_alltalk_during_warmup_half_end 0;sv_deadtalk 1;sv_full_alltalk 0;sv_grenade_trajectory 0;sv_hibernate_when_empty 0;sv_hide_roundtime_until_seconds 1;mp_weapons_allow_typecount -1;ammo_grenade_limit_flashbang 2;mp_respawn_immunitytime 0;sv_infinite_ammo 0;sv_showimpacts 0;sv_voiceenable 1;sm_cvar sv_mute_players_with_social_penalties 0;sv_mute_players_with_social_penalties 0;tv_relayvoice 0;sv_cheats 0;mp_ct_default_melee weapon_knife;mp_ct_default_secondary weapon_hkp2000;mp_ct_default_primary \"\";mp_t_default_melee weapon_knife;mp_t_default_secondary weapon_glock;mp_t_default_primary \"\";mp_maxrounds 24;mp_warmuptime 9999;cash_team_bonus_shorthanded 0;mp_restartgame 1;mp_warmup_online_enabled 1;mp_warmup_start;mp_warmup_pausetimer 1");
+                Server.ExecuteCommand("mp_autokick 0;mp_autoteambalance 0;mp_buy_anywhere 0;mp_buytime 15;mp_death_drop_gun 0;mp_free_armor 1;mp_defuser_allocation 0;mp_drop_knife_enable 0;mp_ignore_round_win_conditions 0;mp_limitteams 0;mp_radar_showall 0;mp_respawn_on_death_ct 0;mp_respawn_on_death_t 0;mp_randomspawn 0;mp_teammates_are_enemies 0;mp_solid_teammates 0;mp_spectators_max 20;mp_maxmoney 16000;mp_startmoney 16000;mp_timelimit 0;sv_alltalk 0;sv_auto_full_alltalk_during_warmup_half_end 0;sv_deadtalk 1;sv_full_alltalk 0;sv_grenade_trajectory 0;sv_hibernate_when_empty 0;sv_hide_roundtime_until_seconds 1;mp_weapons_allow_typecount -1;ammo_grenade_limit_flashbang 2;mp_respawn_immunitytime 0;sv_infinite_ammo 0;sv_showimpacts 0;sv_voiceenable 1;sm_cvar sv_mute_players_with_social_penalties 0;sv_mute_players_with_social_penalties 0;tv_relayvoice 0;sv_cheats 0;mp_ct_default_melee weapon_knife;mp_ct_default_secondary weapon_hkp2000;mp_ct_default_primary \"\";mp_t_default_melee weapon_knife;mp_t_default_secondary weapon_glock;mp_t_default_primary \"\";mp_maxrounds 24;mp_warmuptime 9999;cash_team_bonus_shorthanded 0;mp_restartgame 1;mp_warmup_online_enabled 1;mp_warmup_start;mp_warmup_pausetimer 1" + WarmupInstantRespawnCommands());
+                if (_fakeWarmupActive)
+                    Server.ExecuteCommand(FakeWarmupCommands);
             }
             // The warmup cfg sets bot_quota 0; put a bot team back.
             ApplyBotTeam();
@@ -1282,7 +1349,7 @@ namespace MatchZy
             }
             else
             {
-                Server.ExecuteCommand("mp_ct_default_secondary \"\";mp_free_armor 1;mp_freezetime 10;mp_give_player_c4 0;mp_maxmoney 0;mp_respawn_immunitytime 0;sv_hide_roundtime_until_seconds 0;mp_respawn_on_death_ct 0;mp_respawn_on_death_t 0;mp_roundtime 1.92;mp_roundtime_defuse 1.92;mp_roundtime_hostage 1.92;mp_t_default_secondary \"\";mp_round_restart_delay 3;mp_team_intro_time 0;mp_restartgame 1;mp_warmup_end;");
+                Server.ExecuteCommand("mp_ct_default_secondary \"\";mp_free_armor 1;mp_defuser_allocation 0;mp_drop_knife_enable 0;mp_freezetime 10;mp_give_player_c4 0;mp_maxmoney 0;mp_respawn_immunitytime 0;sv_hide_roundtime_until_seconds 0;mp_respawn_on_death_ct 0;mp_respawn_on_death_t 0;mp_roundtime 1.92;mp_roundtime_defuse 1.92;mp_roundtime_hostage 1.92;mp_t_default_secondary \"\";mp_round_restart_delay 3;mp_team_intro_time 0;mp_restartgame 1;mp_warmup_end;");
             }
             ApplyBotTeam();
 
@@ -2446,6 +2513,12 @@ namespace MatchZy
                         SetupRoundBackupFile();
                         GetSpawns();
 
+                        // Put everyone on their roster side BEFORE the knife/live restart that the
+                        // Start* calls below queue (mp_restartgame), so that restart spawns them
+                        // on the right side. Not before a veto (sides are not decided yet).
+                        if (!isPreVeto)
+                            PlaceMatchPlayers();
+
                         if (isPreVeto)
                         {
                             // The veto is not the match start: the players ready up again afterwards and
@@ -2753,6 +2826,17 @@ namespace MatchZy
                 }
             });
 
+            // A pause still pending when the map ends (an auto-pause after a disconnect in the last
+            // round, a .pause or .tech called during it) never reaches a freeze time. It used to be
+            // cleared only between maps of a series, so a series end ran the intermission and the
+            // reset with mp_pause_match still queued and the auto-pause state left set.
+            if (isPaused)
+                UnpauseMatch();
+            autoResumeTimer?.Kill();
+            autoResumeTimer = null;
+            isAutoPaused = false;
+            autoPauseReason = null;
+
             // The series winner (null on a tie). Passing null for every series end printed
             // "have tied the match" and reported winner "none" even for a 2-0.
             if (seriesOver)
@@ -2776,9 +2860,6 @@ namespace MatchZy
 
             matchConfig.CurrentMapNumber += 1;
             string nextMap = matchConfig.Maplist[matchConfig.CurrentMapNumber];
-
-            if (isPaused)
-                UnpauseMatch();
 
             stopData["ct"] = false;
             stopData["t"] = false;
@@ -3559,15 +3640,9 @@ namespace MatchZy
             if (matchStarted || (!isSleep && !isDryRun && !isPractice))
                 return;
 
-            isDryRun = false;
-
-            ResetAllPlayerPracticeSettings(enteringPractice: false);
-            CleanupAllCollisionTimers();
-            ExecUnpracCommands();
+            EndPracticeMode();
             ResetMatch();
-            RemoveSpawnBeams();
             isMatchModeEnabled = true;
-            isPractice = false; // Set it here to be safe
             ScheduleRoundHistoryWipe();
         }
 
@@ -3597,13 +3672,13 @@ namespace MatchZy
             {
                 if (gameMode == 2)
                 {
-                    Server.ExecuteCommand("ammo_grenade_limit_default 1;ammo_grenade_limit_flashbang 2;ammo_grenade_limit_total 4;mp_weapons_allow_typecount 5;sv_hide_roundtime_until_seconds 0;bot_quota 0;cash_player_bomb_defused 300;cash_player_bomb_planted 300;cash_player_damage_hostage -30;cash_player_interact_with_hostage 300;cash_player_killed_enemy_default 300;cash_player_killed_enemy_factor 1;cash_player_killed_hostage -1000;cash_player_killed_teammate -300;cash_player_rescued_hostage 1000;cash_team_bonus_shorthanded 1000;cash_team_elimination_bomb_map 2750;cash_team_elimination_hostage_map_ct 2500;cash_team_elimination_hostage_map_t 2500;cash_team_hostage_alive 0;cash_team_hostage_interaction 600;cash_team_loser_bonus 2000;cash_team_loser_bonus_consecutive_rounds 300;cash_team_planted_bomb_but_defused 600;cash_team_rescued_hostage 600;cash_team_terrorist_win_bomb 3000;cash_team_win_by_defusing_bomb 3000;cash_team_win_by_hostage_rescue 2900;cash_team_win_by_time_running_out_bomb 2750;cash_team_win_by_time_running_out_hostage 2750;ff_damage_reduction_bullets 0.33;ff_damage_reduction_grenade 0.85;ff_damage_reduction_grenade_self 1;ff_damage_reduction_other 0.4;mp_afterroundmoney 16000;mp_autokick 0;mp_autoteambalance 0;mp_backup_restore_load_autopause 0;mp_backup_round_auto 1;mp_buy_anywhere 0;mp_buy_during_immunity 0;mp_buytime 20;mp_c4timer 40;mp_ct_default_melee weapon_knife;mp_ct_default_primary \"\";mp_ct_default_secondary weapon_hkp2000;mp_death_drop_defuser 1;mp_death_drop_grenade 2;mp_death_drop_gun 1;mp_defuser_allocation 0;mp_display_kill_assists 1;mp_endmatch_votenextmap 0;mp_forcecamera 1;mp_free_armor 0;mp_freezetime 10;mp_friendlyfire 1;mp_give_player_c4 1;mp_halftime 1;mp_halftime_duration 15;mp_halftime_pausetimer 0;mp_ignore_round_win_conditions 0;mp_limitteams 0;mp_match_can_clinch 0;mp_match_end_restart 0;mp_maxmoney 8000;");
+                    Server.ExecuteCommand("ammo_grenade_limit_default 1;ammo_grenade_limit_flashbang 2;ammo_grenade_limit_total 4;mp_weapons_allow_typecount 5;sv_hide_roundtime_until_seconds 0;bot_quota 0;cash_player_bomb_defused 300;cash_player_bomb_planted 300;cash_player_damage_hostage -30;cash_player_interact_with_hostage 300;cash_player_killed_enemy_default 300;cash_player_killed_enemy_factor 1;cash_player_killed_hostage -1000;cash_player_killed_teammate -300;cash_player_rescued_hostage 1000;cash_team_bonus_shorthanded 1000;cash_team_elimination_bomb_map 2750;cash_team_elimination_hostage_map_ct 2500;cash_team_elimination_hostage_map_t 2500;cash_team_hostage_alive 0;cash_team_hostage_interaction 600;cash_team_loser_bonus 2000;cash_team_loser_bonus_consecutive_rounds 300;cash_team_planted_bomb_but_defused 600;cash_team_rescued_hostage 600;cash_team_terrorist_win_bomb 3000;cash_team_win_by_defusing_bomb 3000;cash_team_win_by_hostage_rescue 2900;cash_team_win_by_time_running_out_bomb 2750;cash_team_win_by_time_running_out_hostage 2750;ff_damage_reduction_bullets 0.33;ff_damage_reduction_grenade 0.85;ff_damage_reduction_grenade_self 1;ff_damage_reduction_other 0.4;mp_afterroundmoney 16000;mp_autokick 0;mp_autoteambalance 0;mp_backup_restore_load_autopause 0;mp_backup_round_auto 1;mp_buy_anywhere 0;mp_buy_during_immunity 0;mp_buytime 20;mp_c4timer 40;mp_ct_default_melee weapon_knife;mp_ct_default_primary \"\";mp_ct_default_secondary weapon_hkp2000;mp_death_drop_defuser 1;mp_death_drop_grenade 2;mp_death_drop_gun 1;mp_defuser_allocation 0;mp_drop_knife_enable 0;mp_display_kill_assists 1;mp_endmatch_votenextmap 0;mp_forcecamera 1;mp_free_armor 0;mp_freezetime 10;mp_friendlyfire 1;mp_give_player_c4 1;mp_halftime 1;mp_halftime_duration 15;mp_halftime_pausetimer 0;mp_ignore_round_win_conditions 0;mp_limitteams 0;mp_match_can_clinch 0;mp_match_end_restart 0;mp_maxmoney 8000;");
                     Server.ExecuteCommand("mp_maxrounds 16;mp_overtime_enable 0;mp_overtime_halftime_pausetimer 0;mp_overtime_maxrounds 4;mp_overtime_startmoney 8000;mp_playercashawards 1;mp_randomspawn 0;mp_respawn_immunitytime 0;mp_respawn_on_death_ct 0;mp_respawn_on_death_t 0;mp_round_restart_delay 7;mp_roundtime 1.5;mp_roundtime_defuse 1.5;mp_roundtime_hostage 1.5;mp_solid_teammates 1;mp_starting_losses 1;mp_startmoney 16000;mp_t_default_melee weapon_knife;mp_t_default_primary \"\";mp_t_default_secondary weapon_glock;mp_teamcashawards 1;mp_timelimit 0;mp_weapons_allow_map_placed 1;mp_weapons_allow_zeus 1;mp_win_panel_display_time 3;spec_freeze_deathanim_time 0;spec_freeze_time 2;spec_freeze_time_lock 2;spec_replay_enable 0;sv_allow_votes 0;sv_auto_full_alltalk_during_warmup_half_end 0;sv_deadtalk 1;sv_hibernate_postgame_delay 300;sv_ignoregrenaderadio 0;sv_infinite_ammo 0;sv_talk_enemy_dead 0;sv_talk_enemy_living 0;sv_voiceenable 1;tv_relayvoice 0");
                 }
                 else
                 {
                     Server.ExecuteCommand("ammo_grenade_limit_default 1;ammo_grenade_limit_flashbang 2;ammo_grenade_limit_total 4;mp_weapons_allow_typecount 5;sv_hide_roundtime_until_seconds 0;bot_quota 0;cash_player_bomb_defused 300;cash_player_bomb_planted 300;cash_player_damage_hostage -30;cash_player_interact_with_hostage 300;cash_player_killed_enemy_default 300;cash_player_killed_enemy_factor 1;cash_player_killed_hostage -1000;cash_player_killed_teammate -300;cash_player_rescued_hostage 1000;cash_team_elimination_bomb_map 3250;cash_team_elimination_hostage_map_ct 3000;cash_team_elimination_hostage_map_t 3000;cash_team_hostage_alive 0;cash_team_hostage_interaction 600;cash_team_loser_bonus 1400;cash_team_loser_bonus_consecutive_rounds 500;cash_team_planted_bomb_but_defused 600;cash_team_rescued_hostage 600;cash_team_terrorist_win_bomb 3500;cash_team_win_by_defusing_bomb 3500;");
-                    Server.ExecuteCommand("cash_team_win_by_hostage_rescue 2900;cash_team_win_by_time_running_out_bomb 3250;cash_team_win_by_time_running_out_hostage 3250;ff_damage_reduction_bullets 0.33;ff_damage_reduction_grenade 0.85;ff_damage_reduction_grenade_self 1;ff_damage_reduction_other 0.4;mp_afterroundmoney 16000;mp_autokick 0;mp_autoteambalance 0;mp_backup_restore_load_autopause 1;mp_backup_round_auto 1;mp_buy_anywhere 0;mp_buy_during_immunity 0;mp_buytime 20;mp_c4timer 40;mp_ct_default_melee weapon_knife;mp_ct_default_primary \"\";mp_ct_default_secondary weapon_hkp2000;mp_death_drop_defuser 1;mp_death_drop_grenade 2;mp_death_drop_gun 1;mp_defuser_allocation 0;mp_display_kill_assists 1;mp_endmatch_votenextmap 0;mp_forcecamera 1;mp_free_armor 0;mp_freezetime 18;mp_friendlyfire 1;mp_give_player_c4 1;mp_halftime 1;mp_halftime_duration 15;mp_halftime_pausetimer 0;mp_ignore_round_win_conditions 0;mp_limitteams 0;mp_match_can_clinch 0;mp_match_end_restart 0;mp_maxmoney 16000;mp_maxrounds 24;mp_overtime_enable 0;mp_overtime_halftime_pausetimer 0;mp_overtime_maxrounds 6;mp_overtime_startmoney 10000;mp_playercashawards 1;mp_randomspawn 0;mp_respawn_immunitytime 0;mp_respawn_on_death_ct 0;mp_respawn_on_death_t 0;mp_round_restart_delay 5;mp_roundtime 1.92;mp_roundtime_defuse 1.92;mp_roundtime_hostage 1.92;mp_solid_teammates 1;mp_starting_losses 1;mp_startmoney 16000;mp_t_default_melee weapon_knife;mp_t_default_primary \"\";mp_t_default_secondary weapon_glock;mp_teamcashawards 1;mp_timelimit 0;mp_weapons_allow_map_placed 1;mp_weapons_allow_zeus 1;mp_win_panel_display_time 3;spec_freeze_deathanim_time 0;spec_freeze_time 2;spec_freeze_time_lock 2;spec_replay_enable 0;sv_allow_votes 1;sv_auto_full_alltalk_during_warmup_half_end 0;sv_deadtalk 1;sv_hibernate_postgame_delay 300;sv_ignoregrenaderadio 0;sv_infinite_ammo 0;sv_talk_enemy_dead 0;sv_talk_enemy_living 0;sv_voiceenable 1;tv_relayvoice 1;mp_team_timeout_max 4;mp_team_timeout_time 30;sv_vote_command_delay 0;cash_team_bonus_shorthanded 0;mp_spectators_max 20;mp_team_intro_time 0;mp_restartgame 3;mp_warmup_end;");
+                    Server.ExecuteCommand("cash_team_win_by_hostage_rescue 2900;cash_team_win_by_time_running_out_bomb 3250;cash_team_win_by_time_running_out_hostage 3250;ff_damage_reduction_bullets 0.33;ff_damage_reduction_grenade 0.85;ff_damage_reduction_grenade_self 1;ff_damage_reduction_other 0.4;mp_afterroundmoney 16000;mp_autokick 0;mp_autoteambalance 0;mp_backup_restore_load_autopause 1;mp_backup_round_auto 1;mp_buy_anywhere 0;mp_buy_during_immunity 0;mp_buytime 20;mp_c4timer 40;mp_ct_default_melee weapon_knife;mp_ct_default_primary \"\";mp_ct_default_secondary weapon_hkp2000;mp_death_drop_defuser 1;mp_death_drop_grenade 2;mp_death_drop_gun 1;mp_defuser_allocation 0;mp_drop_knife_enable 0;mp_display_kill_assists 1;mp_endmatch_votenextmap 0;mp_forcecamera 1;mp_free_armor 0;mp_freezetime 18;mp_friendlyfire 1;mp_give_player_c4 1;mp_halftime 1;mp_halftime_duration 15;mp_halftime_pausetimer 0;mp_ignore_round_win_conditions 0;mp_limitteams 0;mp_match_can_clinch 0;mp_match_end_restart 0;mp_maxmoney 16000;mp_maxrounds 24;mp_overtime_enable 0;mp_overtime_halftime_pausetimer 0;mp_overtime_maxrounds 6;mp_overtime_startmoney 10000;mp_playercashawards 1;mp_randomspawn 0;mp_respawn_immunitytime 0;mp_respawn_on_death_ct 0;mp_respawn_on_death_t 0;mp_round_restart_delay 5;mp_roundtime 1.92;mp_roundtime_defuse 1.92;mp_roundtime_hostage 1.92;mp_solid_teammates 1;mp_starting_losses 1;mp_startmoney 16000;mp_t_default_melee weapon_knife;mp_t_default_primary \"\";mp_t_default_secondary weapon_glock;mp_teamcashawards 1;mp_timelimit 0;mp_weapons_allow_map_placed 1;mp_weapons_allow_zeus 1;mp_win_panel_display_time 3;spec_freeze_deathanim_time 0;spec_freeze_time 2;spec_freeze_time_lock 2;spec_replay_enable 0;sv_allow_votes 1;sv_auto_full_alltalk_during_warmup_half_end 0;sv_deadtalk 1;sv_hibernate_postgame_delay 300;sv_ignoregrenaderadio 0;sv_infinite_ammo 0;sv_talk_enemy_dead 0;sv_talk_enemy_living 0;sv_voiceenable 1;tv_relayvoice 1;mp_team_timeout_max 4;mp_team_timeout_time 30;sv_vote_command_delay 0;cash_team_bonus_shorthanded 0;mp_spectators_max 20;mp_team_intro_time 0;mp_restartgame 3;mp_warmup_end;");
                 }
             }
             // .friendlyfire / .ff chosen before the match, on top of the cfg and the match config.
@@ -3636,13 +3711,13 @@ namespace MatchZy
             {
                 if (gameMode == 2)
                 {
-                    Server.ExecuteCommand("ammo_grenade_limit_default 1;ammo_grenade_limit_flashbang 2;ammo_grenade_limit_total 4;mp_weapons_allow_typecount 5;sv_hide_roundtime_until_seconds 0;bot_quota 0;cash_player_bomb_defused 300;cash_player_bomb_planted 300;cash_player_damage_hostage -30;cash_player_interact_with_hostage 300;cash_player_killed_enemy_default 300;cash_player_killed_enemy_factor 1;cash_player_killed_hostage -1000;cash_player_killed_teammate -300;cash_player_rescued_hostage 1000;cash_team_bonus_shorthanded 1000;cash_team_elimination_bomb_map 2750;cash_team_elimination_hostage_map_ct 2500;cash_team_elimination_hostage_map_t 2500;cash_team_hostage_alive 0;cash_team_hostage_interaction 600;cash_team_loser_bonus 2000;cash_team_loser_bonus_consecutive_rounds 300;cash_team_planted_bomb_but_defused 600;cash_team_rescued_hostage 600;cash_team_terrorist_win_bomb 3000;cash_team_win_by_defusing_bomb 3000;cash_team_win_by_hostage_rescue 2900;cash_team_win_by_time_running_out_bomb 2750;cash_team_win_by_time_running_out_hostage 2750;ff_damage_reduction_bullets 0.33;ff_damage_reduction_grenade 0.85;ff_damage_reduction_grenade_self 1;ff_damage_reduction_other 0.4;mp_afterroundmoney 0;mp_autokick 0;mp_autoteambalance 0;mp_backup_restore_load_autopause 0;mp_backup_round_auto 1;mp_buy_anywhere 0;mp_buy_during_immunity 0;mp_buytime 20;mp_c4timer 40;mp_ct_default_melee weapon_knife;mp_ct_default_primary \"\";mp_ct_default_secondary weapon_hkp2000;mp_death_drop_defuser 1;mp_death_drop_grenade 2;mp_death_drop_gun 1;mp_defuser_allocation 0;mp_display_kill_assists 1;mp_endmatch_votenextmap 0;mp_forcecamera 1;mp_free_armor 0;mp_freezetime 10;mp_friendlyfire 1;mp_give_player_c4 1;mp_halftime 1;mp_halftime_duration 15;mp_halftime_pausetimer 0;mp_ignore_round_win_conditions 0;mp_limitteams 0;mp_match_can_clinch 0;mp_match_end_restart 0;mp_maxmoney 8000;");
+                    Server.ExecuteCommand("ammo_grenade_limit_default 1;ammo_grenade_limit_flashbang 2;ammo_grenade_limit_total 4;mp_weapons_allow_typecount 5;sv_hide_roundtime_until_seconds 0;bot_quota 0;cash_player_bomb_defused 300;cash_player_bomb_planted 300;cash_player_damage_hostage -30;cash_player_interact_with_hostage 300;cash_player_killed_enemy_default 300;cash_player_killed_enemy_factor 1;cash_player_killed_hostage -1000;cash_player_killed_teammate -300;cash_player_rescued_hostage 1000;cash_team_bonus_shorthanded 1000;cash_team_elimination_bomb_map 2750;cash_team_elimination_hostage_map_ct 2500;cash_team_elimination_hostage_map_t 2500;cash_team_hostage_alive 0;cash_team_hostage_interaction 600;cash_team_loser_bonus 2000;cash_team_loser_bonus_consecutive_rounds 300;cash_team_planted_bomb_but_defused 600;cash_team_rescued_hostage 600;cash_team_terrorist_win_bomb 3000;cash_team_win_by_defusing_bomb 3000;cash_team_win_by_hostage_rescue 2900;cash_team_win_by_time_running_out_bomb 2750;cash_team_win_by_time_running_out_hostage 2750;ff_damage_reduction_bullets 0.33;ff_damage_reduction_grenade 0.85;ff_damage_reduction_grenade_self 1;ff_damage_reduction_other 0.4;mp_afterroundmoney 0;mp_autokick 0;mp_autoteambalance 0;mp_backup_restore_load_autopause 0;mp_backup_round_auto 1;mp_buy_anywhere 0;mp_buy_during_immunity 0;mp_buytime 20;mp_c4timer 40;mp_ct_default_melee weapon_knife;mp_ct_default_primary \"\";mp_ct_default_secondary weapon_hkp2000;mp_death_drop_defuser 1;mp_death_drop_grenade 2;mp_death_drop_gun 1;mp_defuser_allocation 0;mp_drop_knife_enable 0;mp_display_kill_assists 1;mp_endmatch_votenextmap 0;mp_forcecamera 1;mp_free_armor 0;mp_freezetime 10;mp_friendlyfire 1;mp_give_player_c4 1;mp_halftime 1;mp_halftime_duration 15;mp_halftime_pausetimer 0;mp_ignore_round_win_conditions 0;mp_limitteams 0;mp_match_can_clinch 0;mp_match_end_restart 0;mp_maxmoney 8000;");
                     Server.ExecuteCommand("mp_maxrounds 16;mp_overtime_enable 0;mp_overtime_halftime_pausetimer 0;mp_overtime_maxrounds 4;mp_overtime_startmoney 8000;mp_playercashawards 1;mp_randomspawn 0;mp_respawn_immunitytime 0;mp_respawn_on_death_ct 0;mp_respawn_on_death_t 0;mp_round_restart_delay 7;mp_roundtime 1.5;mp_roundtime_defuse 1.5;mp_roundtime_hostage 1.5;mp_solid_teammates 1;mp_starting_losses 1;mp_startmoney 800;mp_t_default_melee weapon_knife;mp_t_default_primary \"\";mp_t_default_secondary weapon_glock;mp_teamcashawards 1;mp_timelimit 0;mp_weapons_allow_map_placed 1;mp_weapons_allow_zeus 1;mp_win_panel_display_time 3;spec_freeze_deathanim_time 0;spec_freeze_time 2;spec_freeze_time_lock 2;spec_replay_enable 0;sv_allow_votes 0;sv_auto_full_alltalk_during_warmup_half_end 0;sv_deadtalk 1;sv_hibernate_postgame_delay 300;sv_ignoregrenaderadio 0;sv_infinite_ammo 0;sv_talk_enemy_dead 0;sv_talk_enemy_living 0;sv_voiceenable 1;tv_relayvoice 0");
                 }
                 else
                 {
                     Server.ExecuteCommand("ammo_grenade_limit_default 1;ammo_grenade_limit_flashbang 2;ammo_grenade_limit_total 4;mp_weapons_allow_typecount 5;sv_hide_roundtime_until_seconds 0;bot_quota 0;cash_player_bomb_defused 300;cash_player_bomb_planted 300;cash_player_damage_hostage -30;cash_player_interact_with_hostage 300;cash_player_killed_enemy_default 300;cash_player_killed_enemy_factor 1;cash_player_killed_hostage -1000;cash_player_killed_teammate -300;cash_player_rescued_hostage 1000;cash_team_elimination_bomb_map 3250;cash_team_elimination_hostage_map_ct 3000;cash_team_elimination_hostage_map_t 3000;cash_team_hostage_alive 0;cash_team_hostage_interaction 600;cash_team_loser_bonus 1400;cash_team_loser_bonus_consecutive_rounds 500;cash_team_planted_bomb_but_defused 600;cash_team_rescued_hostage 600;cash_team_terrorist_win_bomb 3500;cash_team_win_by_defusing_bomb 3500;");
-                    Server.ExecuteCommand("cash_team_win_by_hostage_rescue 2900;cash_team_win_by_time_running_out_bomb 3250;cash_team_win_by_time_running_out_hostage 3250;ff_damage_reduction_bullets 0.33;ff_damage_reduction_grenade 0.85;ff_damage_reduction_grenade_self 1;ff_damage_reduction_other 0.4;mp_afterroundmoney 0;mp_autokick 0;mp_autoteambalance 0;mp_backup_restore_load_autopause 1;mp_backup_round_auto 1;mp_buy_anywhere 0;mp_buy_during_immunity 0;mp_buytime 20;mp_c4timer 40;mp_ct_default_melee weapon_knife;mp_ct_default_primary \"\";mp_ct_default_secondary weapon_hkp2000;mp_death_drop_defuser 1;mp_death_drop_grenade 2;mp_death_drop_gun 1;mp_defuser_allocation 0;mp_display_kill_assists 1;mp_endmatch_votenextmap 0;mp_forcecamera 1;mp_free_armor 0;mp_freezetime 18;mp_friendlyfire 1;mp_give_player_c4 1;mp_halftime 1;mp_halftime_duration 15;mp_halftime_pausetimer 0;mp_ignore_round_win_conditions 0;mp_limitteams 0;mp_match_can_clinch 0;mp_match_end_restart 0;mp_maxmoney 16000;mp_maxrounds 24;mp_overtime_enable 0;mp_overtime_halftime_pausetimer 0;mp_overtime_maxrounds 6;mp_overtime_startmoney 10000;mp_playercashawards 1;mp_randomspawn 0;mp_respawn_immunitytime 0;mp_respawn_on_death_ct 0;mp_respawn_on_death_t 0;mp_round_restart_delay 5;mp_roundtime 1.92;mp_roundtime_defuse 1.92;mp_roundtime_hostage 1.92;mp_solid_teammates 1;mp_starting_losses 1;mp_startmoney 800;mp_t_default_melee weapon_knife;mp_t_default_primary \"\";mp_t_default_secondary weapon_glock;mp_teamcashawards 1;mp_timelimit 0;mp_weapons_allow_map_placed 1;mp_weapons_allow_zeus 1;mp_win_panel_display_time 3;spec_freeze_deathanim_time 0;spec_freeze_time 2;spec_freeze_time_lock 2;spec_replay_enable 0;sv_allow_votes 1;sv_auto_full_alltalk_during_warmup_half_end 0;sv_deadtalk 1;sv_hibernate_postgame_delay 300;sv_ignoregrenaderadio 0;sv_infinite_ammo 0;sv_talk_enemy_dead 0;sv_talk_enemy_living 0;sv_voiceenable 1;tv_relayvoice 1;mp_team_timeout_max 4;mp_team_timeout_time 30;sv_vote_command_delay 0;cash_team_bonus_shorthanded 0;mp_spectators_max 20;mp_team_intro_time 0;mp_restartgame 3;mp_warmup_end;");
+                    Server.ExecuteCommand("cash_team_win_by_hostage_rescue 2900;cash_team_win_by_time_running_out_bomb 3250;cash_team_win_by_time_running_out_hostage 3250;ff_damage_reduction_bullets 0.33;ff_damage_reduction_grenade 0.85;ff_damage_reduction_grenade_self 1;ff_damage_reduction_other 0.4;mp_afterroundmoney 0;mp_autokick 0;mp_autoteambalance 0;mp_backup_restore_load_autopause 1;mp_backup_round_auto 1;mp_buy_anywhere 0;mp_buy_during_immunity 0;mp_buytime 20;mp_c4timer 40;mp_ct_default_melee weapon_knife;mp_ct_default_primary \"\";mp_ct_default_secondary weapon_hkp2000;mp_death_drop_defuser 1;mp_death_drop_grenade 2;mp_death_drop_gun 1;mp_defuser_allocation 0;mp_drop_knife_enable 0;mp_display_kill_assists 1;mp_endmatch_votenextmap 0;mp_forcecamera 1;mp_free_armor 0;mp_freezetime 18;mp_friendlyfire 1;mp_give_player_c4 1;mp_halftime 1;mp_halftime_duration 15;mp_halftime_pausetimer 0;mp_ignore_round_win_conditions 0;mp_limitteams 0;mp_match_can_clinch 0;mp_match_end_restart 0;mp_maxmoney 16000;mp_maxrounds 24;mp_overtime_enable 0;mp_overtime_halftime_pausetimer 0;mp_overtime_maxrounds 6;mp_overtime_startmoney 10000;mp_playercashawards 1;mp_randomspawn 0;mp_respawn_immunitytime 0;mp_respawn_on_death_ct 0;mp_respawn_on_death_t 0;mp_round_restart_delay 5;mp_roundtime 1.92;mp_roundtime_defuse 1.92;mp_roundtime_hostage 1.92;mp_solid_teammates 1;mp_starting_losses 1;mp_startmoney 800;mp_t_default_melee weapon_knife;mp_t_default_primary \"\";mp_t_default_secondary weapon_glock;mp_teamcashawards 1;mp_timelimit 0;mp_weapons_allow_map_placed 1;mp_weapons_allow_zeus 1;mp_win_panel_display_time 3;spec_freeze_deathanim_time 0;spec_freeze_time 2;spec_freeze_time_lock 2;spec_replay_enable 0;sv_allow_votes 1;sv_auto_full_alltalk_during_warmup_half_end 0;sv_deadtalk 1;sv_hibernate_postgame_delay 300;sv_ignoregrenaderadio 0;sv_infinite_ammo 0;sv_talk_enemy_dead 0;sv_talk_enemy_living 0;sv_voiceenable 1;tv_relayvoice 1;mp_team_timeout_max 4;mp_team_timeout_time 30;sv_vote_command_delay 0;cash_team_bonus_shorthanded 0;mp_spectators_max 20;mp_team_intro_time 0;mp_restartgame 3;mp_warmup_end;");
                 }
             }
             // .friendlyfire / .ff chosen before the match, on top of the cfg and the match config.
@@ -3671,13 +3746,13 @@ namespace MatchZy
             {
                 if (gameMode == 2)
                 {
-                    Server.ExecuteCommand("ammo_grenade_limit_default 1;ammo_grenade_limit_flashbang 2;ammo_grenade_limit_total 4;mp_weapons_allow_typecount 5;sv_hide_roundtime_until_seconds 0;bot_quota 0;cash_player_bomb_defused 300;cash_player_bomb_planted 300;cash_player_damage_hostage -30;cash_player_interact_with_hostage 300;cash_player_killed_enemy_default 300;cash_player_killed_enemy_factor 1;cash_player_killed_hostage -1000;cash_player_killed_teammate -300;cash_player_rescued_hostage 1000;cash_team_bonus_shorthanded 0;cash_team_elimination_bomb_map 2750;cash_team_elimination_hostage_map_ct 2500;cash_team_elimination_hostage_map_t 2500;cash_team_hostage_alive 0;cash_team_hostage_interaction 600;cash_team_loser_bonus 2000;cash_team_loser_bonus_consecutive_rounds 300;cash_team_planted_bomb_but_defused 600;cash_team_rescued_hostage 600;cash_team_terrorist_win_bomb 3000;cash_team_win_by_defusing_bomb 3000;cash_team_win_by_hostage_rescue 2900;cash_team_win_by_time_running_out_bomb 2750;cash_team_win_by_time_running_out_hostage 2750;ff_damage_reduction_bullets 0.33;ff_damage_reduction_grenade 0.85;ff_damage_reduction_grenade_self 1;ff_damage_reduction_other 0.4;mp_afterroundmoney 0;mp_autokick 0;mp_autoteambalance 0;mp_backup_restore_load_autopause 0;mp_backup_round_auto 1;mp_buy_anywhere 0;mp_buy_during_immunity 0;mp_buytime 20;mp_c4timer 40;mp_ct_default_melee weapon_knife;mp_ct_default_primary \"\";mp_ct_default_secondary weapon_hkp2000;mp_death_drop_defuser 1;mp_death_drop_grenade 2;mp_death_drop_gun 1;mp_defuser_allocation 0;mp_display_kill_assists 1;mp_endmatch_votenextmap 0;mp_forcecamera 1;mp_free_armor 0;mp_freezetime 10;mp_friendlyfire 1;mp_give_player_c4 1;mp_halftime 1;mp_halftime_duration 15;mp_halftime_pausetimer 0;mp_ignore_round_win_conditions 0;mp_limitteams 0;mp_match_can_clinch 1;mp_match_end_restart 0;mp_maxmoney 8000;");
+                    Server.ExecuteCommand("ammo_grenade_limit_default 1;ammo_grenade_limit_flashbang 2;ammo_grenade_limit_total 4;mp_weapons_allow_typecount 5;sv_hide_roundtime_until_seconds 0;bot_quota 0;cash_player_bomb_defused 300;cash_player_bomb_planted 300;cash_player_damage_hostage -30;cash_player_interact_with_hostage 300;cash_player_killed_enemy_default 300;cash_player_killed_enemy_factor 1;cash_player_killed_hostage -1000;cash_player_killed_teammate -300;cash_player_rescued_hostage 1000;cash_team_bonus_shorthanded 0;cash_team_elimination_bomb_map 2750;cash_team_elimination_hostage_map_ct 2500;cash_team_elimination_hostage_map_t 2500;cash_team_hostage_alive 0;cash_team_hostage_interaction 600;cash_team_loser_bonus 2000;cash_team_loser_bonus_consecutive_rounds 300;cash_team_planted_bomb_but_defused 600;cash_team_rescued_hostage 600;cash_team_terrorist_win_bomb 3000;cash_team_win_by_defusing_bomb 3000;cash_team_win_by_hostage_rescue 2900;cash_team_win_by_time_running_out_bomb 2750;cash_team_win_by_time_running_out_hostage 2750;ff_damage_reduction_bullets 0.33;ff_damage_reduction_grenade 0.85;ff_damage_reduction_grenade_self 1;ff_damage_reduction_other 0.4;mp_afterroundmoney 0;mp_autokick 0;mp_autoteambalance 0;mp_backup_restore_load_autopause 0;mp_backup_round_auto 1;mp_buy_anywhere 0;mp_buy_during_immunity 0;mp_buytime 20;mp_c4timer 40;mp_ct_default_melee weapon_knife;mp_ct_default_primary \"\";mp_ct_default_secondary weapon_hkp2000;mp_death_drop_defuser 1;mp_death_drop_grenade 2;mp_death_drop_gun 1;mp_defuser_allocation 0;mp_drop_knife_enable 0;mp_display_kill_assists 1;mp_endmatch_votenextmap 0;mp_forcecamera 1;mp_free_armor 0;mp_freezetime 10;mp_friendlyfire 1;mp_give_player_c4 1;mp_halftime 1;mp_halftime_duration 15;mp_halftime_pausetimer 0;mp_ignore_round_win_conditions 0;mp_limitteams 0;mp_match_can_clinch 1;mp_match_end_restart 0;mp_maxmoney 8000;");
                     Server.ExecuteCommand("mp_maxrounds 16;mp_overtime_enable 1;mp_overtime_halftime_pausetimer 0;mp_overtime_maxrounds 6;mp_overtime_startmoney 8000;mp_playercashawards 1;mp_randomspawn 0;mp_respawn_immunitytime 0;mp_respawn_on_death_ct 0;mp_respawn_on_death_t 0;mp_round_restart_delay 7;mp_roundtime 1.5;mp_roundtime_defuse 1.5;mp_roundtime_hostage 1.5;mp_solid_teammates 1;mp_starting_losses 1;mp_startmoney 800;mp_t_default_melee weapon_knife;mp_t_default_primary \"\";mp_t_default_secondary weapon_glock;mp_teamcashawards 1;mp_timelimit 0;mp_weapons_allow_map_placed 1;mp_weapons_allow_zeus 1;mp_win_panel_display_time 3;spec_freeze_deathanim_time 0;spec_freeze_time 2;spec_freeze_time_lock 2;spec_replay_enable 0;sv_allow_votes 0;sv_auto_full_alltalk_during_warmup_half_end 0;sv_deadtalk 1;sv_hibernate_postgame_delay 300;sv_ignoregrenaderadio 0;sv_infinite_ammo 0;sv_talk_enemy_dead 0;sv_talk_enemy_living 0;sv_voiceenable 1;tv_relayvoice 1;mp_team_timeout_max 1;mp_team_timeout_time 60;mp_team_timeout_ot_max 1;mp_team_timeout_ot_add_each 1;mp_team_timeout_ot_add_once 1");
                 }
                 else
                 {
                     Server.ExecuteCommand("ammo_grenade_limit_default 1;ammo_grenade_limit_flashbang 2;ammo_grenade_limit_total 4;mp_weapons_allow_typecount 5;sv_hide_roundtime_until_seconds 0;bot_quota 0;cash_player_bomb_defused 300;cash_player_bomb_planted 300;cash_player_damage_hostage -30;cash_player_interact_with_hostage 300;cash_player_killed_enemy_default 300;cash_player_killed_enemy_factor 1;cash_player_killed_hostage -1000;cash_player_killed_teammate -300;cash_player_rescued_hostage 1000;cash_team_elimination_bomb_map 3250;cash_team_elimination_hostage_map_ct 3000;cash_team_elimination_hostage_map_t 3000;cash_team_hostage_alive 0;cash_team_hostage_interaction 600;cash_team_loser_bonus 1400;cash_team_loser_bonus_consecutive_rounds 500;cash_team_planted_bomb_but_defused 600;cash_team_rescued_hostage 600;cash_team_terrorist_win_bomb 3500;cash_team_win_by_defusing_bomb 3500;");
-                    Server.ExecuteCommand("cash_team_win_by_hostage_rescue 2900;cash_team_win_by_time_running_out_bomb 3250;cash_team_win_by_time_running_out_hostage 3250;ff_damage_reduction_bullets 0.33;ff_damage_reduction_grenade 0.85;ff_damage_reduction_grenade_self 1;ff_damage_reduction_other 0.4;mp_afterroundmoney 0;mp_autokick 0;mp_autoteambalance 0;mp_backup_restore_load_autopause 1;mp_backup_round_auto 1;mp_buy_anywhere 0;mp_buy_during_immunity 0;mp_buytime 20;mp_c4timer 40;mp_ct_default_melee weapon_knife;mp_ct_default_primary \"\";mp_ct_default_secondary weapon_hkp2000;mp_death_drop_defuser 1;mp_death_drop_grenade 2;mp_death_drop_gun 1;mp_defuser_allocation 0;mp_display_kill_assists 1;mp_endmatch_votenextmap 0;mp_forcecamera 1;mp_free_armor 0;mp_freezetime 18;mp_friendlyfire 1;mp_give_player_c4 1;mp_halftime 1;mp_halftime_duration 15;mp_halftime_pausetimer 0;mp_ignore_round_win_conditions 0;mp_limitteams 0;mp_match_can_clinch 1;mp_match_end_restart 0;mp_maxmoney 16000;mp_maxrounds 24;mp_overtime_enable 1;mp_overtime_halftime_pausetimer 0;mp_overtime_maxrounds 6;mp_overtime_startmoney 10000;mp_playercashawards 1;mp_randomspawn 0;mp_respawn_immunitytime 0;mp_respawn_on_death_ct 0;mp_respawn_on_death_t 0;mp_round_restart_delay 5;mp_roundtime 1.92;mp_roundtime_defuse 1.92;mp_roundtime_hostage 1.92;mp_solid_teammates 1;mp_starting_losses 1;mp_startmoney 800;mp_t_default_melee weapon_knife;mp_t_default_primary \"\";mp_t_default_secondary weapon_glock;mp_teamcashawards 1;mp_timelimit 0;mp_weapons_allow_map_placed 1;mp_weapons_allow_zeus 1;mp_win_panel_display_time 3;spec_freeze_deathanim_time 0;spec_freeze_time 2;spec_freeze_time_lock 2;spec_replay_enable 0;sv_allow_votes 1;sv_auto_full_alltalk_during_warmup_half_end 0;sv_deadtalk 1;sv_hibernate_postgame_delay 300;sv_ignoregrenaderadio 0;sv_infinite_ammo 0;sv_talk_enemy_dead 0;sv_talk_enemy_living 0;sv_voiceenable 1;tv_relayvoice 1;mp_team_timeout_max 4;mp_team_timeout_time 30;sv_vote_command_delay 0;cash_team_bonus_shorthanded 0;mp_spectators_max 20;mp_team_intro_time 0;");
+                    Server.ExecuteCommand("cash_team_win_by_hostage_rescue 2900;cash_team_win_by_time_running_out_bomb 3250;cash_team_win_by_time_running_out_hostage 3250;ff_damage_reduction_bullets 0.33;ff_damage_reduction_grenade 0.85;ff_damage_reduction_grenade_self 1;ff_damage_reduction_other 0.4;mp_afterroundmoney 0;mp_autokick 0;mp_autoteambalance 0;mp_backup_restore_load_autopause 1;mp_backup_round_auto 1;mp_buy_anywhere 0;mp_buy_during_immunity 0;mp_buytime 20;mp_c4timer 40;mp_ct_default_melee weapon_knife;mp_ct_default_primary \"\";mp_ct_default_secondary weapon_hkp2000;mp_death_drop_defuser 1;mp_death_drop_grenade 2;mp_death_drop_gun 1;mp_defuser_allocation 0;mp_drop_knife_enable 0;mp_display_kill_assists 1;mp_endmatch_votenextmap 0;mp_forcecamera 1;mp_free_armor 0;mp_freezetime 18;mp_friendlyfire 1;mp_give_player_c4 1;mp_halftime 1;mp_halftime_duration 15;mp_halftime_pausetimer 0;mp_ignore_round_win_conditions 0;mp_limitteams 0;mp_match_can_clinch 1;mp_match_end_restart 0;mp_maxmoney 16000;mp_maxrounds 24;mp_overtime_enable 1;mp_overtime_halftime_pausetimer 0;mp_overtime_maxrounds 6;mp_overtime_startmoney 10000;mp_playercashawards 1;mp_randomspawn 0;mp_respawn_immunitytime 0;mp_respawn_on_death_ct 0;mp_respawn_on_death_t 0;mp_round_restart_delay 5;mp_roundtime 1.92;mp_roundtime_defuse 1.92;mp_roundtime_hostage 1.92;mp_solid_teammates 1;mp_starting_losses 1;mp_startmoney 800;mp_t_default_melee weapon_knife;mp_t_default_primary \"\";mp_t_default_secondary weapon_glock;mp_teamcashawards 1;mp_timelimit 0;mp_weapons_allow_map_placed 1;mp_weapons_allow_zeus 1;mp_win_panel_display_time 3;spec_freeze_deathanim_time 0;spec_freeze_time 2;spec_freeze_time_lock 2;spec_replay_enable 0;sv_allow_votes 1;sv_auto_full_alltalk_during_warmup_half_end 0;sv_deadtalk 1;sv_hibernate_postgame_delay 300;sv_ignoregrenaderadio 0;sv_infinite_ammo 0;sv_talk_enemy_dead 0;sv_talk_enemy_living 0;sv_voiceenable 1;tv_relayvoice 1;mp_team_timeout_max 4;mp_team_timeout_time 30;sv_vote_command_delay 0;cash_team_bonus_shorthanded 0;mp_spectators_max 20;mp_team_intro_time 0;");
                 }
                 // Match config cvars go in before the restart, as in ExecModeCfg, so round 1 already uses them
                 // (mp_team_timeout_max is read by the restart).
@@ -5540,6 +5615,55 @@ namespace MatchZy
             }
         }
 
+        /// <summary>
+        /// Puts a player who just finished connecting on their roster side. After a map change
+        /// (series map, the veto's map) the engine gives a reconnecting player back their old
+        /// team while they are still connecting: the player_team event for that fires before the
+        /// controller is Connected, so the team-lock handler skips it and the player stayed on
+        /// the wrong side for the whole warmup (warmups of 6v4 with both teams mixed). Checked
+        /// twice, because the restored team can land a moment after player_connect_full.
+        /// Players still in the team menu (team None) are left alone: the jointeam lock handles them.
+        /// </summary>
+        private void PlaceMatchPlayerAfterConnect(CCSPlayerController player)
+        {
+            if (!isMatchSetup || matchStarted || !IsTeamWhitelistConfigured())
+                return;
+            int? userId = player.UserId;
+            foreach (float delay in new[] { 0.5f, 3.0f })
+            {
+                AddTimer(delay, () =>
+                {
+                    try
+                    {
+                        if (!isMatchSetup || matchStarted || isVeto || !IsTeamWhitelistConfigured())
+                            return;
+                        if (player == null || !player.IsValid || player.UserId != userId || player.Connected != PlayerConnectedState.Connected)
+                            return;
+                        if (player.IsBot || player.IsHLTV || IsMatchCoach(player))
+                            return;
+                        if (player.TeamNum == (byte)CsTeam.None)
+                            return;
+                        CsTeam target = GetPlayerTeam(player);
+                        if (target == CsTeam.None)
+                            target = CsTeam.Spectator;
+                        if (player.Team == target)
+                            return;
+                        // A full side (players_per_team) takes no more players: substitutes watch.
+                        if (target is CsTeam.Terrorist or CsTeam.CounterTerrorist && IsSideFull(target, player))
+                            target = CsTeam.Spectator;
+                        if (player.Team == target)
+                            return;
+                        Log($"[PlaceMatchPlayerAfterConnect] {player.PlayerName} is on {player.Team} after connecting, moving to {target}");
+                        SwitchPlayerTeam(player, target);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"[PlaceMatchPlayerAfterConnect FATAL] {ex}");
+                    }
+                }, TimerFlags.STOP_ON_MAPCHANGE);
+            }
+        }
+
         public void SwitchPlayerTeam(CCSPlayerController player, CsTeam team)
         {
             // None is what GetPlayerTeam returns for a player who is not part of the match.
@@ -5594,13 +5718,71 @@ namespace MatchZy
                 else
                 {
                     player.SwitchTeam(team);
-                    var gameRules = GetGameRules();
-                    if (gameRules != null && gameRules.WarmupPeriod && IsPlayerValid(player))
+                    // Respawn so the player actually plays on the new side. SwitchTeam only writes
+                    // the team number: without a respawn the pawn stays where it was (in the other
+                    // side's spawn) or stays dead when the engine already killed it for the move.
+                    // The ready phase counts even when the HTML ready panel has forced
+                    // m_bWarmupPeriod off, and the freeze time of the first knife/live round counts
+                    // too: a correction there used to leave the player dead for the whole round.
+                    if (IsPlayerValid(player) && IsTeamCorrectionRespawnWindow())
                     {
                         player.Respawn();
                     }
                 }
             });
+        }
+
+        /// <summary>
+        /// True while a player whose side was corrected may be respawned: warmup, the ready phase
+        /// (also the "fake warmup" with m_bWarmupPeriod forced off) and the freeze time of the
+        /// knife round or of the first live round. Never mid-round.
+        /// </summary>
+        private bool IsTeamCorrectionRespawnWindow()
+        {
+            var gameRules = GetGameRules();
+            if (gameRules == null)
+                return false;
+            if (gameRules.WarmupPeriod || (readyAvailable && !matchStarted))
+                return true;
+            if (!gameRules.FreezePeriod)
+                return false;
+            return isKnifeRound || (isMatchLive && gameRules.TotalRoundsPlayed == 0);
+        }
+
+        /// <summary>
+        /// Knife round / first live round safety net: a roster player who is dead at the start of
+        /// the freeze time (moved to their roster side by the server around the warmup-end restart)
+        /// is respawned instead of sitting out the round. T/CT only, never coaches.
+        /// </summary>
+        private void RespawnDeadMatchPlayersInFreeze()
+        {
+            if (!isMatchSetup || !IsTeamCorrectionRespawnWindow() || (!isKnifeRound && !isMatchLive))
+                return;
+            HashSet<CCSPlayerController> coaches = GetAllCoaches();
+            foreach (var p in Utilities.GetPlayers())
+            {
+                if (p == null || !p.IsValid || p.IsBot || p.IsHLTV || p.Connected != PlayerConnectedState.Connected)
+                    continue;
+                if (p.Team != CsTeam.Terrorist && p.Team != CsTeam.CounterTerrorist)
+                    continue;
+                if (coaches.Contains(p) || IsMatchCoach(p))
+                    continue;
+                if (p.PawnIsAlive)
+                    continue;
+                var pawn = p.PlayerPawn.Value;
+                // No pawn = still joining (observer state): respawning that is the crash class.
+                if (pawn == null || !pawn.IsValid || pawn.LifeState == (byte)LifeState_t.LIFE_ALIVE)
+                    continue;
+                try
+                {
+                    Log($"[RespawnDeadMatchPlayersInFreeze] Respawning {p.PlayerName} (dead at freeze time start)");
+                    p.Respawn();
+                }
+                catch (Exception ex)
+                {
+                    Log($"[RespawnDeadMatchPlayersInFreeze] respawn failed: {ex.Message}");
+                }
+            }
         }
 
         /// <summary>

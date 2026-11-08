@@ -55,6 +55,9 @@ public partial class MatchZy
                     if (isMatchSetup)
                     {
                         SendPlayerConnectEvent(player);
+                        // Not in the match: a team the engine restored after a map change must
+                        // not keep them on a side.
+                        PlaceMatchPlayerAfterConnect(player);
                         return HookResult.Continue;
                     }
                 }
@@ -66,7 +69,10 @@ public partial class MatchZy
             connectedPlayers++;
 
             if (isMatchSetup)
+            {
                 AssignRosteredCoach(player);
+                PlaceMatchPlayerAfterConnect(player);
+            }
 
 
             // Set ready status based on game state
@@ -126,6 +132,19 @@ public partial class MatchZy
                 {
                     PrintToPlayerChat(player, Localizer.ForPlayer(player, "matchzy.eh.quitprac"));
                 }
+            }
+
+            // Practice already running when this player joined (started automatically at map start,
+            // e.g. coming from another mode, or by someone else): StartPracticeMode printed the
+            // command list before they were in. Send it now, after the join chat spam.
+            if (isPractice)
+            {
+                AddTimer(5.0f, () =>
+                {
+                    if (!isPractice || !IsPlayerValid(player) || player!.UserId != userId)
+                        return;
+                    SendPracticeHelp(player);
+                }, CounterStrikeSharp.API.Modules.Timers.TimerFlags.STOP_ON_MAPCHANGE);
             }
 
             if (isMatchLive && autoPauseEnabled.Value)
@@ -424,6 +443,15 @@ public partial class MatchZy
             // round restores, and refills bots the engine dropped.
             if (isMatchSetup)
                 ApplyBotTeam();
+            // Knife round / first live round: nobody may sit the round out dead because the
+            // server moved them to their roster side around the warmup-end restart. Off the
+            // event (respawn is engine re-entry) and once more shortly after for corrections that
+            // land a few frames late.
+            if (isMatchSetup && (isKnifeRound || isMatchLive))
+            {
+                Server.NextFrame(RespawnDeadMatchPlayersInFreeze);
+                AddTimer(1.0f, RespawnDeadMatchPlayersInFreeze, CounterStrikeSharp.API.Modules.Timers.TimerFlags.STOP_ON_MAPCHANGE);
+            }
             HandlePostRoundStartEvent(@event);
             return HookResult.Continue;
         }
@@ -555,6 +583,8 @@ public partial class MatchZy
                     uint projIndex = projectile.Index;
 
                     lastGrenadeThrownTime[(int)projIndex] = DateTime.Now;
+                    if (nadeType == "smoke")
+                        OnSmokeTimerThrow(player, (int)projIndex);
                     // Molotov/incendiary: track throw time + thrower per PROJECTILE (see OnEntityDeletedHandler).
                     if (nadeType == "molotov" || nadeType == "incendiary")
                         molotovProjectileThrows[(int)projIndex] = (DateTime.Now, client);
@@ -672,6 +702,7 @@ public partial class MatchZy
         if (lastGrenadeThrownTime.TryGetValue(@event.Entityid, out var thrownTime))
         {
             PrintToPlayerChat(player!, Localizer.ForPlayer(player, "matchzy.pracc.smoke", player!.PlayerName, $"{(DateTime.Now - thrownTime).TotalSeconds:0.00}"));
+            OnSmokeTimerDetonate(player!, @event.Entityid, thrownTime);
             lastGrenadeThrownTime.Remove(@event.Entityid);
         }
 

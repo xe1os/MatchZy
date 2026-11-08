@@ -1,6 +1,11 @@
 name: PR checks
+# Build and tests run on pull requests and on every push to main. Releases come from
+# release.yml (a version tag), which is disabled on mrc4tt/MatchZy.
 on:
   pull_request:
+    branches:
+      - main
+  push:
     branches:
       - main
 
@@ -11,6 +16,7 @@ jobs:
   # Checks that need no secrets, so they also run for pull requests from forks.
   lint:
     name: Lint
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -21,8 +27,8 @@ jobs:
       - name: Language files are valid and have the same keys
         run: |
           python3 - <<'PY'
-          import json, sys
-          files = {"en": "lang/en.json", "da": "lang/da.json", "sq": "lang/sq.json"}
+          import glob, json, os, sys
+          files = {os.path.basename(p)[:-5]: p for p in sorted(glob.glob("lang/*.json"))}
           data = {}
           for name, path in files.items():
               try:

@@ -2,6 +2,48 @@
 
 Based on [MatchZy](https://github.com/shobhit-pathak/MatchZy) by Shobhit Pathak, adapted for CS2 game-server hosting: remote log HTTP API, G5API compatibility, auto changelevel, advanced stats (HLTV 2.0 rating / KAST / clutch / opening duels), a coach system, a pause overhaul, and in-game admin and match-setup menus.
 
+# 1.0.24
+
+#### November 7, 2026
+
+- Loading a match (`matchzy_loadmatch`, `matchzy_loadmatch_url`, `.matchsetup`) while practice mode or a dry run is running now ends it like `.exitprac`, and the match loads normally. Before, the server stayed in practice through the match warmup (practice commands such as `.bot` and `.god` still worked), and practice settings that the match cfgs do not reset (for example free default grenades) stayed on into the knife round and the live match. A failed load during practice also turns the practice settings off before going back to warmup.
+- A player who joins while practice mode is already running (for example started automatically at map start after switching from another mode) now gets the short practice command list in chat. Before, it was only printed to the players on the server when practice started.
+- Players are put on their roster side during warmup again after a map change (series map, the veto's map). CS2 gives a reconnecting player back their old team while they are still connecting, before MatchZy's team lock sees them, so warmups could run with both teams mixed. MatchZy now checks each player's side right after they finish connecting and moves them if needed.
+- Players who were on the wrong side in warmup and were moved to their roster side when the match started no longer sit out the knife round (or the first live round) dead. MatchZy now puts everyone on their roster side before the knife/live restart, respawns a player it moves during the ready phase (also with the HTML ready panel, which turns the native warmup off) or the first freeze time, and respawns any roster player who is still dead when that freeze time starts.
+
+# 1.0.23
+
+#### November 5, 2026
+
+- A player who left a live match and came back in the same round got back the money they had at the start of that round. CS2 keeps an in-memory round backup for reconnecting players (`mp_backup_round_auto`) and restores their cash from it, so money spent that round was refunded while the bought weapons stayed on the ground for teammates (players reported 4000 turning into 6000). MatchZy now remembers the money a player leaves with and sets it back to that if they return in the same round with more. A reconnect in a later round, and money earned after coming back, are not touched. Each correction is logged.
+
+# 1.0.22
+
+#### November 5, 2026
+
+- Round backups are found again on servers where a hosting egg, `server.cfg` or another plugin changed `mp_backup_round_file_pattern` (for example to `backups/%prefix%_round%round%.txt`). CS2 then wrote the round files to a folder MatchZy does not read, so the backups had no round data and `.restore` failed. MatchZy now sets the pattern back to `%prefix%_round%round%.txt` when a match goes live and logs the old value.
+- On Metamod servers the round backup files no longer stay in `csgo/addons/metamod/`. CS2 writes them to the first game search path, which Metamod's `gameinfo.gi` line makes `csgo/addons/metamod/`, and it no longer accepts a full path to `csgo/`. MatchZy now moves each round file to `csgo/` about two seconds after the round starts, once CS2 has finished writing it (also files left there by older versions). Restores load them from `csgo/` as before. If `csgo/` is not writable, the files stay where they are and a warning is logged once.
+- Round backup files are now also looked for in `csgo/backups/`, for servers whose `gameinfo.gi` adds that folder as a game search path (some Pelican/Pterodactyl eggs). CS2 writes the round files to the first such folder, so MatchZy found no round data there and `.restore` failed. Servers without it still use `csgo/` or `csgo/addons/metamod/`.
+- The startup line and `css_matchzy_version` now also say that this is the fork by mrc4tt and not the original MatchZy by WD-, with where to get support (`github.com/mrc4tt/MatchZy`), so a log or console output tells this fork (1.0.x) apart from the original MatchZy (0.9.x). The `MatchZy version: x` line is unchanged.
+
+# 1.0.21
+
+#### November 2, 2026
+
+- MySqlConnector updated from 2.4.0 to 2.6.2 for GHSA-473q-m89c-ghf8. MatchZy connects with the default TLS mode, in which the older version sent the MySQL password before verifying the server certificate, so a man-in-the-middle between the game server and a remote MySQL server could read it. SQLite is not affected.
+- `noclip` in the console now only works in practice mode. MatchZy takes over the `noclip` command to apply it server-side, and that handler ran before the engine's `sv_cheats` check without checking for practice, so any alive player could noclip during warmup, the knife round, scrims and live matches. Dry run counts as outside practice.
+- With `matchzy_ready_hint_style 1` or `2`, a player who joined a team during warmup while the round was running stayed in the observer view until the round ended. The join respawn checked for a player pawn, which someone who just joined from the team menu or Spectator does not have yet, so it never ran. Joiners now spawn as soon as their team is set, and with `matchzy_warmup_instant_respawn true` also in the native warmup.
+- New `matchzy_warmup_instant_respawn` (default `false`): a warmup where the dead respawn at once at their team spawn with 2 seconds of spawn protection, no bomb, no friendly fire, buying all warmup and full money on every respawn. It is set after `warmup.cfg`, so servers with an older `warmup.cfg` copy do not have to edit it. Friendly fire, buy time and respawn cash return to their previous values when the warmup ends.
+- With `matchzy_ready_hint_style 1` or `2`, a warmup that restarted while the ready phase was already running (match loaded during warmup, veto finished, map reload) ran `warmup.cfg` again, which turned the ready phase's respawn and no-round-end rules off. Rounds then ended when one side was eliminated and the dead only came back with the next round. The rules are now put back after the cfg.
+- New `matchzy_ready_max_missing` (default `-1` = off): the fewest players a team can ready up with in a loaded match, `players_per_team` minus this. It applies to every way of readying up (a smaller roster, `min_players_to_ready` in the match config, join mode, `matchzy_ready_per_team`, `.forceready`). Before, `matchzy_forceready_max_missing` only limited `.forceready`, so a panel sending `min_players_to_ready 1` or a 3-player roster still let a short team start with plain `.ready`.
+- Ready reminders in a loaded match no longer read as "everyone must type .ready" when fewer are enough: players on a side that is already ready are left out of the waiting list, the chat reminder (`matchzy_ready_hint_style 2`) says how many each side needs, and the classic center hint counts ready players against what the start needs instead of everyone on the server.
+- A server started without `-allow_round_backup_files` now warns admins in chat when a match is loaded and when it goes live, not only in the log. CS2 saves no round backups without it, so the missing option used to show up only when a `.restore` failed with every round already lost.
+- Warmup, knife round, scrim and all live cfgs now set `mp_drop_knife_enable 0`, and `warmup.cfg` / `knife.cfg` also set `mp_defuser_allocation 0`. A knife-drop or free-defuser value from `server.cfg` or another plugin used to carry into these modes. Servers with their own cfg copies get the new values automatically unless their cfg sets them.
+- `matchzy_spawn_markers_enabled_default` is now `true`: the `.showspawns` markers are drawn as soon as practice starts, so players can walk into a spawn box (or aim at it) and press E to teleport there without knowing the command. `.hidespawns` hides them; set it to `false` for the old behaviour.
+- New `.smoketimer` spawn smoke timer in practice (on by default, `.smoketimer` turns it off for you): after a spawn teleport (E on a spawn marker, `.spawn`, `.ctspawn`, `.tspawn`) a clock starts on your first move, jump or shot. A smoke you throw then reports how many seconds after that start it was thrown and when it popped, with its flight time, so a spawn smoke can be checked against the round start.
+- Chat messages are now also translated to German (`de`), Spanish (`es`), French (`fr`), Norwegian (`nb`), Polish (`pl`), Russian (`ru`) and Swedish (`sv`). Each player sees their own language (`!lang <code>`); messages without a translation stay in English.
+- A pause still pending when the last map of a series ended (for example an auto-pause after a player left during the final round) stayed queued through the end-of-match intermission and the reset. It is now cleared when the map ends, as it already was between the maps of a series.
+
 # 1.0.20
 
 #### October 24, 2026

@@ -38,6 +38,8 @@ A match plays as competitive (5v5) unless its match config sets `game_mode`. Mat
 
 The mode commands (`.prac`, `.match`, `.scrim`, `.sleep`, `.exitprac`) also set this value, so a practice server stays in practice after `.map`.
 
+Loading a match (`matchzy_loadmatch`, `matchzy_loadmatch_url`, `.matchsetup`) during practice or a dry run ends it like `.exitprac`, so no practice settings carry into the match. `matchzy_autostart_mode` keeps its value, so a map that starts after the match is over comes up in practice again.
+
 ## Match flow
 
 ```mermaid
@@ -52,3 +54,5 @@ flowchart LR
 ```
 
 With a match config the veto runs before warmup. Scrim and hill skip the knife round.
+
+For a warmup with instant respawn at the team spawn, 2 seconds of spawn protection, no bomb, no friendly fire, buying all warmup and full money on every respawn, set `matchzy_warmup_instant_respawn true`. It is applied after `warmup.cfg`, so you do not have to edit your cfg. Players who join a team during the warmup spawn at once as well.

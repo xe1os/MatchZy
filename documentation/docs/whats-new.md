@@ -2,35 +2,69 @@
 
 A short summary of each release. The [full changelog](changelog.md) has the details and background for every change.
 
+## 1.0.24 <small>November 7, 2026</small>
+
+- **Fixed:** Loading a match while practice mode or a dry run is running ends it like `.exitprac`. Practice settings such as free grenades no longer carry into the match.
+- **Fixed:** Players who join while practice mode is already running get the practice command list in chat.
+- **Fixed:** Players are placed on their correct team already in warmup, also after a map change, instead of being moved when the match starts.
+- **Fixed:** Players moved to their roster side when the match starts no longer die and miss the knife round or the first live round.
+
+## 1.0.23 <small>November 5, 2026</small>
+
+- **Fixed:** Reconnecting during a live round no longer refunds the money spent that round. Players keep the money they left with.
+
+## 1.0.22 <small>November 5, 2026</small>
+
+- **Changed:** The startup line and `css_matchzy_version` say that this is the fork by mrc4tt, not the original MatchZy by WD- (0.9.x), and where to get support.
+- **Fixed:** Round backups work on servers where `mp_backup_round_file_pattern` was changed (for example by a hosting egg to a `backups/` folder). MatchZy sets it back to the default during a match, so `.restore` finds the round files.
+- **Changed:** On Metamod servers the round backup files are moved from `csgo/addons/metamod/` to `csgo/` after each round start, so they no longer end up in the Metamod folder.
+- **Fixed:** Round backups are found in `csgo/backups/` on servers whose `gameinfo.gi` adds that folder (some Pelican/Pterodactyl eggs).
+
+## 1.0.21 <small>November 2, 2026</small>
+
+- **New:** `matchzy_warmup_instant_respawn true` gives a warmup with instant respawn at the team spawn, 2 seconds of spawn protection, no bomb, no friendly fire, buying all warmup and full money on every respawn. Off by default.
+- **New:** `matchzy_ready_max_missing` sets the fewest players a team can ready up with in a loaded match (`1` = at least 4 in a 5v5), however it readies up. Off by default.
+- **New:** `.smoketimer` in practice (on by default): after a spawn teleport, each smoke you throw reports how many seconds after your first move it was thrown and popped.
+- **New:** Chat translations in German, Spanish, French, Norwegian, Polish, Russian and Swedish (`!lang <code>`).
+- **Changed:** The `.showspawns` markers are shown when practice starts (`matchzy_spawn_markers_enabled_default true`), so E on a spawn box teleports you there without knowing the command.
+- **Changed:** A server started without `-allow_round_backup_files` warns admins in chat when a match is loaded and when it goes live, so missing round backups are noticed before a `.restore` is needed.
+- **Fixed:** With `matchzy_ready_hint_style 1` or `2` (or `matchzy_warmup_instant_respawn true`), players who join a team during warmup spawn at once instead of watching until the round ends.
+- **Fixed:** With `matchzy_ready_hint_style 1` or `2`, players who died in warmup sometimes only respawned when the round ended (after a match was loaded during warmup, a veto or a map reload).
+- **Fixed:** Ready reminders no longer suggest every player has to type `.ready` when the match needs fewer: ready teams drop out of the waiting list, and the counts show what the start needs.
+- **Fixed:** Warmup, the knife round, scrims and live matches always turn off knife dropping (`mp_drop_knife_enable 0`), and warmup and the knife round no longer hand out free defuse kits (`mp_defuser_allocation 0`). A value set by `server.cfg` or another plugin no longer carries into these modes.
+- **Fixed:** A pause called in the final round of a series (also an auto-pause after a disconnect) is cleared when the map ends instead of staying queued through the intermission.
+- **Security:** `noclip` in the console only works in practice mode. Before, MatchZy's own `noclip` handler skipped the `sv_cheats` check and let any alive player noclip in warmup, the knife round, scrims and live matches.
+- **Security:** MySqlConnector updated to 2.6.2 (GHSA-473q-m89c-ghf8). With MySQL stats, the older version could send the database password before checking the server's TLS certificate, so someone on the network between the game server and a remote MySQL server could read it.
+
 ## 1.0.20 <small>October 24, 2026</small>
 
 - **Fixed:** A match config loaded during a `.start` pug no longer reuses the pug's match id (stats, events, demo name and backups went to the pug).
 - **Changed:** `.showspawns`: E on a spawn marker picks the marker you aim at more precisely, also at a distance and while crouched.
 
-## 1.0.19 <small>October 24, 2026</small>
-
-- **Fixed:** GOTV demos are recorded again on Windows servers. The current CS2 build rejected the demo path MatchZy sent (`couldn't open file ... for writing`), so no demo was saved.
-
-## 1.0.18 <small>October 24, 2026</small>
-
-- **New:** `matchzy_ready_enabled false` turns off the player ready-up (`.ready`, `.forceready`, ping, join ready mode). Only an admin starts the match with `.start`, and the ready time limit does not run.
-- **New:** `matchzy_hide_failed_connect_messages true` hides the chat line for players who leave before they were fully connected ("failed to connect").
-
-## 1.0.17 <small>October 24, 2026</small>
-
-- **Fixed:** `matchzy_remote_log_url ""` clears the remote log URL and stops sending events (also the header and auth settings). Before, the old webhook kept receiving events.
-- **Changed:** A remote log setting run without a value prints what it is set to (header and auth values masked).
-- **Changed:** `matchzy_loadmatch_url` tries the match config download up to 3 times on timeouts, network errors and HTTP 5xx/408/429.
-
-## 1.0.16 <small>October 24, 2026</small>
-
-- **New:** `.ffire nades` and `"friendly_fire": "grenades"` in the match config: only HE and molotov/incendiary damage teammates. `.ffire on` / `.ffire off` and `"friendly_fire": true` / `false` also work.
-- **Fixed:** Demo uploads no longer fail for team names with letters outside ASCII (for example `Ærø`).
-- **Fixed:** A pause asked for during the knife round or side selection starts in the first live round.
-- **Fixed:** In a series, a `mp_match_restart_delay` below 18 in the match config no longer lets the game load another map before the next map of the series.
-- **Fixed:** The hostname set by `matchzy_hostname_format` is put back to the one from before the match when the series ends or the match is stopped (with `matchzy_reset_cvars_on_series_end`).
-
 ## Older releases
+
+??? note "1.0.19 - October 24, 2026"
+
+    - **Fixed:** GOTV demos are recorded again on Windows servers. The current CS2 build rejected the demo path MatchZy sent (`couldn't open file ... for writing`), so no demo was saved.
+
+??? note "1.0.18 - October 24, 2026"
+
+    - **New:** `matchzy_ready_enabled false` turns off the player ready-up (`.ready`, `.forceready`, ping, join ready mode). Only an admin starts the match with `.start`, and the ready time limit does not run.
+    - **New:** `matchzy_hide_failed_connect_messages true` hides the chat line for players who leave before they were fully connected ("failed to connect").
+
+??? note "1.0.17 - October 24, 2026"
+
+    - **Fixed:** `matchzy_remote_log_url ""` clears the remote log URL and stops sending events (also the header and auth settings). Before, the old webhook kept receiving events.
+    - **Changed:** A remote log setting run without a value prints what it is set to (header and auth values masked).
+    - **Changed:** `matchzy_loadmatch_url` tries the match config download up to 3 times on timeouts, network errors and HTTP 5xx/408/429.
+
+??? note "1.0.16 - October 24, 2026"
+
+    - **New:** `.ffire nades` and `"friendly_fire": "grenades"` in the match config: only HE and molotov/incendiary damage teammates. `.ffire on` / `.ffire off` and `"friendly_fire": true` / `false` also work.
+    - **Fixed:** Demo uploads no longer fail for team names with letters outside ASCII (for example `Ærø`).
+    - **Fixed:** A pause asked for during the knife round or side selection starts in the first live round.
+    - **Fixed:** In a series, a `mp_match_restart_delay` below 18 in the match config no longer lets the game load another map before the next map of the series.
+    - **Fixed:** The hostname set by `matchzy_hostname_format` is put back to the one from before the match when the series ends or the match is stopped (with `matchzy_reset_cvars_on_series_end`).
 
 ??? note "1.0.15 - October 23, 2026"
 

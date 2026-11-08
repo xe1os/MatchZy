@@ -170,14 +170,8 @@ namespace MatchZy
         readonly List<Position> activeSpawnMarkers = new();
         readonly Dictionary<int, float> lastSpawnMarkerUseTime = new();
         const float spawnMarkerUseCooldown = 0.3f;      // seconds between accepted +use teleports
-        // Aim tolerance in world units around a marker's vertical line (floor box up to the number),
-        // so far markers are not easier to hit than near ones (an angular cone grew to ~350u at 2000u
-        // and could grab a marker next to the one aimed at).
-        const float spawnMarkerAimRadius = 24.0f;
-        const float spawnMarkerAimMaxDistance = 4096.0f;
-        const float spawnMarkerAimMinDot = 0.985f;      // ~10 degree aim cone, still used by the .shownades markers
-        const float spawnMarkerStandRadiusSq = 8.0f * 8.0f;  // issue #11: only the spawn you're exactly on is excluded
-        const float spawnMarkerStandHeight = 90.0f;     // vertical band for the standing-on check
+        // Spawn marker aim geometry lives in Logic/SpawnPickLogic.cs (unit tested).
+        const float spawnMarkerAimMinDot = 0.985f;      // ~10 degree aim cone, used by the .shownades markers
         Dictionary<int, Dictionary<string, GrenadeThrownData>> nadeSpecificLastGrenadeData = new();
         Dictionary<int, DateTime> lastGrenadeThrownTime = new();
         // Molotov/incendiary detonation time is tracked PER PROJECTILE (entity index -> throw time +
@@ -323,6 +317,12 @@ namespace MatchZy
 
             var absolutePath = Path.Join(Server.GameDirectory + "/csgo/cfg", practiceCfgPath);
 
+            // A mode loaded before (fshost css_dmon: a deathmatch plugin or gamemode cfg) can leave
+            // mp_randomspawn and mp_teammates_are_enemies on, and an older prac.cfg copy does not
+            // set them, so practice spawned everyone at random. Reset them first: prac.cfg and its
+            // override still win.
+            Server.ExecuteCommand("mp_randomspawn 0;mp_teammates_are_enemies 0");
+
             if (File.Exists(Path.Join(Server.GameDirectory + "/csgo/cfg", practiceCfgPath)))
             {
                 practiceUsesWarmup = false;
@@ -377,19 +377,28 @@ namespace MatchZy
             AddTimer(1.5f, () => { if (isPractice) WarmSpawnFloorCache(); }, TimerFlags.STOP_ON_MAPCHANGE);
             if (spawnMarkersEnabledDefault.Value)
                 AddTimer(2.0f, () => { if (isPractice) ShowAllSpawnMarkers(); }, TimerFlags.STOP_ON_MAPCHANGE);
-            string[] practiceHelpKeys =
-            {
-                "matchzy.prac.help.spawns", "matchzy.prac.help.bots", "matchzy.prac.help.botpositions",
-                "matchzy.prac.help.nades", "matchzy.prac.help.nadethrow", "matchzy.prac.help.utility",
-                "matchzy.prac.help.positions", "matchzy.prac.help.sides", "matchzy.prac.help.full"
-            };
             foreach (var helpPlayer in Utilities.GetPlayers())
-            {
-                if (helpPlayer == null || !helpPlayer.IsValid || helpPlayer.IsBot || helpPlayer.IsHLTV)
-                    continue;
-                foreach (var helpKey in practiceHelpKeys)
-                    helpPlayer.PrintToChat($" {Localizer.ForPlayer(helpPlayer, helpKey)}");
-            }
+                SendPracticeHelp(helpPlayer);
+        }
+
+        private static readonly string[] PracticeHelpKeys =
+        {
+            "matchzy.prac.help.spawns", "matchzy.prac.help.bots", "matchzy.prac.help.botpositions",
+            "matchzy.prac.help.nades", "matchzy.prac.help.nadethrow", "matchzy.prac.help.utility",
+            "matchzy.prac.help.positions", "matchzy.prac.help.sides", "matchzy.prac.help.full"
+        };
+
+        /// <summary>
+        /// Prints the short practice command list to one player. Sent to everyone when practice
+        /// starts, and to a player who joins while practice is already running (they used to get
+        /// no hint at all which commands exist).
+        /// </summary>
+        private void SendPracticeHelp(CCSPlayerController? helpPlayer)
+        {
+            if (helpPlayer == null || !helpPlayer.IsValid || helpPlayer.IsBot || helpPlayer.IsHLTV)
+                return;
+            foreach (var helpKey in PracticeHelpKeys)
+                helpPlayer.PrintToChat($" {Localizer.ForPlayer(helpPlayer, helpKey)}");
         }
 
         public void GetSpawns()
@@ -474,6 +483,7 @@ namespace MatchZy
                         // Route through TeleportUpright so a steep spawn angle doesn't tilt the
                         // whole body (issue MatchZy-Enhanced#8).
                         TeleportUpright(player, spawnsData[teamNum][spawnNumber].PlayerPosition, spawnsData[teamNum][spawnNumber].PlayerAngle);
+                        ArmSmokeSpawnTimer(player);
                     }
                     ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.pm.movedtospawn", $"{spawnNumber + 1}/{spawnsData[teamNum].Count}"));
                 }
@@ -1080,17 +1090,17 @@ namespace MatchZy
 
         // Spawn marker = a flat square outline on the floor (4 beams) plus the spawn number floating
         // above it, so the number to use with .spawn / css_spawn is visible in the world.
-        const float spawnMarkerHalfSize = 16.0f;   // 32u box = player hull footprint
+        const float spawnMarkerHalfSize = SpawnPickLogic.HalfSize;   // 32u box = player hull footprint
         // Lift the box +8u off the floor (issue MatchZy-Enhanced#11): at +0 the marker sinks under
         // shallow water (e.g. de_ancient) and is invisible.
-        const float spawnMarkerFloorLift = 8.0f;
-        const float spawnMarkerLabelHeight = 40.0f;
+        const float spawnMarkerFloorLift = SpawnPickLogic.FloorLift;
+        const float spawnMarkerLabelHeight = SpawnPickLogic.LabelHeight;
         // Floor lookup: nav mesh point within this range of the spawn, and no further than
         // spawnMarkerMaxFloorDrop below/above it (a different floor level is not this spawn's floor).
         const float spawnMarkerNavSearchDistance = 128.0f;
         const float spawnMarkerMaxFloorDrop = 32.0f;
         // Standing inside a box (this far up from its floor) + USE snaps onto that spawn.
-        const float spawnMarkerStandInHeight = 36.0f;
+        const float spawnMarkerStandInHeight = SpawnPickLogic.StandInHeight;
 
         // Per drawn marker, indexed like activeSpawnMarkers: the entities to recolor on hover.
         sealed class SpawnMarkerVisual
@@ -3944,7 +3954,7 @@ namespace MatchZy
             {
                 //Log($"[ExecDryRunCFG] Starting Dryrun! Dryrun CFG not found in {absolutePath}, using default CFG!");
                 Server.ExecuteCommand("ammo_grenade_limit_default 1;ammo_grenade_limit_flashbang 2;ammo_grenade_limit_total 4;bot_quota 0;cash_player_bomb_defused 300;cash_player_bomb_planted 300;cash_player_damage_hostage -30;cash_player_interact_with_hostage 300;cash_player_killed_enemy_default 300;cash_player_killed_enemy_factor 1;cash_player_killed_hostage -1000;cash_player_killed_teammate -300;cash_player_rescued_hostage 1000;cash_team_elimination_bomb_map 3250;cash_team_elimination_hostage_map_ct 3000;cash_team_elimination_hostage_map_t 3000;cash_team_hostage_alive 0;cash_team_hostage_interaction 600;cash_team_loser_bonus 1400;cash_team_loser_bonus_consecutive_rounds 500;cash_team_planted_bomb_but_defused 600;cash_team_rescued_hostage 600;cash_team_terrorist_win_bomb 3500;cash_team_win_by_defusing_bomb 3500;");
-                Server.ExecuteCommand("cash_team_win_by_hostage_rescue 2900;cash_team_win_by_time_running_out_bomb 3250;cash_team_win_by_time_running_out_hostage 3250;ff_damage_reduction_bullets 0.33;ff_damage_reduction_grenade 0.85;ff_damage_reduction_grenade_self 1;ff_damage_reduction_other 0.4;mp_afterroundmoney 0;mp_autokick 0;mp_autoteambalance 0;mp_backup_restore_load_autopause 1;mp_backup_round_auto 1;mp_buy_anywhere 0;mp_buy_during_immunity 0;mp_buytime 20;mp_c4timer 40;mp_ct_default_melee weapon_knife;mp_ct_default_primary \"\";mp_ct_default_secondary weapon_hkp2000;mp_death_drop_defuser 1;mp_death_drop_grenade 2;mp_death_drop_gun 1;mp_defuser_allocation 0;mp_display_kill_assists 1;mp_endmatch_votenextmap 0;mp_forcecamera 1;mp_free_armor 0;mp_freezetime 6;mp_friendlyfire 1;mp_give_player_c4 1;mp_halftime 1;mp_halftime_duration 15;mp_halftime_pausetimer 0;mp_ignore_round_win_conditions 0;mp_limitteams 0;mp_match_can_clinch 1;mp_match_end_restart 0;mp_maxmoney 16000;mp_maxrounds 24;mp_molotovusedelay 0;mp_overtime_enable 1;mp_overtime_halftime_pausetimer 0;mp_overtime_maxrounds 6;mp_overtime_startmoney 10000;mp_playercashawards 1;mp_randomspawn 0;mp_respawn_immunitytime 0;mp_respawn_on_death_ct 0;mp_respawn_on_death_t 0;mp_round_restart_delay 5;mp_roundtime 1.92;mp_roundtime_defuse 1.92;mp_roundtime_hostage 1.92;mp_solid_teammates 1;mp_starting_losses 1;mp_startmoney 16000;mp_t_default_melee weapon_knife;mp_t_default_primary \"\";mp_t_default_secondary weapon_glock;mp_teamcashawards 1;mp_timelimit 0;mp_weapons_allow_map_placed 1;mp_weapons_allow_zeus 1;mp_weapons_glow_on_ground 0;mp_win_panel_display_time 3;occlusion_test_async 0;spec_freeze_deathanim_time 0;spec_freeze_panel_extended_time 0;spec_freeze_time 2;spec_freeze_time_lock 2;spec_replay_enable 0;sv_allow_votes 1;sv_auto_full_alltalk_during_warmup_half_end 0;sv_coaching_enabled 1;sv_competitive_official_5v5 1;sv_deadtalk 1;sv_hibernate_postgame_delay 300;sv_holiday_mode 0;sv_ignoregrenaderadio 0;sv_infinite_ammo 0;sv_occlude_players 1;sv_talk_enemy_dead 0;sv_talk_enemy_living 0;sv_voiceenable 1;tv_relayvoice 1;mp_team_timeout_max 4;mp_team_timeout_time 30;sv_vote_command_delay 0;cash_team_bonus_shorthanded 0;cash_team_loser_bonus_shorthanded 0;mp_spectators_max 20;mp_team_intro_time 0;mp_restartgame 3;mp_warmup_end;");
+                Server.ExecuteCommand("cash_team_win_by_hostage_rescue 2900;cash_team_win_by_time_running_out_bomb 3250;cash_team_win_by_time_running_out_hostage 3250;ff_damage_reduction_bullets 0.33;ff_damage_reduction_grenade 0.85;ff_damage_reduction_grenade_self 1;ff_damage_reduction_other 0.4;mp_afterroundmoney 0;mp_autokick 0;mp_autoteambalance 0;mp_backup_restore_load_autopause 1;mp_backup_round_auto 1;mp_buy_anywhere 0;mp_buy_during_immunity 0;mp_buytime 20;mp_c4timer 40;mp_ct_default_melee weapon_knife;mp_ct_default_primary \"\";mp_ct_default_secondary weapon_hkp2000;mp_death_drop_defuser 1;mp_death_drop_grenade 2;mp_death_drop_gun 1;mp_defuser_allocation 0;mp_drop_knife_enable 0;mp_display_kill_assists 1;mp_endmatch_votenextmap 0;mp_forcecamera 1;mp_free_armor 0;mp_freezetime 6;mp_friendlyfire 1;mp_give_player_c4 1;mp_halftime 1;mp_halftime_duration 15;mp_halftime_pausetimer 0;mp_ignore_round_win_conditions 0;mp_limitteams 0;mp_match_can_clinch 1;mp_match_end_restart 0;mp_maxmoney 16000;mp_maxrounds 24;mp_molotovusedelay 0;mp_overtime_enable 1;mp_overtime_halftime_pausetimer 0;mp_overtime_maxrounds 6;mp_overtime_startmoney 10000;mp_playercashawards 1;mp_randomspawn 0;mp_respawn_immunitytime 0;mp_respawn_on_death_ct 0;mp_respawn_on_death_t 0;mp_round_restart_delay 5;mp_roundtime 1.92;mp_roundtime_defuse 1.92;mp_roundtime_hostage 1.92;mp_solid_teammates 1;mp_starting_losses 1;mp_startmoney 16000;mp_t_default_melee weapon_knife;mp_t_default_primary \"\";mp_t_default_secondary weapon_glock;mp_teamcashawards 1;mp_timelimit 0;mp_weapons_allow_map_placed 1;mp_weapons_allow_zeus 1;mp_weapons_glow_on_ground 0;mp_win_panel_display_time 3;occlusion_test_async 0;spec_freeze_deathanim_time 0;spec_freeze_panel_extended_time 0;spec_freeze_time 2;spec_freeze_time_lock 2;spec_replay_enable 0;sv_allow_votes 1;sv_auto_full_alltalk_during_warmup_half_end 0;sv_coaching_enabled 1;sv_competitive_official_5v5 1;sv_deadtalk 1;sv_hibernate_postgame_delay 300;sv_holiday_mode 0;sv_ignoregrenaderadio 0;sv_infinite_ammo 0;sv_occlude_players 1;sv_talk_enemy_dead 0;sv_talk_enemy_living 0;sv_voiceenable 1;tv_relayvoice 1;mp_team_timeout_max 4;mp_team_timeout_time 30;sv_vote_command_delay 0;cash_team_bonus_shorthanded 0;cash_team_loser_bonus_shorthanded 0;mp_spectators_max 20;mp_team_intro_time 0;mp_restartgame 3;mp_warmup_end;");
             }
         }
 
@@ -3975,6 +3985,27 @@ namespace MatchZy
             Server.ExecuteCommand("mp_death_drop_defuser true; mp_death_drop_taser true; mp_drop_knife_enable false; mp_death_drop_grenade 2; ammo_grenade_limit_total 4; mp_defuser_allocation 0; sv_infinite_ammo 0; mp_force_pick_time 15");
             // CS2 March 2026+: Re-enable magazine-based reload when exiting practice mode
             Server.ExecuteCommand("""sv_magazine_drop_enabled "true";""");
+        }
+
+        // Leaves practice mode (and a dry run) without resetting the match: .exitprac / .match reset
+        // it right after, a match load keeps the config it is loading. A match loaded during .prac
+        // used to keep isPractice on through its warmup (practice commands worked) and never ran the
+        // unprac commands, so prac.cfg values no mode cfg resets (default grenades, infinite ammo)
+        // carried into the knife round and the live match. The unprac commands are queued, so what
+        // the caller queues next (the match's cvars, warmup.cfg, a changelevel) runs after them.
+        private void EndPracticeMode()
+        {
+            isPractice = false;
+            isDryRun = false;
+            ResetAllPlayerPracticeSettings(enteringPractice: false);
+            CleanupAllCollisionTimers();
+            ExecUnpracCommands();
+            RemoveSpawnBeams();
+            // ResetMatch clears these as well, but a successful match load does not run it.
+            pracUsedBots = new Dictionary<int, Dictionary<string, object>>();
+            noFlashList = new();
+            lastGrenadesData = new();
+            nadeSpecificLastGrenadeData = new();
         }
 
         public bool IsValidPositionForLastGrenade(CCSPlayerController player, int position)
@@ -4925,12 +4956,16 @@ namespace MatchZy
                 if (!IsPlayerValid(player))
                     return;
                 TeleportUpright(player, target.PlayerPosition, target.PlayerAngle);
+                ArmSmokeSpawnTimer(player);
             });
         }
 
         // The marker USE would teleport to, or -1: the one the player aims at, else the box they
         // stand in. Shared by the USE handler and the hover highlight so the highlighted marker is
         // always the one E picks.
+        // Reused by TargetSpawnMarkerIndex (game thread only; the hover timer calls it per player at 10 Hz).
+        readonly List<(System.Numerics.Vector3 Spawn, float FloorZ)> spawnMarkerPickBuffer = new();
+
         private int TargetSpawnMarkerIndex(CCSPlayerController player)
         {
             if (player.TeamNum != (byte)CsTeam.CounterTerrorist && player.TeamNum != (byte)CsTeam.Terrorist)
@@ -4943,80 +4978,17 @@ namespace MatchZy
             Vector origin = pawn.AbsOrigin;
             var eye = new System.Numerics.Vector3(origin.X, origin.Y, origin.Z + pawn.ViewOffset.Z);
             QAngle ang = pawn.EyeAngles;
-            double pitch = ang.X * Math.PI / 180.0;
-            double yaw = ang.Y * Math.PI / 180.0;
-            var forward = new System.Numerics.Vector3(
-                (float)(Math.Cos(pitch) * Math.Cos(yaw)),
-                (float)(Math.Cos(pitch) * Math.Sin(yaw)),
-                (float)(-Math.Sin(pitch)));
+            var forward = SpawnPickLogic.Forward(ang.X, ang.Y);
 
-            int bestIndex = -1;
-            float bestAlong = float.MaxValue;
-            for (int i = 0; i < activeSpawnMarkers.Count; i++)
-            {
-                Vector sp = activeSpawnMarkers[i].PlayerPosition;
-                // Exclude the spawn you're standing exactly on (issue #11: 8u radius) so you can
-                // still re-center onto a neighbouring marker you're merely near.
-                float hdx = sp.X - origin.X, hdy = sp.Y - origin.Y, vdz = sp.Z - origin.Z;
-                if (hdx * hdx + hdy * hdy <= spawnMarkerStandRadiusSq && Math.Abs(vdz) <= spawnMarkerStandHeight)
-                    continue;
-                // Aiming anywhere between the floor box and the number above it registers. When
-                // several markers are in tolerance, the nearest along the view wins, so a marker
-                // behind another one is not picked.
-                float floorZ = i < spawnMarkerVisuals.Count ? spawnMarkerVisuals[i].FloorZ : sp.Z;
-                var (dist, along) = RayToVerticalSegment(eye, forward, spawnMarkerAimMaxDistance,
-                    sp.X, sp.Y, floorZ + spawnMarkerFloorLift, floorZ + spawnMarkerLabelHeight);
-                if (dist <= spawnMarkerAimRadius && along < bestAlong)
-                {
-                    bestAlong = along;
-                    bestIndex = i;
-                }
-            }
-
-            if (bestIndex >= 0)
-                return bestIndex;
-
-            // Not aiming at a marker: standing inside a box on the floor + USE snaps onto that
-            // spawn (exact position and view angle). Nearest box center wins when boxes overlap.
-            float bestDistSq = float.MaxValue;
+            var markers = spawnMarkerPickBuffer;
+            markers.Clear();
             for (int i = 0; i < activeSpawnMarkers.Count; i++)
             {
                 Vector sp = activeSpawnMarkers[i].PlayerPosition;
                 float floorZ = i < spawnMarkerVisuals.Count ? spawnMarkerVisuals[i].FloorZ : sp.Z;
-                float dx = origin.X - sp.X, dy = origin.Y - sp.Y, dz = origin.Z - floorZ;
-                if (Math.Abs(dx) > spawnMarkerHalfSize || Math.Abs(dy) > spawnMarkerHalfSize
-                    || dz < -spawnMarkerStandInHeight || dz > spawnMarkerStandInHeight)
-                    continue;
-                float distSq = dx * dx + dy * dy;
-                if (distSq < bestDistSq)
-                {
-                    bestDistSq = distSq;
-                    bestIndex = i;
-                }
+                markers.Add((new System.Numerics.Vector3(sp.X, sp.Y, sp.Z), floorZ));
             }
-            return bestIndex;
-        }
-
-        // Closest distance between the view ray (eye + forward * t, 0 <= t <= maxDistance, forward a
-        // unit vector) and the vertical segment (x, y, zBottom..zTop), and the ray distance t at
-        // that point.
-        private static (float Distance, float Along) RayToVerticalSegment(System.Numerics.Vector3 eye,
-            System.Numerics.Vector3 forward, float maxDistance, float x, float y, float zBottom, float zTop)
-        {
-            var a = new System.Numerics.Vector3(x, y, zBottom);
-            float height = zTop - zBottom;
-            System.Numerics.Vector3 w = eye - a;
-            float fz = forward.Z;               // forward . (0, 0, 1)
-            float fw = System.Numerics.Vector3.Dot(forward, w);
-            float denom = 1.0f - fz * fz;       // 0 when looking straight up/down along the segment
-            float t = denom < 1e-6f ? 0.0f : Math.Clamp((fz * w.Z - fw) / denom, 0.0f, maxDistance);
-            // Clamp onto the segment, then re-project the ray onto that point.
-            float s = Math.Clamp(w.Z + fz * t, 0.0f, height);
-            var onSegment = new System.Numerics.Vector3(x, y, zBottom + s);
-            t = Math.Clamp(System.Numerics.Vector3.Dot(onSegment - eye, forward), 0.0f, maxDistance);
-            s = Math.Clamp(w.Z + fz * t, 0.0f, height);
-            onSegment = new System.Numerics.Vector3(x, y, zBottom + s);
-            return (System.Numerics.Vector3.Distance(eye + forward * t, onSegment), t);
+            return SpawnPickLogic.PickMarker(new System.Numerics.Vector3(origin.X, origin.Y, origin.Z), eye, forward, markers);
         }
 
         [ConsoleCommand("css_hidespawns", "Hides the highlighted spawns")]
