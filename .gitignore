@@ -6,7 +6,6 @@ obj/
 .git-credentials
 
 # MkDocs build output
-documentation/site/
 
 # Local backup copies
 *.bak
@@ -15,3 +14,4 @@ tools/ship.sh
 
 # Release output (tools/package.sh)
 dist/
+__pycache__/

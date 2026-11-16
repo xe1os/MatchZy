@@ -26,7 +26,155 @@ namespace MatchZy
         // on a worker thread can race our open during the native bootstrap and segfault.
         static Database()
         {
-            EnsureSqliteProviderInitialized();
+            RegisterSqliteNativeResolver();
+            _staticSqliteInitError = EnsureSqliteProviderInitialized();
+        }
+
+        // Set by the static ctor (it cannot log: no plugin instance yet); InitializeDatabaseAsync logs them.
+        private static string? _staticSqliteInitError;
+        private static string? _sqliteResolverNote;
+
+        /// <summary>
+        /// Points SQLitePCLRaw's DllImport("e_sqlite3") straight at MatchZy's own SQLite build
+        /// (libe_sqlite3.so on Linux, e_sqlite3.dll on Windows, both shipped next to MatchZy.dll).
+        /// Normally the plugin loader finds it through MatchZy.deps.json + runtimes/<rid>/native/.
+        /// That failed after a plugin reload or a deploy without deps.json / runtimes: .NET then only
+        /// probed the runtime's shared folder (dotnet/shared/Microsoft.NETCore.App/...), threw
+        /// DllNotFoundException, and stats were disabled. The resolver tries the flat layout
+        /// (next to MatchZy.dll) and the runtimes/ layout itself, so neither file is required.
+        /// Returning Zero falls back to the default lookup.
+        /// </summary>
+        private static void RegisterSqliteNativeResolver()
+        {
+            bool windows = OperatingSystem.IsWindows();
+            if (!windows && !OperatingSystem.IsLinux())
+                return;
+            try
+            {
+                var dirs = new List<string>();
+                // Empty when the plugin is loaded from memory (hot reload), hence the fallback below.
+                string location = typeof(Database).Assembly.Location;
+                if (!string.IsNullOrEmpty(location))
+                    dirs.Add(Path.GetDirectoryName(location)!);
+                try
+                {
+                    // The static ctor runs from the plugin ctor on the game thread, so this native is safe.
+                    string pluginsDir = Path.Combine(Server.GameDirectory, "csgo", "addons", "counterstrikesharp", "plugins");
+                    dirs.Add(Path.Combine(pluginsDir, "MatchZy"));
+                    // A renamed plugin folder (e.g. "matchzy"; Linux paths are case-sensitive): any folder
+                    // directly under plugins/ that holds MatchZy.dll.
+                    if (Directory.Exists(pluginsDir))
+                    {
+                        foreach (var dir in Directory.EnumerateDirectories(pluginsDir))
+                        {
+                            if (File.Exists(Path.Combine(dir, "MatchZy.dll")))
+                                dirs.Add(dir);
+                        }
+                    }
+                }
+                catch { }
+
+                var candidates = dirs.Distinct()
+                    .SelectMany(d => windows
+                        ? new[]
+                        {
+                            Path.Combine(d, "e_sqlite3.dll"),
+                            Path.Combine(d, "runtimes", "win-x64", "native", "e_sqlite3.dll"),
+                        }
+                        : new[]
+                        {
+                            Path.Combine(d, "libe_sqlite3.so"),
+                            Path.Combine(d, "runtimes", "linux-x64", "native", "libe_sqlite3.so"),
+                        })
+                    .ToArray();
+                if (!candidates.Any(File.Exists))
+                    _sqliteResolverNote = $"no MatchZy SQLite library found (looked in: {string.Join(", ", dirs.Distinct())}); using the default lookup";
+
+                System.Runtime.InteropServices.NativeLibrary.SetDllImportResolver(typeof(SQLitePCL.SQLite3Provider_e_sqlite3).Assembly, (name, _, _) =>
+                {
+                    if (name != "e_sqlite3" && name != "libe_sqlite3")
+                        return IntPtr.Zero;
+                    foreach (var path in candidates)
+                    {
+                        if (!File.Exists(path))
+                            continue;
+                        string? shadow = windows ? null : ShadowCopySqliteNative(path);
+                        if (shadow != null && System.Runtime.InteropServices.NativeLibrary.TryLoad(shadow, out var shadowHandle))
+                            return shadowHandle;
+                        if (System.Runtime.InteropServices.NativeLibrary.TryLoad(path, out var handle))
+                            return handle;
+                    }
+                    return IntPtr.Zero;
+                });
+            }
+            catch (InvalidOperationException)
+            {
+                // A resolver is already set for this assembly (it is shared with another plugin's
+                // load context); that one handles the lookup.
+            }
+            catch (Exception)
+            {
+                // Never let the resolver setup break the plugin; the default lookup still runs.
+            }
+        }
+
+        // Linux maps a loaded .so straight from its file. Uploading a new libe_sqlite3.so over the
+        // old one in place (FTP overwrites the same inode; unzip replaces it with a new file) swaps
+        // the pages under the running library, and the dynamic linker then resolves symbols out
+        // of the new build's tables: a SIGSEGV in ld-linux on whichever thread calls SQLite next.
+        // So load a private copy instead, named by the file's content hash, under
+        // <plugin>/native-cache/. Nobody uploads into that folder, an unchanged library maps to the
+        // same copy on every reload (dlopen returns the same handle), and a changed one gets a new
+        // copy. Older copies are unlinked, which is safe on Linux even while one is mapped.
+        // Returns null when the copy cannot be made; the caller then loads the original.
+        private static string? ShadowCopySqliteNative(string source)
+        {
+            try
+            {
+                string hash;
+                using (var stream = File.OpenRead(source))
+                    hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream))[..16].ToLowerInvariant();
+
+                string? pluginDir = Path.GetDirectoryName(source);
+                if (pluginDir == null)
+                    return null;
+                // runtimes/linux-x64/native/ layout: keep the cache next to MatchZy.dll.
+                if (string.Equals(Path.GetFileName(pluginDir), "native", StringComparison.Ordinal))
+                    pluginDir = Path.GetFullPath(Path.Combine(pluginDir, "..", "..", ".."));
+
+                string cacheRoot = Path.Combine(pluginDir, "native-cache");
+                string target = Path.Combine(cacheRoot, $"libe_sqlite3-{hash}.so");
+                if (!File.Exists(target))
+                {
+                    Directory.CreateDirectory(cacheRoot);
+                    string temp = $"{target}.{Environment.ProcessId}.tmp";
+                    File.Copy(source, temp, overwrite: true);
+                    try
+                    {
+                        // Atomic publish: another server sharing this install never sees a half copy.
+                        File.Move(temp, target, overwrite: false);
+                    }
+                    catch (IOException) when (File.Exists(target))
+                    {
+                        File.Delete(temp);
+                    }
+                }
+
+                foreach (var old in Directory.EnumerateFiles(cacheRoot, "libe_sqlite3-*"))
+                {
+                    if (string.Equals(old, target, StringComparison.Ordinal))
+                        continue;
+                    // Another server process may be copying right now; only sweep stale temp files.
+                    if (old.EndsWith(".tmp", StringComparison.Ordinal) && File.GetLastWriteTimeUtc(old) > DateTime.UtcNow.AddHours(-1))
+                        continue;
+                    try { File.Delete(old); } catch { }
+                }
+                return target;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         public void Dispose()
@@ -91,8 +239,43 @@ namespace MatchZy
         DatabaseConfig? config;
         public DatabaseType databaseType { get; set; }
 
+        // Completed when InitializeDatabaseAsync has finished (successfully or not). Load runs the
+        // init on a pool thread so it does not block the game thread, which means a match config
+        // exec'd right after Load (autostart, a backup restore) can reach InitMatch before the
+        // connection string exists: CreateNewConnection threw "not initialized" and the match got
+        // matchid -1. Every public DB method awaits this first, so early callers just wait.
+        private readonly TaskCompletionSource _initDone = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Upper bound on that wait, so a DB method can never hang forever if init was never started.
+        private static readonly TimeSpan InitWaitTimeout = TimeSpan.FromSeconds(60);
+
+        private async Task WaitForInitAsync()
+        {
+            if (_initDone.Task.IsCompleted)
+                return;
+            Task finished = await Task.WhenAny(_initDone.Task, Task.Delay(InitWaitTimeout));
+            if (finished != _initDone.Task)
+                Log($"[Database] Initialization still not finished after {InitWaitTimeout.TotalSeconds:0} s, continuing anyway.");
+        }
+
         public async Task InitializeDatabaseAsync(string directory, string gameDirectory)
         {
+            try
+            {
+                await InitializeDatabaseCoreAsync(directory, gameDirectory);
+            }
+            finally
+            {
+                _initDone.TrySetResult();
+            }
+        }
+
+        private async Task InitializeDatabaseCoreAsync(string directory, string gameDirectory)
+        {
+            if (_sqliteResolverNote != null)
+                Log($"[RegisterSqliteNativeResolver] {_sqliteResolverNote}");
+            if (_staticSqliteInitError != null)
+                Log($"[EnsureSqliteProviderInitialized] Batteries_V2.Init() failed at load: {_staticSqliteInitError}");
             string? sqliteInitError = EnsureSqliteProviderInitialized();
             if (sqliteInitError != null)
                 Log($"[EnsureSqliteProviderInitialized] Batteries_V2.Init() failed: {sqliteInitError}");
@@ -253,19 +436,21 @@ namespace MatchZy
 
         private async Task CreateRequiredTablesSQLiteAsync(IDbConnection conn)
         {
-            // WAL lets reads run while a write is in progress and makes overlapping writes (round end,
-            // map end and series end at the end of the last round) wait less for the file lock. The
-            // mode is stored in the database file, so setting it once at startup is enough.
+            // Rollback journal (DELETE), not WAL: WAL kept matchzy.db-wal and matchzy.db-shm next to
+            // the database for as long as the server ran, which admins took for leftovers or
+            // corruption, and a copy of matchzy.db alone could miss recent rounds still in the WAL.
+            // MatchZy writes a few rows per round, so WAL's concurrency gains nothing here; writers
+            // wait on the file lock (Default Timeout=30). The mode is stored in the file: switching
+            // an existing WAL database back checkpoints it and removes the -wal/-shm files.
             try
             {
-                string? mode = await conn.ExecuteScalarAsync<string>("PRAGMA journal_mode=WAL;");
-                // SQLite falls back silently (e.g. on a filesystem without shared-memory locking).
-                if (!string.Equals(mode, "wal", StringComparison.OrdinalIgnoreCase))
-                    Log($"[CreateRequiredTablesSQLite] SQLite journal mode is '{mode}', not WAL.");
+                string? mode = await conn.ExecuteScalarAsync<string>("PRAGMA journal_mode=DELETE;");
+                if (!string.Equals(mode, "delete", StringComparison.OrdinalIgnoreCase))
+                    Log($"[CreateRequiredTablesSQLite] SQLite journal mode is '{mode}', not DELETE.");
             }
             catch (Exception ex)
             {
-                Log($"[CreateRequiredTablesSQLite] Could not enable WAL mode: {ex.Message}");
+                Log($"[CreateRequiredTablesSQLite] Could not set the journal mode: {ex.Message}");
             }
 
             await conn.ExecuteAsync(
@@ -360,7 +545,7 @@ namespace MatchZy
                     team2_name VARCHAR(64) NOT NULL DEFAULT '',
                     team2_score INT NOT NULL DEFAULT 0,
                     server_ip VARCHAR(64) NOT NULL DEFAULT '0'
-                )"
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
             );
 
             await conn.ExecuteAsync(
@@ -376,7 +561,7 @@ namespace MatchZy
                     team2_score INT NOT NULL DEFAULT 0,
                     PRIMARY KEY (matchid, mapnumber),
                     FOREIGN KEY (matchid) REFERENCES matchzy_stats_matches (matchid)
-                )"
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
             );
 
             await conn.ExecuteAsync(
@@ -420,12 +605,48 @@ namespace MatchZy
                     enemies_flashed INT NOT NULL DEFAULT 0,
                     PRIMARY KEY (matchid, mapnumber, steamid64),
                     FOREIGN KEY (matchid) REFERENCES matchzy_stats_matches (matchid)
-                )"
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
             );
+        }
+
+        // Width of the VARCHAR(64) team/winner columns. Team names come straight from match JSON or
+        // admin input and are never shortened before here; a MySQL server in strict mode (the
+        // default since 5.7) rejects an over-long value instead of truncating it, so a long team name
+        // failed the matches INSERT, InitMatch returned -1 and the whole match lost its stats.
+        private const int TeamColumnLength = 64;
+
+        private static string FitTeamColumn(string? value)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length <= TeamColumnLength)
+                return value ?? string.Empty;
+            int cut = TeamColumnLength;
+            // Never split a surrogate pair: a lone high surrogate is not valid UTF-8 either.
+            if (char.IsHighSurrogate(value[cut - 1]))
+                cut--;
+            return value.Substring(0, cut);
+        }
+
+        // A table created before the utf8mb4 default (or on a server whose default charset is
+        // latin1/utf8mb3) cannot store 4-byte characters such as emoji, so the row INSERT fails with
+        // "Incorrect string value". Used as a one-shot fallback for the player name only.
+        private static string ToAsciiName(string value)
+        {
+            var sb = new System.Text.StringBuilder(value.Length);
+            foreach (char c in value.Normalize(System.Text.NormalizationForm.FormD))
+            {
+                if (c >= 32 && c < 127)
+                    sb.Append(c);
+            }
+            string result = sb.ToString().Trim();
+            return result.Length == 0 ? "player" : result;
         }
 
         public async Task<long> InitMatchAsync(string team1Name, string team2Name, string winner, bool isMatchSetup, long currentMatchId, int currentMapNumber, string seriesType, string mapName, string serverIp)
         {
+            await WaitForInitAsync();
+            team1Name = FitTeamColumn(team1Name);
+            team2Name = FitTeamColumn(team2Name);
+            winner = FitTeamColumn(winner);
             try
             {
                 using IDbConnection conn = CreateNewConnection();
@@ -595,9 +816,9 @@ namespace MatchZy
                 {
                     MatchId = matchId,
                     StartTime = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-                    Team1Name = team1Name,
-                    Team2Name = team2Name,
-                    Winner = winner,
+                    Team1Name = FitTeamColumn(team1Name),
+                    Team2Name = FitTeamColumn(team2Name),
+                    Winner = FitTeamColumn(winner),
                     SeriesType = seriesType,
                     ServerIp = serverIp,
                 }
@@ -613,6 +834,7 @@ namespace MatchZy
         {
             if (matchId <= 0)
                 return false;
+            await WaitForInitAsync();
             try
             {
                 using IDbConnection conn = CreateNewConnection();
@@ -637,6 +859,11 @@ namespace MatchZy
                 Log("[SetMatchEndData - ERROR] Invalid matchId: -1");
                 return;
             }
+
+            await WaitForInitAsync();
+            mapWinner = FitTeamColumn(mapWinner);
+            if (matchWinner != null)
+                matchWinner = FitTeamColumn(matchWinner);
 
             try
             {
@@ -741,6 +968,8 @@ namespace MatchZy
                 return;
             }
 
+            await WaitForInitAsync();
+
             try
             {
                 using IDbConnection conn = CreateNewConnection();
@@ -800,6 +1029,7 @@ namespace MatchZy
         {
             if (matchId <= 0)
                 return;
+            await WaitForInitAsync();
             try
             {
                 using IDbConnection conn = CreateNewConnection();
@@ -810,8 +1040,8 @@ namespace MatchZy
                       WHERE matchid = @MatchId",
                     new
                     {
-                        Team1Name = team1Name,
-                        Team2Name = team2Name,
+                        Team1Name = FitTeamColumn(team1Name),
+                        Team2Name = FitTeamColumn(team2Name),
                         MatchId = matchId,
                     }
                 );
@@ -835,6 +1065,8 @@ namespace MatchZy
                 Log($"[UpdatePlayerStats] Nothing to write for match {matchId} map {mapNumber}: the caller collected no player stats.");
                 return;
             }
+
+            await WaitForInitAsync();
 
             int written = 0;
 
@@ -968,55 +1200,75 @@ namespace MatchZy
                     // character in a name under a legacy column charset, a stray value) used to
                     // abort the whole loop from the outer catch, so a single bad player discarded
                     // every other player's stats for that round.
+                    object RowParams(object? name) => new
+                    {
+                        matchId,
+                        mapNumber,
+                        steamid64,
+                        team = FitTeamColumn(playerStats["TeamName"]?.ToString()),
+                        name,
+                        kills = playerStats["Kills"],
+                        deaths = playerStats["Deaths"],
+                        damage = playerStats["Damage"],
+                        assists = playerStats["Assists"],
+                        enemy5ks = playerStats["Enemy5Ks"],
+                        enemy4ks = playerStats["Enemy4Ks"],
+                        enemy3ks = playerStats["Enemy3Ks"],
+                        enemy2ks = playerStats["Enemy2Ks"],
+                        utility_count = playerStats["UtilityCount"],
+                        utility_damage = playerStats["UtilityDamage"],
+                        utility_successes = playerStats["UtilitySuccess"],
+                        utility_enemies = playerStats["UtilityEnemies"],
+                        flash_count = playerStats["FlashCount"],
+                        flash_successes = playerStats["FlashSuccess"],
+                        health_points_removed_total = playerStats["HealthPointsRemovedTotal"],
+                        health_points_dealt_total = playerStats["HealthPointsDealtTotal"],
+                        shots_fired_total = playerStats["ShotsFiredTotal"],
+                        shots_on_target_total = playerStats["ShotsOnTargetTotal"],
+                        v1_count = playerStats["1v1Count"],
+                        v1_wins = playerStats["1v1Wins"],
+                        v2_count = playerStats["1v2Count"],
+                        v2_wins = playerStats["1v2Wins"],
+                        entry_count = playerStats["EntryCount"],
+                        entry_wins = playerStats["EntryWins"],
+                        equipment_value = playerStats["EquipmentValue"],
+                        money_saved = playerStats["MoneySaved"],
+                        kill_reward = playerStats["KillReward"],
+                        live_time = playerStats["LiveTime"],
+                        head_shot_kills = playerStats["HeadShotKills"],
+                        cash_earned = playerStats["CashEarned"],
+                        enemies_flashed = playerStats["EnemiesFlashed"],
+                    };
+
+                    playerStats.TryGetValue("PlayerName", out object? nameValue);
+                    string originalName = nameValue?.ToString() ?? string.Empty;
                     try
                     {
-                        await conn.ExecuteAsync(
-                            sqlQuery,
-                            new
-                            {
-                                matchId,
-                                mapNumber,
-                                steamid64,
-                                team = playerStats["TeamName"],
-                                name = playerStats["PlayerName"],
-                                kills = playerStats["Kills"],
-                                deaths = playerStats["Deaths"],
-                                damage = playerStats["Damage"],
-                                assists = playerStats["Assists"],
-                                enemy5ks = playerStats["Enemy5Ks"],
-                                enemy4ks = playerStats["Enemy4Ks"],
-                                enemy3ks = playerStats["Enemy3Ks"],
-                                enemy2ks = playerStats["Enemy2Ks"],
-                                utility_count = playerStats["UtilityCount"],
-                                utility_damage = playerStats["UtilityDamage"],
-                                utility_successes = playerStats["UtilitySuccess"],
-                                utility_enemies = playerStats["UtilityEnemies"],
-                                flash_count = playerStats["FlashCount"],
-                                flash_successes = playerStats["FlashSuccess"],
-                                health_points_removed_total = playerStats["HealthPointsRemovedTotal"],
-                                health_points_dealt_total = playerStats["HealthPointsDealtTotal"],
-                                shots_fired_total = playerStats["ShotsFiredTotal"],
-                                shots_on_target_total = playerStats["ShotsOnTargetTotal"],
-                                v1_count = playerStats["1v1Count"],
-                                v1_wins = playerStats["1v1Wins"],
-                                v2_count = playerStats["1v2Count"],
-                                v2_wins = playerStats["1v2Wins"],
-                                entry_count = playerStats["EntryCount"],
-                                entry_wins = playerStats["EntryWins"],
-                                equipment_value = playerStats["EquipmentValue"],
-                                money_saved = playerStats["MoneySaved"],
-                                kill_reward = playerStats["KillReward"],
-                                live_time = playerStats["LiveTime"],
-                                head_shot_kills = playerStats["HeadShotKills"],
-                                cash_earned = playerStats["CashEarned"],
-                                enemies_flashed = playerStats["EnemiesFlashed"],
-                            }
-                        );
+                        await conn.ExecuteAsync(sqlQuery, RowParams(nameValue));
                         written++;
                     }
                     catch (Exception rowEx)
                     {
-                        Log($"[UpdatePlayerStats - ERROR] Skipped steamid {steamid64} (name '{playerStats["PlayerName"]}'): {DescribeException(rowEx)}");
+                        // Most likely a 4-byte character (emoji) in the name hitting a non-utf8mb4
+                        // column: retry once with the name reduced to ASCII so the stats survive.
+                        string asciiName = ToAsciiName(originalName);
+                        bool retried = false;
+                        if (asciiName != originalName)
+                        {
+                            try
+                            {
+                                await conn.ExecuteAsync(sqlQuery, RowParams(asciiName));
+                                written++;
+                                retried = true;
+                                Log($"[UpdatePlayerStats] Steamid {steamid64} written with ASCII name '{asciiName}' after: {DescribeException(rowEx)}");
+                            }
+                            catch (Exception retryEx)
+                            {
+                                Log($"[UpdatePlayerStats - ERROR] ASCII-name retry for steamid {steamid64} failed: {DescribeException(retryEx)}");
+                            }
+                        }
+                        if (!retried)
+                            Log($"[UpdatePlayerStats - ERROR] Skipped steamid {steamid64} (name '{originalName}'): {DescribeException(rowEx)}");
                     }
                 }
 
@@ -1038,6 +1290,8 @@ namespace MatchZy
                 Log("[WritePlayerStatsToCsv - ERROR] Invalid matchId: -1");
                 return;
             }
+
+            await WaitForInitAsync();
 
             try
             {

@@ -75,13 +75,21 @@ namespace MatchZy
                 // spectators or extra ready players on one side must not hide a side that is missing.
                 int readyPlayers = perTeam > 0
                     ? CountedReadyForSide(CsTeam.CounterTerrorist, perTeam) + CountedReadyForSide(CsTeam.Terrorist, perTeam)
-                    : playerReadyStatus.Values.Count(status => status);
+                    : CountReadyGatePlayers().Ready;
                 int notReadyPlayers = totalPlayers - readyPlayers;
 
                 if (notReadyPlayers < 0)
                     notReadyPlayers = 0; // safety check
 
-                if (player != null)
+                // Loaded match: per team, what it is waiting for (players on the side, ready count, the
+                // registered players who are missing). The totals alone did not say why a match
+                // with everyone ready did not start.
+                if (isMatchSetup)
+                {
+                    foreach (string line in ReadyCheckTeamLines(player))
+                        ReplyToUserCommand(player, line);
+                }
+                else if (player != null)
                 {
                     player.PrintToChat($" {Localizer.ForPlayer(player, "matchzy.cmd.readycheck.readyplayers", readyPlayers, totalPlayers)}");
                     player.PrintToChat($" {Localizer.ForPlayer(player, "matchzy.cmd.readycheck.waitingfor", notReadyPlayers)}");
@@ -108,6 +116,8 @@ namespace MatchZy
             {
                 if (ReplyReadyDisabled(player))
                     return;
+                if (RejectNonPlayerReady(player))
+                    return;
                 if (player.UserId.HasValue)
                 {
                     int userId = player.UserId.Value;
@@ -124,6 +134,7 @@ namespace MatchZy
                     {
                         playerReadyStatus[userId] = true;
                         PrintToPlayerChat(player, Localizer.ForPlayer(player, "matchzy.ready.markedready"));
+                        PublishPlayerReadyChanged(player, true);
 
                         // NEW: Check if this team is now ready
                         bool isTeamReady = IsTeamReady(team);
@@ -132,7 +143,7 @@ namespace MatchZy
                             string teamName = team == 3 ? "CT" : "Terrorists";
                             PrintLocalizedToAll("matchzy.cmd.teamready", teamName);
                         }
-                        else if (ShortHandedSide(team) != null
+                        else if (ShortHandedHintSide(team) != null
                             && (!shortHandedHintAt.TryGetValue(team, out DateTime last) || DateTime.UtcNow - last > TimeSpan.FromSeconds(15)))
                         {
                             // Everyone here may be ready while a rostered player is missing: say so.
@@ -164,6 +175,8 @@ namespace MatchZy
             {
                 if (ReplyReadyDisabled(player))
                     return;
+                if (RejectNonPlayerReady(player))
+                    return;
                 if (player.UserId.HasValue)
                 {
                     if (!playerReadyStatus.ContainsKey(player.UserId.Value))
@@ -179,6 +192,7 @@ namespace MatchZy
                     {
                         playerReadyStatus[player.UserId.Value] = false;
                         PrintToPlayerChat(player, Localizer.ForPlayer(player, "matchzy.ready.markedunready"));
+                        PublishPlayerReadyChanged(player, false);
                     }
 
                     _readyStatusDirty = true;
@@ -590,6 +604,8 @@ namespace MatchZy
                 else
                 {
                     PrintLocalizedToAll("matchzy.pause.teamwantstounpause", unpauseTeamName, remainingUnpauseTeam);
+                    if (player != null && player.IsValid)
+                        PublishUnpauseRequested(player.TeamNum);
                 }
 
                 if (!isPaused && pausedStateTimer != null)
@@ -628,9 +644,13 @@ namespace MatchZy
                     {
                         bool alreadyActive = gameRules.TerroristTimeOutActive;
                         int left = gameRules.TerroristTimeOuts - 1;
+                        pauseNoticeGraceUntil = DateTime.UtcNow.AddSeconds(2);
                         Server.ExecuteCommand("timeout_terrorist_start");
                         if (!alreadyActive)
+                        {
                             PrintLocalizedToAll("matchzy.pause.tacleft", GetTacTeamName(player), left);
+                            PublishTacticalTimeoutStarted(player);
+                        }
                     }
                     else
                     {
@@ -643,9 +663,13 @@ namespace MatchZy
                     {
                         bool alreadyActive = gameRules.CTTimeOutActive;
                         int left = gameRules.CTTimeOuts - 1;
+                        pauseNoticeGraceUntil = DateTime.UtcNow.AddSeconds(2);
                         Server.ExecuteCommand("timeout_ct_start");
                         if (!alreadyActive)
+                        {
                             PrintLocalizedToAll("matchzy.pause.tacleft", GetTacTeamName(player), left);
+                            PublishTacticalTimeoutStarted(player);
+                        }
                     }
                     else
                     {
@@ -678,6 +702,11 @@ namespace MatchZy
                         // player.PrintToChat($"{chatPrefix} Skip veto command cannot be used if match has already started!");
                         PrintToPlayerChat(player, Localizer.ForPlayer(player, "matchzy.cc.skipvetomatchstarted"));
                     }
+                }
+                else if (!isVeto && !isPreVeto)
+                {
+                    // Outside a veto SkipVeto forced warmup flags on top of practice/sleep/idle.
+                    ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.cc.novetotoskip"));
                 }
                 else
                 {
@@ -987,6 +1016,12 @@ namespace MatchZy
                 {
                     ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.cc.startmatchstarted"));
                 }
+                else if (isVeto)
+                {
+                    // matchStarted is false during the veto: a second start ran HandleMatchStartCore
+                    // again (new database row, CreateVeto again with new captains) mid-veto.
+                    ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.cc.vetoinprogress"));
+                }
                 else
                 {
                     PrintLocalizedToAll("matchzy.cmd.adminstartedgame");
@@ -1009,6 +1044,17 @@ namespace MatchZy
                 if (matchStarted)
                 {
                     ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.cmd.warmupmatchstarted"));
+                }
+                else if (isVeto)
+                {
+                    // warmup.cfg restarts the game under the veto's pause.
+                    ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.cc.vetoinprogress"));
+                }
+                else if (isPractice)
+                {
+                    // Only the cfg would change: isPractice and the practice handlers stayed on top
+                    // of a warmup cfg. .match / .exitprac leave practice properly.
+                    ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.cmd.startinpracticehint"));
                 }
                 else if (!warmupEnabled.Value)
                 {
@@ -1186,10 +1232,18 @@ namespace MatchZy
 
             SetExplicitMode(1);
             StartScrimMode();
+            // Start*Mode runs ResetMatch() when leaving practice, sleep or a dry run, which sets the
+            // mode flags back to their defaults: set them again so this mode is the one that starts.
+            isKnifeRound = false;
+            isKnifeRequired = false;
+            isPlayOutEnabled = true;
+            isPlayOutEnabled2 = false;
+            isMatchModeEnabled = false;
             // Apply clinch=0/overtime=0 NOW during warmup so client trophy UI slot
             // is allocated correctly at the upcoming warmup→live phase transition.
             // Mid-live convar flips can't move trophy after the slot is allocated.
             HandlePlayoutConfig();
+            RefreshScoreboardAfterModeSwitch();
             // Same compact status readout as .match, reflecting scrim's flags (knife off, playout on).
             string on = Localizer.ForPlayer(player, "matchzy.cc.statuson");
             string off = Localizer.ForPlayer(player, "matchzy.cc.statusoff");
@@ -1230,13 +1284,22 @@ namespace MatchZy
             isKnifeRequired = false;
             isMatchModeEnabled = false;
             StartHillMode();
+            // Start*Mode runs ResetMatch() when leaving practice, sleep or a dry run, which sets the
+            // mode flags back to their defaults: set them again so this mode is the one that starts.
+            isPlayOutEnabled = false;
+            isPlayOutEnabled2 = true;
+            isKnifeRequired = false;
+            isMatchModeEnabled = false;
             // Apply clinch=0/overtime=0 in warmup → see OnScrimCommand for rationale.
             HandlePlayoutConfig();
+            RefreshScoreboardAfterModeSwitch();
         }
 
         [ConsoleCommand("css_match", "Starts match mode")]
         public void OnMatchCommand(CCSPlayerController? player, CommandInfo? command)
         {
+            if (DeferExternalModeCall(player, command, () => OnMatchCommand(null, null)))
+                return;
             if (!IsPlayerAdmin(player, "css_match", "@css/map", "@custom/prac"))
             {
                 SendPlayerNotAdminMessage(player);
@@ -1275,10 +1338,17 @@ namespace MatchZy
             isPlayOutEnabled2 = false; // clear hill flag too, else .hill -> .match leaks hill mode
             SetExplicitMode(1);
             StartMatchMode();
+            // Start*Mode runs ResetMatch() when leaving practice, sleep or a dry run, which sets the
+            // mode flags back to their defaults: set them again so this mode is the one that starts.
+            isKnifeRequired = true;
+            isMatchModeEnabled = true;
+            isPlayOutEnabled = false;
+            isPlayOutEnabled2 = false;
             // Apply clinch=1/overtime=1 from live.cfg NOW during warmup so client
             // trophy UI slot is allocated at warmup→knife/live phase transition.
             // Required when transitioning back from scrim/hill where clinch=0 leaked.
             HandlePlayoutConfig();
+            RefreshScoreboardAfterModeSwitch();
         }
 
         [ConsoleCommand("css_exitprac", "Starts match mode")]

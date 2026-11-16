@@ -82,8 +82,13 @@ namespace MatchZy
         // not kicked by the loaded match's roster check (same rule as EventPlayerConnectFull).
         private void FlushPendingLoadConnects(bool loaded)
         {
+            // The pending load resolved on this map: its timeout was stopped by the map change.
+            pendingMatchLoadToken++;
+            pendingMatchLoadTimer = null;
             var userIds = pendingLoadConnects.ToList();
             pendingLoadConnects.Clear();
+            // Players let in while the load was pending skipped the roster check.
+            RecheckRosterAfterPendingLoad(userIds);
             if (!loaded)
                 return;
             foreach (int userId in userIds)
@@ -111,6 +116,24 @@ namespace MatchZy
         {
             try
             {
+                // .report is private: handle it here, before the engine broadcasts the chat line, and
+                // swallow the line so neither the server chat nor player_say carries the report.
+                if (adminCallEnabled.Value && player != null && player.IsValid && !player.IsBot)
+                {
+                    string line = ChatMessage(info.ArgString);
+                    if (line.Equals(".report", StringComparison.OrdinalIgnoreCase)
+                        || line.StartsWith(".report ", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string text = line.Length > ".report".Length ? line.Substring(".report".Length).Trim() : "";
+                        var reporter = player;
+                        // Engine re-entry (chat prints, events) off the command dispatch: next frame (rule 4).
+                        Server.NextFrame(() => { if (reporter.IsValid) HandleAdminCall(reporter, text, report: true); });
+                        return HookResult.Handled;
+                    }
+                }
+                if (player != null && player.IsValid && !player.IsBot && !player.IsHLTV
+                    && HandleAllChatSay(player, command, ChatMessage(info.ArgString)) == HookResult.Handled)
+                    return HookResult.Handled;
                 if (!ShouldSendPlayerEvent(player))
                     return HookResult.Continue;
                 string message = ChatMessage(info.ArgString);

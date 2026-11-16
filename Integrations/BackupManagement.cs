@@ -312,6 +312,13 @@ namespace MatchZy
                 HandleDryRunRestartRound(player, command?.ArgString ?? "");
                 return;
             }
+            // Practice: .rr restarts the round (the chat dispatch does the same). With "." as a CSS
+            // chat trigger the dispatch skips .rr because css_rr exists, so this handler runs alone.
+            if (isPractice)
+            {
+                OnRestartRoundCommand(player, command);
+                return;
+            }
             if (!IsPlayerAdmin(player, "css_restorecurrent", "@css/config"))
             {
                 SendPlayerNotAdminMessage(player);
@@ -321,6 +328,10 @@ namespace MatchZy
             if (!isMatchLive)
             {
                 ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.backupmsg.matchnotlive"));
+                // No live match (crash, restart, reload): point at the backups on disk instead of
+                // stopping there.
+                ShowRecentBackupsFromDisk(player);
+                ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.recover.loadbackuphint"));
                 return;
             }
 
@@ -395,6 +406,10 @@ namespace MatchZy
             if (!isMatchLive)
             {
                 ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.backupmsg.matchnotlive"));
+                // No live match (crash, restart, reload): point at the backups on disk instead of
+                // stopping there.
+                ShowRecentBackupsFromDisk(player);
+                ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.recover.loadbackuphint"));
                 return;
             }
 
@@ -417,7 +432,14 @@ namespace MatchZy
                 return;
             }
             if (!isMatchLive)
+            {
+                // Used to return without a word. No live match (crash, restart, reload): show the
+                // backups on disk and how to load one.
+                ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.backupmsg.matchnotlive"));
+                ShowRecentBackupsFromDisk(player);
+                ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.recover.loadbackuphint"));
                 return;
+            }
 
             if (!string.IsNullOrWhiteSpace(commandArg))
             {
@@ -787,6 +809,9 @@ namespace MatchZy
                     }
 
                     int restoreTimer = liveSetupRequired ? 2 : 0;
+                    // Keeps the round_start "live match in warmup" fix from ending the warmup (a game
+                    // restart) between here and the load.
+                    MarkRoundRestoreRequested();
                     if (liveSetupRequired)
                     {
                         string gameMode = backupData.GetValueOrDefault("game_mode", "live");
@@ -836,9 +861,16 @@ namespace MatchZy
                             isRoundRestoring = true;
                             isSpawnKeeping = true;
                             ClearReconnectMoneyCaps();
+                            // A tech pause box (anti-flash) or the ready phase's fake warmup still
+                            // holding m_bGameRestart / mp_ignore_round_win_conditions would carry into
+                            // the restored round and stop it from ever ending. The restore settles its
+                            // own pause below, so the tech pause box goes now.
+                            StopTechPauseHud();
+                            ClearLiveRoundBlockers("before round restore");
                             Log(
                                 $"[RestoreRoundBackup] Loading {loadFileName}. Rounds played: {preRoundsPlayed}, score: {preTeam1Score}-{preTeam2Score}, target round: {restoredRoundsPlayed}."
                             );
+                            ownRawRestoreFile = loadFileName;
                             Server.ExecuteCommand($"mp_backup_restore_load_file {loadFileName}");
                             SendBackupLoadedEvents(fileName, restoredRoundsPlayed);
                             if (pendingRestoreTechPauses is var (team1Tech, team2Tech))
@@ -851,8 +883,14 @@ namespace MatchZy
                             // the reset that setting the match live again does).
                             RestoreAdvancedStatsSnapshot(advancedStatsJson);
                             ApplySideScores(restoredSideScores, keepStartingSide);
-                            Server.ExecuteCommand($"mp_teamname_1 {TeamNameArg(matchzyTeam1.teamName)}");
-                            Server.ExecuteCommand($"mp_teamname_2 {TeamNameArg(matchzyTeam2.teamName)}");
+                            // mp_teamname_1 belongs to the team that started the map as CT and the
+                            // engine swaps what it shows at halftime / OT halves, so the names follow
+                            // the restored round's half, not team1/team2. Setting team1's name as
+                            // mp_teamname_1 put the names on the wrong sides whenever team1 started T
+                            // or the restore crossed a halftime. The flag also has to match for the
+                            // next SetTeamNames (halftime, live cfg re-apply).
+                            isConvarMappingSwapped = AreSidesSwitchedAfter(restoredRoundsPlayed);
+                            SetTeamNames();
                             // Settle the pause state after the load, not before it: the live cfgs set
                             // mp_backup_restore_load_autopause 1, so the engine pauses on its own here and
                             // our own pause/unpause has to be the last thing that touches it.
@@ -992,6 +1030,11 @@ namespace MatchZy
 
             int roundsPlayed = rules.TotalRoundsPlayed;
             (int team1Score, int team2Score) = GetTeamsScore();
+            // State a stuck round (everyone dead, timer at 0:00) would show.
+            bool ignoreWin = ConVar.Find("mp_ignore_round_win_conditions")?.GetPrimitiveValue<bool>() ?? false;
+            Log($"[VerifyRoundRestore] Round state: mp_ignore_round_win_conditions={(ignoreWin ? 1 : 0)}, m_bGameRestart={rules.GameRestart}, m_bWarmupPeriod={rules.WarmupPeriod}, RoundTime={rules.RoundTime}.");
+            if (ignoreWin || (rules.GameRestart && rules.RestartRoundTime < Server.CurrentTime))
+                ClearLiveRoundBlockers("restore verify");
             Log(
                 $"[RestoreRoundBackup] Post-load state for {fileName}: rounds played {preRoundsPlayed} -> {roundsPlayed} (expected {expectedRoundsPlayed}), score {preTeam1Score}-{preTeam2Score} -> {team1Score}-{team2Score}."
             );
@@ -1031,6 +1074,9 @@ namespace MatchZy
         {
             restoreUnpauseTimer?.Kill();
             restoreUnpauseTimer = null;
+            // Again after the load: the ready-phase tick can still have run once between the
+            // load command and here.
+            ClearLiveRoundBlockers("after round restore");
 
             if (!pauseAfterRoundRestore)
             {
@@ -1706,21 +1752,9 @@ namespace MatchZy
                 return;
             }
 
-            // var fileName = command.GetArg(1);
-            var fileName = ExtractJsonFileName(rawArgs);
-
-            // ExtractJsonFileName returns "" when it cannot find a .json name in the argument.
-            // Passing that on produced a "backup does not exist" reply naming an empty file, which
-            // reads like the command did nothing at all.
-            if (string.IsNullOrWhiteSpace(fileName))
-            {
-                Log($"[OnLoadBackupCommand] No .json file name could be read from '{rawArgs}'.");
-                ReplyToUserCommand(player, Localizer.ForPlayer(player, "matchzy.backupmsg.loadbackupbadname", rawArgs));
-                return;
-            }
-
-            Log($"[OnLoadBackupCommand] Restoring '{fileName}' for {callerName}.");
-            RestoreRoundBackup(player, fileName);
+            // Accepts the .json name, the .txt name of Valve's command, no extension, "latest" or a
+            // round number. The .txt name used to be looked up as is and reported as missing.
+            LoadBackupFromArgument(player, rawArgs, callerName);
         }
 
         [ConsoleCommand("css_backupmenu", "Shows available backups with restore commands")]

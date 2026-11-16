@@ -93,6 +93,10 @@ namespace MatchZy
         {
             ClearRecDisplays();
             activePathRecordings.Clear();
+            // A .rec countdown froze its player (MOVETYPE_NONE); its unfreeze timer now sees no
+            // pending entry and returns, so undo the freeze here (fresh lookup, the player may be gone).
+            foreach (ulong steamId in pendingRecCountdowns.Keys)
+                UnfreezeStratPlayer(Utilities.GetPlayerFromSteamId(steamId));
             pendingRecCountdowns.Clear();
             lastPathRecordings.Clear();
             activePathReplays.Clear();
@@ -139,7 +143,9 @@ namespace MatchZy
                 return;
             }
 
-            // Frozen for a 3 second countdown, so every take starts the same way.
+            // Frozen for a 3 second countdown, so every take starts the same way. A running grenade
+            // camera ends first (the pawn goes back to where it threw).
+            StopNadeFollowForRecording(player);
             int generation = ++recCountdownGeneration;
             pendingRecCountdowns[steamId] = generation;
             Server.NextFrame(() => FreezeStratPlayer(player));
@@ -635,6 +641,8 @@ namespace MatchZy
         // Practice turns cash awards off, so the kick prints no kill reward to the other team.
         private void KickReplayBot(int uid)
         {
+            // The userid goes to the next bot in this slot: drop this bot's armor/gun overrides.
+            ForgetBotLoadout(uid);
             Server.NextFrame(() =>
             {
                 var bot = Utilities.GetPlayerFromUserid(uid);
@@ -682,7 +690,6 @@ namespace MatchZy
         private Dictionary<string, SavedPath>? _savedPaths;
         private string _savedPathsMap = "";
         private bool _savedPathsLoadFailed;
-        private readonly object _savedPathsWriteLock = new();
 
         private string SavedPathsFile(string map)
         {
@@ -703,7 +710,10 @@ namespace MatchZy
                 var loaded = File.Exists(file)
                     ? JsonSerializer.Deserialize<Dictionary<string, SavedPath>>(File.ReadAllText(file), SavedPathJsonOpts)
                     : null;
-                _savedPaths = new Dictionary<string, SavedPath>(loaded ?? new(), StringComparer.OrdinalIgnoreCase);
+                _savedPaths = new Dictionary<string, SavedPath>(StringComparer.OrdinalIgnoreCase);
+                foreach (var (name, path) in loaded ?? new())
+                    if (SanitizeSavedPath(path))
+                        _savedPaths[name] = path;
             }
             catch (Exception e)
             {
@@ -715,32 +725,106 @@ namespace MatchZy
             return _savedPaths;
         }
 
-        // Serialize and write off the game thread: a 60 s path is a few hundred KB of JSON. The file
-        // path is resolved here (Server.GameDirectory), never inside the task.
+        // Valid JSON can still hold nulls ("Frames": null, a null frame or throw, null arrays in a
+        // throw); FromSavedPath and .listrec dereference them all. Null lists become empty, null
+        // entries are dropped. False for a null path.
+        private static bool SanitizeSavedPath(SavedPath? path)
+        {
+            if (path == null)
+                return false;
+            path.Frames ??= new();
+            path.Frames.RemoveAll(f => f == null);
+            path.Throws ??= new();
+            path.Throws.RemoveAll(t => t == null);
+            foreach (var t in path.Throws)
+            {
+                t.Type ??= "";
+                t.Pos ??= Array.Empty<float>();
+                t.Ang ??= Array.Empty<float>();
+                t.Vel ??= Array.Empty<float>();
+                t.Spin ??= Array.Empty<float>();
+                t.PlayerPos ??= Array.Empty<float>();
+                t.PlayerAng ??= Array.Empty<float>();
+            }
+            return true;
+        }
+
+        // The commands keep mutating the same dictionaries and lists (a shallow snapshot shares
+        // them), and System.Text.Json walking a list another thread is changing throws or writes a
+        // torn file. So the game thread takes a deep copy (cheap: array copies) and the serializing
+        // of every path of the map plus the disk write run off the game thread on that copy.
         private bool WriteSavedPaths(Dictionary<string, SavedPath> paths)
         {
             if (_savedPathsLoadFailed)
                 return false;
             string file = SavedPathsFile(_savedPathsMap);
-            var snapshot = new Dictionary<string, SavedPath>(paths);
+            var snapshot = new Dictionary<string, SavedPath>(paths.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var (name, path) in paths)
+                snapshot[name] = CloneSavedPath(path);
+            WritePracticeJsonOrdered(file, () => JsonSerializer.Serialize(snapshot, SavedPathJsonOpts), "PathReplay");
+            return true;
+        }
+
+        // Deep copy (own lists and arrays) for an off-thread serialize.
+        private static SavedPath CloneSavedPath(SavedPath p)
+        {
+            var c = new SavedPath { Team = p.Team, Frames = new List<float[]>(p.Frames.Count), Throws = new List<SavedPathThrow>(p.Throws.Count) };
+            foreach (var f in p.Frames)
+                c.Frames.Add((float[])f.Clone());
+            foreach (var t in p.Throws)
+            {
+                c.Throws.Add(new SavedPathThrow
+                {
+                    Frame = t.Frame,
+                    Type = t.Type,
+                    Pos = (float[])t.Pos.Clone(),
+                    Ang = (float[])t.Ang.Clone(),
+                    Vel = (float[])t.Vel.Clone(),
+                    Spin = (float[])t.Spin.Clone(),
+                    PlayerPos = (float[])t.PlayerPos.Clone(),
+                    PlayerAng = (float[])t.PlayerAng.Clone(),
+                    ItemIndex = t.ItemIndex,
+                    Duck = t.Duck,
+                });
+            }
+            return c;
+        }
+
+        // Per-file write order for the off-thread practice JSON writes. Each write takes a sequence
+        // number on the game thread; tasks can run (and take the lock) in any order, so a write whose
+        // number is older than the last one written to that file is dropped instead of replacing the
+        // newer content. Touched only inside the lock (the counter only on the game thread).
+        private readonly object _practiceJsonWriteLock = new();
+        private readonly Dictionary<string, long> _practiceJsonWrittenSeq = new();
+        private long _practiceJsonWriteSeq;
+
+        // Game thread: file is already resolved (Server.GameDirectory is never read in the task).
+        // serialize runs inside the task: it must only touch a snapshot the game thread no longer
+        // changes (no Server.*, no entities).
+        private void WritePracticeJsonOrdered(string file, Func<string> serialize, string logTag)
+        {
+            long seq = ++_practiceJsonWriteSeq;
             Task.Run(() =>
             {
                 try
                 {
-                    lock (_savedPathsWriteLock)
+                    string json = serialize();
+                    lock (_practiceJsonWriteLock)
                     {
+                        if (_practiceJsonWrittenSeq.TryGetValue(file, out long written) && written > seq)
+                            return;
                         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
                         string tmp = file + ".tmp";
-                        File.WriteAllText(tmp, JsonSerializer.Serialize(snapshot, SavedPathJsonOpts));
+                        File.WriteAllText(tmp, json);
                         File.Move(tmp, file, overwrite: true);
+                        _practiceJsonWrittenSeq[file] = seq;
                     }
                 }
                 catch (Exception e)
                 {
-                    Console.WriteLine($"[MatchZy] [PathReplay] save {file}: {e.Message}");
+                    Console.WriteLine($"[MatchZy] [{logTag}] save {file}: {e.Message}");
                 }
             });
-            return true;
         }
 
         private static float[] Vec(Vector v) => new[] { v.X, v.Y, v.Z };

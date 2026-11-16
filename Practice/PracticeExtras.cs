@@ -1,5 +1,6 @@
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
+using CounterStrikeSharp.API.Modules.Memory;
 
 namespace MatchZy
 {
@@ -13,7 +14,10 @@ namespace MatchZy
         {
             RegisterListener<Listeners.OnTick>(OnBotCombatTick);
             RegisterListener<Listeners.OnTick>(OnPathReplayTick);
+            RegisterNadeTutorial();
+            RegisterNadeFollowCam();
             RegisterListener<Listeners.OnTick>(OnRunBoostTick);
+            RegisterListener<Listeners.OnServerPostEntityThink>(OnPracticeBuyZonePostThink);
             RegisterListener<Listeners.OnPlayerButtonsChanged>(OnBotSpawnMarkerButtonHandler);
             RegisterEventHandler<EventPlayerDeath>(OnPracticeDeathPre, HookMode.Pre);
             RegisterEventHandler<EventPlayerSpawn>(OnPracticeSpawnPost);
@@ -23,10 +27,92 @@ namespace MatchZy
             RegisterListener<Listeners.OnPlayerButtonsChanged>(OnSmokeTimerButtonHandler);
         }
 
+        // E (+use) opens the buy menu on the client whenever the networked m_bInBuyZone is true, and
+        // with mp_buy_anywhere the engine sets it true everywhere, so E opened the buy menu instead of
+        // using the practice markers. Forcing it false after every entity think (the engine sets it
+        // again each tick under mp_buy_anywhere) keeps E free; B (buymenu) does not depend on it and still opens the menu.
+        // Practice only and off with matchzy_prac_use_opens_buymenu true.
+        private void OnPracticeBuyZonePostThink()
+        {
+            if (!isPractice || pracUseOpensBuyMenu.Value)
+            {
+                if (buyZoneSuppressed)
+                {
+                    buyZoneSuppressed = false;
+                    RestoreBuyZoneFlags();
+                    // Leaving practice starts warmup, whose mp_restartgame respawns everyone a moment
+                    // later; check again once they stand at their spawn.
+                    AddTimer(2.0f, RestoreBuyZoneFlags, CounterStrikeSharp.API.Modules.Timers.TimerFlags.STOP_ON_MAPCHANGE);
+                }
+                return;
+            }
+            buyZoneSuppressed = true;
+            foreach (var player in Utilities.GetPlayers())
+            {
+                if (player == null || !player.IsValid || player.IsBot)
+                    continue;
+                var pawn = player.PlayerPawn?.Value;
+                if (pawn == null || !pawn.IsValid)
+                    continue;
+                if (!Schema.GetSchemaValue<bool>(pawn.Handle, "CCSPlayerPawn", "m_bInBuyZone"))
+                    continue;
+                Schema.SetSchemaValue(pawn.Handle, "CCSPlayerPawn", "m_bInBuyZone", false);
+                Utilities.SetStateChanged(pawn, "CCSPlayerPawn", "m_bInBuyZone");
+            }
+        }
+
+        // True while OnPracticeBuyZonePostThink is forcing m_bInBuyZone false.
+        private bool buyZoneSuppressed;
+
+        // Without mp_buy_anywhere the engine only writes m_bInBuyZone when a pawn enters or leaves a
+        // func_buyzone trigger. A player who was already standing in the zone when practice ended
+        // (or after a respawn into it) gets no new touch, so the false we forced stuck and buying was
+        // refused with "left the buy zone". Recompute it once from the buy zone bounds; the engine's
+        // touch logic takes over from there.
+        private void RestoreBuyZoneFlags()
+        {
+            try
+            {
+                var zones = Utilities.FindAllEntitiesByDesignerName<CBaseEntity>("func_buyzone")
+                    .Where(zone => zone != null && zone.IsValid && zone.Collision != null && zone.AbsOrigin != null)
+                    .ToList();
+                foreach (var player in Utilities.GetPlayers())
+                {
+                    if (player == null || !player.IsValid || player.IsBot)
+                        continue;
+                    var pawn = player.PlayerPawn?.Value;
+                    if (pawn == null || !pawn.IsValid || pawn.AbsOrigin == null)
+                        continue;
+                    var feet = pawn.AbsOrigin;
+                    bool inZone = zones.Any(zone =>
+                    {
+                        if (zone.TeamNum != 0 && zone.TeamNum != pawn.TeamNum)
+                            return false;
+                        var origin = zone.AbsOrigin!;
+                        var mins = zone.Collision!.Mins;
+                        var maxs = zone.Collision!.Maxs;
+                        float z = feet.Z + 16f;
+                        return feet.X >= origin.X + mins.X && feet.X <= origin.X + maxs.X
+                            && feet.Y >= origin.Y + mins.Y && feet.Y <= origin.Y + maxs.Y
+                            && z >= origin.Z + mins.Z && z <= origin.Z + maxs.Z;
+                    });
+                    if (Schema.GetSchemaValue<bool>(pawn.Handle, "CCSPlayerPawn", "m_bInBuyZone") == inZone)
+                        continue;
+                    Schema.SetSchemaValue(pawn.Handle, "CCSPlayerPawn", "m_bInBuyZone", inZone);
+                    Utilities.SetStateChanged(pawn, "CCSPlayerPawn", "m_bInBuyZone");
+                }
+            }
+            catch (Exception e)
+            {
+                Log($"[RestoreBuyZoneFlags] {e.GetType().Name}: {e.Message}");
+            }
+        }
+
         // Practice start and end: every extra goes back to its default, so a new session never
         // inherits shooting bots, a frozen .startround or regeneration settings.
         private void ResetPracticeExtras()
         {
+            ResetNadeFollow(mapStart: false);
             ResetBotCombatState();
             botShootEnabled = false;
             botReactionTimeMs = 500;
@@ -43,6 +129,37 @@ namespace MatchZy
             ResetStrats();
             ResetUtilityExpire();
             ResetSmokeSpawnTimer();
+        }
+
+        /// <summary>
+        /// Plugin unload (plain and hot reload): ends every grenade follow camera (pawn and weapon
+        /// visible again, move type restored, a living pawn put back where it threw), removes the
+        /// lineup trainer targets and hud hint, the .xray glow props, and sets the tier0 Assert
+        /// channel back to normal. Safe with no players; each part is guarded on its own.
+        /// touchEntities false (map ending: entity wrappers and handles may point at freed memory):
+        /// only the managed state is cleared, no entity is read, moved or killed.
+        /// </summary>
+        public void ShutdownPracticeExtrasForUnload(bool touchEntities = true)
+        {
+            if (!touchEntities)
+            {
+                _nadeFollows.Clear();
+                try { ForgetNadeTutorialState(); }
+                catch (Exception e) { Log($"[PracticeExtras] unload trainer: {e.Message}"); }
+                xrayGlows.Clear();
+                xrayEnabled = false;
+                try { RefreshGlowAssertQuiet(forceOff: true); }
+                catch (Exception e) { Log($"[PracticeExtras] unload assert: {e.Message}"); }
+                return;
+            }
+            try { ResetNadeFollow(mapStart: false, unloading: true); }
+            catch (Exception e) { Log($"[PracticeExtras] unload follow: {e.Message}"); }
+            try { ShutdownNadeTutorial(); }
+            catch (Exception e) { Log($"[PracticeExtras] unload trainer: {e.Message}"); }
+            try { ResetXray(); }
+            catch (Exception e) { Log($"[PracticeExtras] unload xray: {e.Message}"); }
+            try { RefreshGlowAssertQuiet(forceOff: true); }
+            catch (Exception e) { Log($"[PracticeExtras] unload assert: {e.Message}"); }
         }
 
         // Chat dispatch for the extras (both the bare and the argument forms). Returns true when the

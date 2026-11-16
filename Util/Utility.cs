@@ -150,6 +150,20 @@ namespace MatchZy
                 ExecuteChangedConvars();
         }
 
+        // A going-live mode cfg followed by its restart ("mp_restartgame 1;mp_warmup_end;"), in the
+        // same frame as before 1.0.25 (kicking leftover bots one frame earlier put the match back
+        // into warmup in testing). Opens a short settle window in which coach weapons are not
+        // stripped while the engine restarts the round.
+        private void ExecModeCfgAndRestart(string cfgPath, string restartCommands)
+        {
+            coachStripSettleUntil = Server.CurrentTime + 2.0f;
+            ExecModeCfg(cfgPath);
+            Server.ExecuteCommand(restartCommands);
+        }
+
+        // Coach weapons are not stripped before this server time (see ExecModeCfgAndRestart).
+        private float coachStripSettleUntil;
+
         // Commands (mp_warmup_start/end, ...) are left out: only "name value" settings are applied,
         // so nothing in the default runs twice. Server-level settings that some default cfgs carry
         // (hibernation, CSTV voice, sv_lan, sv_pure, Steam group, ...) are left out too: they belong
@@ -330,6 +344,9 @@ namespace MatchZy
             {
                 if (playerReadyStatus[key] == false && playerData.TryGetValue(key, out var p) && p != null && p.IsValid)
                 {
+                    // Spectators are not part of the ready gate (as the ready panel), so they hold nothing up.
+                    if (p.TeamNum != (int)CsTeam.CounterTerrorist && p.TeamNum != (int)CsTeam.Terrorist)
+                        continue;
                     // A side that is already ready (N ready players, min_players_to_ready, .forceready)
                     // is done, so its remaining players are not holding anything up.
                     if ((p.TeamNum == (int)CsTeam.CounterTerrorist && ctDone) || (p.TeamNum == (int)CsTeam.Terrorist && tDone))
@@ -358,7 +375,7 @@ namespace MatchZy
             }
             else
             {
-                int countOfReadyPlayers = playerReadyStatus.Count(kv => kv.Value == true);
+                (_, int countOfReadyPlayers) = CountReadyGatePlayers();
                 if (isMatchSetup)
                 {
                     PrintLocalizedToAll("matchzy.utility.readyplayers", countOfReadyPlayers);
@@ -385,13 +402,16 @@ namespace MatchZy
             {
                 if (onlySide.HasValue && onlySide.Value != side)
                     continue;
-                if (ShortHandedSide(side) is not (int present, int required))
+                if (ShortHandedHintSide(side) is not (int present, int required))
                     continue;
                 foreach (var p in Utilities.GetPlayers())
                 {
                     if (p == null || !p.IsValid || p.IsBot || p.IsHLTV || p.TeamNum != side || IsMatchCoach(p))
                         continue;
-                    PrintToPlayerChat(p, Localizer.ForPlayer(p, "matchzy.ready.shorthandedchat", present, required, required - present));
+                    var names = MissingRosterNames(side, p, markSpectators: true);
+                    PrintToPlayerChat(p, names.Count > 0
+                        ? Localizer.ForPlayer(p, "matchzy.ready.shorthandedchatnames", present, required, required - present, ShortNameList(names))
+                        : Localizer.ForPlayer(p, "matchzy.ready.shorthandedchat", present, required, required - present));
                 }
             }
         }
@@ -417,6 +437,7 @@ namespace MatchZy
                 return;
             List<string> unreadyPlayers = new();
             List<int> keysToRemove = new(); // Track stale keys
+            (bool ctDone, bool tDone) = ReadySidesDone();
 
             foreach (var key in playerReadyStatus.Keys.ToList()) // ToList() to avoid collection modification issues
             {
@@ -424,6 +445,12 @@ namespace MatchZy
                 {
                     if (playerData.TryGetValue(key, out var player) && player != null)
                     {
+                        // Same list as the ready panel: only T/CT players, no coaches, and nobody on
+                        // a side that is already ready. Spectators are not part of the ready gate.
+                        if (!player.IsValid || (player.TeamNum != (int)CsTeam.CounterTerrorist && player.TeamNum != (int)CsTeam.Terrorist))
+                            continue;
+                        if (IsMatchCoach(player) || (player.TeamNum == (int)CsTeam.CounterTerrorist ? ctDone : tDone))
+                            continue;
                         unreadyPlayers.Add(player.PlayerName);
                     }
                     else
@@ -494,6 +521,10 @@ namespace MatchZy
             public bool NotReadyVisible;
             public bool IsPlaying;
             public bool IsReady;
+            // Culture name the HTML was built in. A !lang / css_lang change touches none of the
+            // other stamps, so without this the panel kept the old language until something else
+            // changed (keepalive only re-sends the cached HTML).
+            public string Language;
             public string Html;
         }
         // Cached gamerules proxy for the ready-phase HUD sync (re-fetched when invalid, e.g. after
@@ -527,8 +558,8 @@ namespace MatchZy
             {
                 if (playerData.TryGetValue(key, out var p) && p != null && p.IsValid)
                 {
-                    // Only T/CT - spectators aren't part of the ready gate.
-                    if (p.TeamNum != 2 && p.TeamNum != 3)
+                    // Only T/CT players - spectators and coaches aren't part of the ready gate.
+                    if (!IsReadyGatePlayer(p))
                         continue;
                     totalPlayers++;
                     if (playerReadyStatus[key])
@@ -636,10 +667,48 @@ namespace MatchZy
             Utilities.SetStateChanged(p, "CCSGameRulesProxy", "m_pGameRules");
         }
 
+        // Removes every override that stops a live round from ending. The ready phase (styles 1/2)
+        // runs as a fake warmup: mp_ignore_round_win_conditions 1, respawn on death, and (style 1)
+        // m_bGameRestart forced true every tick for the anti-flash HUD fix. The tech pause / timeout
+        // HUD does the same with m_bGameRestart. Leaving the ready phase used to reset only the
+        // convars, so a match that went live straight from it (a round restore during warmup:
+        // crash recovery or a repeated .restore) kept m_bGameRestart set. The engine then treats a
+        // restart as already in progress and never ends the round: everyone dead, timer at 0:00.
+        // m_bGameRestart is only cleared when no real restart is scheduled (RestartRoundTime in the
+        // past), so a pending mp_restartgame is left alone.
+        private void ClearLiveRoundBlockers(string reason)
+        {
+            bool hadFakeWarmup = _fakeWarmupActive;
+            _fakeWarmupActive = false;
+            ResetTechPauseAntiFlash();
+            Server.ExecuteCommand("mp_ignore_round_win_conditions 0; mp_respawn_on_death_ct 0; mp_respawn_on_death_t 0");
+            try
+            {
+                var proxy = Utilities.FindAllEntitiesByDesignerName<CCSGameRulesProxy>("cs_gamerules").FirstOrDefault();
+                var gr = proxy?.GameRules;
+                if (gr == null)
+                    return;
+                bool leakedRestart = gr.GameRestart && gr.RestartRoundTime < Server.CurrentTime;
+                if (leakedRestart)
+                {
+                    gr.GameRestart = false;
+                    Utilities.SetStateChanged(proxy!, "CCSGameRulesProxy", "m_pGameRules");
+                }
+                if (hadFakeWarmup || leakedRestart)
+                    Log($"[ClearLiveRoundBlockers] {reason}: fakeWarmup={hadFakeWarmup}, leakedGameRestart={leakedRestart}.");
+            }
+            catch (Exception e)
+            {
+                Log($"[ClearLiveRoundBlockers] {e.Message}");
+            }
+        }
+
         // 1s timer: keep data fresh, re-assert clan tags ([READY]/[UNREADY] scoreboard), and
         // - in classic style (matchzy_ready_hint_style 0) - broadcast the plain center text.
         private void SendReadyStatusHintMessage()
         {
+            try { TrackReadyEvents(); }
+            catch (Exception e) { Log($"[TrackReadyEvents] {e.Message}"); }
             // Dryrun (.dryrun) is a practice-style mode with no ready gate - don't show the ready hint.
             if (!readyAvailable || matchStarted || isDryRun)
                 return;
@@ -663,7 +732,7 @@ namespace MatchZy
                     // the cached numbers: a few localizer lookups per player once a second.
                     foreach (var p in Utilities.GetPlayers())
                     {
-                        if (p == null || !p.IsValid || p.IsBot || p.IsHLTV)
+                        if (p == null || !p.IsValid || p.IsBot || p.IsHLTV || IsCenterMenuOpen(p))
                             continue;
                         p.PrintToCenter(BuildClassicReadyHint(p));
                     }
@@ -677,15 +746,29 @@ namespace MatchZy
             }
         }
 
+        // "Ready (min. 4): CT 2  T 3" for a loaded match, or "Ready: CT 2 (min. 4)  T 3 (min. 5)" when
+        // the sides need different numbers. Plain text for the classic center hint.
+        private string ReadySidesPlain(CCSPlayerController player)
+        {
+            string label = Localizer.ForPlayer(player, "matchzy.ready.readylabel");
+            if (_rpCtNeed == _rpTNeed)
+                return $"{label} ({Localizer.ForPlayer(player, "matchzy.ready.minshort", _rpCtNeed)}): CT {_rpCtShown}  T {_rpTShown}";
+            return $"{label}: CT {_rpCtShown} ({Localizer.ForPlayer(player, "matchzy.ready.minshort", _rpCtNeed)})  T {_rpTShown} ({Localizer.ForPlayer(player, "matchzy.ready.minshort", _rpTNeed)})";
+        }
+
         private string BuildClassicReadyHint(CCSPlayerController player)
         {
             if (!readyEnabled.Value)
                 return Localizer.ForPlayer(player, "matchzy.ready.waitingforadmin");
             // Ready against what the start needs (as the HTML panel), not against everyone present.
-            string line1 = Localizer.ForPlayer(player, "matchzy.hint.waitingforplayers", _rpReady, _rpRequired);
+            // Loaded match: per side with the minimum, as the HTML panel ("Ready (min. 4): CT 2  T 3").
+            // A total like "5/8" read as the most players the match can have.
+            string line1 = _rpCtNeed > 0
+                ? ReadySidesPlain(player)
+                : Localizer.ForPlayer(player, "matchzy.hint.waitingforplayers", _rpReady, _rpRequired);
             string line2 = Localizer.ForPlayer(player, "matchzy.hint.usereadycommand");
-            if (ShortHandedSide(player.TeamNum) is (int shortPresent, int shortRequired))
-                line2 += "\n" + Localizer.ForPlayer(player, "matchzy.ready.shorthanded", shortPresent, shortRequired, shortRequired - shortPresent);
+            if (ShortHandedHintSide(player.TeamNum) is (int shortPresent, int shortRequired))
+                line2 += "\n" + ShortHandedLine(player, player.TeamNum, shortPresent, shortRequired);
             return _rpWaiting.Length > 0
                 ? $"{line1}\n{line2}\n{Localizer.ForPlayer(player, "matchzy.hint.notready", _rpWaiting)}"
                 : $"{line1}\n{line2}";
@@ -693,6 +776,24 @@ namespace MatchZy
 
         public override void Unload(bool hotReload)
         {
+            UnregisterCstvKickGuard();
+            // Engine asserts back on the console (quieted while glows were in use).
+            if (_glowAssertQuiet == true && !Tier0Logging.SetChannelFlag("Assert", Tier0Logging.LCF_DO_NOT_ECHO, false))
+                Server.ExecuteCommand("log_flags Assert -DoNotEcho");
+            // Practice extras (grenade camera, lineup trainer, .xray glows) and spectator coaches leave
+            // engine state behind that no other plugin resets: invisible noclip pawns, glow props, the
+            // tier0 Assert channel, sv_coaching_enabled / m_iCoachingTeam (the round_prestart guard
+            // against the engine's NULL-controller coach crash goes away with this plugin), the coach
+            // comm patch. Both run on a plain unload and a hot reload, whatever the mode.
+            // After OnMapEnd (or with no map running, e.g. server quit) the stored entity wrappers can
+            // point at freed memory: then only the managed state is cleared and no entity is touched.
+            bool unloadTouchEntities = !mapEnding && AreServerGlobalsReady();
+            try { ShutdownPracticeExtrasForUnload(unloadTouchEntities); } catch { }
+            if (unloadTouchEntities)
+            {
+                try { HideNadeMarkers(); } catch { }
+            }
+            try { ShutdownSpectatorCoachesForUnload(unloadTouchEntities); } catch { }
             // The ready-phase "fake warmup" (matchzy_ready_hint_style 1) forces m_bWarmupPeriod off +
             // RoundTime 0 + mp_ignore_round_win_conditions each tick from RenderReadyPanel. If the
             // plugin unloads/reloads while it is active, that per-tick upkeep stops but the gamerules
@@ -704,6 +805,8 @@ namespace MatchZy
             if (!hotReload)
                 AnnounceShutdown("plugin_unload", waitForSend: false);
             CloseEventQueue();
+            // A tech pause box's anti-flash m_bGameRestart must not outlive the plugin.
+            ResetTechPauseAntiFlash();
             if (_fakeWarmupActive)
             {
                 // Hot reload: the new instance takes the ready phase over, so park the server in a
@@ -743,6 +846,13 @@ namespace MatchZy
                     Server.ExecuteCommand("mp_buy_anywhere 0; mp_maxmoney 16000; mp_startmoney 800; mp_free_armor 0; mp_weapons_allow_typecount 5; mp_solid_teammates 1; mp_autoteambalance 1; mp_limitteams 2");
                     Server.ExecuteCommand("mp_warmuptime 30; mp_warmup_pausetimer 0; mp_roundtime 1.92; mp_roundtime_defuse 1.92; mp_roundtime_hostage 1.92");
                     Server.ExecuteCommand("mp_autokick 1; mp_spawnprotectiontime 5; mp_td_dmgtokick 300; mp_td_dmgtowarn 200; mp_td_spawndmgthreshold 50");
+                    Server.ExecuteCommand("mp_respawn_on_death_ct 0; mp_respawn_on_death_t 0; mp_ignore_round_win_conditions 0; mp_respawn_immunitytime 0");
+                    // Noclip is a per-pawn move type, not a convar: sv_cheats 0 does not end it, and a mode
+                    // switch without a map change (same game_alias) kept practice players flying.
+                    foreach (var p in Utilities.GetPlayers())
+                    {
+                        if (IsPlayerValid(p)) p.PlayerPawn.Value?.ResetNoclipToWalk();
+                    }
                     KickAllBotsProtectCSTV();
                     isPractice = false;
                 }
@@ -770,8 +880,7 @@ namespace MatchZy
                 // before play.
                 if (_fakeWarmupActive)
                 {
-                    Server.ExecuteCommand("mp_ignore_round_win_conditions 0; mp_respawn_on_death_ct 0; mp_respawn_on_death_t 0");
-                    _fakeWarmupActive = false;
+                    ClearLiveRoundBlockers("ready phase ended");
 
                     // Mode 1 ended real warmup (m_bWarmupPeriod=false) + set mp_roundtime 60 to hide the
                     // native warmup HUD. If we are leaving mode 1 but are STILL in the ready phase (e.g.
@@ -953,16 +1062,25 @@ namespace MatchZy
                         continue;
 
                     int uid = target.UserId.Value;
+                    // A menu is open on this player's center panel: leave it alone, and rebuild the
+                    // ready panel once the menu closes.
+                    if (IsCenterMenuOpen(target))
+                    {
+                        _lastPanelHtml.Remove(uid);
+                        continue;
+                    }
                     bool isPlayingNow = target.TeamNum == 2 || target.TeamNum == 3;
                     bool isReadyNow = isPlayingNow
                         && playerReadyStatus.TryGetValue(uid, out bool readyFlag)
                         && readyFlag;
+                    string languageNow = target.GetLanguage().Name;
 
                     // Nothing this player's panel depends on has changed -> skip the build
                     // entirely. The blink state only matters while they are shown as NOT ready.
                     if (_lastPanelHtml.TryGetValue(uid, out var cachedState)
                         && cachedState.Version == _rpVersion
                         && ReferenceEquals(cachedState.Mode, mode)
+                        && string.Equals(cachedState.Language, languageNow, StringComparison.Ordinal)
                         && cachedState.IsPlaying == isPlayingNow
                         && cachedState.IsReady == isReadyNow
                         && (isReadyNow || !isPlayingNow || cachedState.NotReadyVisible == notReadyVisible))
@@ -988,13 +1106,34 @@ namespace MatchZy
                     if (readyEnabled.Value)
                     {
                         sb.Append("<br>");
-                        sb.Append($"{bar} <font class='fontSize-m' color='#ffffff'>{_rpReady} / {_rpRequired}</font><br>");
+                        // Loaded match: bar only. The per-side line below has the numbers, and a total
+                        // like "5 / 8" read as the most players the match can have.
+                        sb.Append(_rpCtNeed > 0
+                            ? $"{bar}<br>"
+                            : $"{bar} <font class='fontSize-m' color='#ffffff'>{_rpReady} / {_rpRequired}</font><br>");
                         // Loaded match: ready / needed per side; otherwise ready / on the side.
                         int ctOf = _rpCtNeed > 0 ? _rpCtNeed : _rpCtCount;
                         int tOf = _rpTNeed > 0 ? _rpTNeed : _rpTCount;
                         int ctShown = _rpCtNeed > 0 ? _rpCtShown : _rpCtReady;
                         int tShown = _rpTNeed > 0 ? _rpTShown : _rpTReady;
-                        sb.Append($"<font class='fontSize-sm' color='#9ecbff'>CT {ctShown}/{ctOf}</font><font class='fontSize-sm' color='#ffffff'> &nbsp; </font><font class='fontSize-sm' color='#ffb36b'>T {tShown}/{tOf}</font>");
+                        // Labelled ("Ready (min. 4): CT 2  T 1"): a bare "CT 2/4" read as the most
+                        // players a side can have. One short line, so it fits the panel's fixed width.
+                        string ctSeg = $"CT {ctShown}", tSeg = $"T {tShown}";
+                        string readyLabel = Localizer.ForPlayer(target, "matchzy.ready.readylabel");
+                        if (_rpCtNeed <= 0)
+                        {
+                            // Pug / per-team ready-up: ready out of the players on the side, no minimum.
+                            ctSeg += $"/{ctOf}";
+                            tSeg += $"/{tOf}";
+                        }
+                        else if (ctOf != tOf)
+                        {
+                            ctSeg += $" ({Localizer.ForPlayer(target, "matchzy.ready.minshort", ctOf)})";
+                            tSeg += $" ({Localizer.ForPlayer(target, "matchzy.ready.minshort", tOf)})";
+                        }
+                        else
+                            readyLabel += $" ({Localizer.ForPlayer(target, "matchzy.ready.minshort", ctOf)})";
+                        sb.Append($"<font class='fontSize-sm' color='#c8c8c8'>{PanelSafe(readyLabel)}: </font><font class='fontSize-sm' color='#9ecbff'>{PanelSafe(ctSeg)}</font><font class='fontSize-sm' color='#ffffff'> &#160; </font><font class='fontSize-sm' color='#ffb36b'>{PanelSafe(tSeg)}</font>");
 
                         // Self-status (YOU ARE (NOT) READY) is the most important line, so render it
                         // BEFORE the "waiting on" list. CS2's center-HTML panel has a size cap and drops
@@ -1008,13 +1147,13 @@ namespace MatchZy
                             else if (notReadyVisible)
                                 sb.Append($"<br><font class='fontSize-m' color='#ff3b3b'>&#10008; {PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.notready"))}</font>");
                             else
-                                sb.Append("<br><font class='fontSize-m' color='#ff3b3b'>&nbsp;</font>"); // blink off-frame: keep height
+                                sb.Append("<br><font class='fontSize-m' color='#ff3b3b'>&#160;</font>"); // blink off-frame: keep height
                         }
 
                         // A registered player is missing: how many. After
                         // the self-status so the panel's size cap can only drop this and the list below.
-                        if (ShortHandedSide(target.TeamNum) is (int shortPresent, int shortRequired))
-                            sb.Append($"<br><font class='fontSize-sm' color='#ffcf3f'>{PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.shorthanded", shortPresent, shortRequired, shortRequired - shortPresent))}</font>");
+                        if (ShortHandedHintSide(target.TeamNum) is (int shortPresent, int shortRequired))
+                            sb.Append($"<br><font class='fontSize-sm' color='#ffcf3f'>{PanelSafe(ShortHandedLine(target, target.TeamNum, shortPresent, shortRequired))}</font>");
 
                         if (_rpWaiting.Length > 0)
                             sb.Append($"<br><font class='fontSize-sm' color='#9a9a9a'>{PanelSafe(Localizer.ForPlayer(target, "matchzy.ready.waitingon", _rpWaiting))}</font>");
@@ -1032,6 +1171,7 @@ namespace MatchZy
                         NotReadyVisible = notReadyVisible,
                         IsPlaying = isPlayingNow,
                         IsReady = isReadyNow,
+                        Language = languageNow,
                         Html = html,
                     };
 
@@ -1340,12 +1480,12 @@ namespace MatchZy
             isDryRun = false;
             isWarmup = false;
             ClearClanTags();
+            PublishKnifeRoundStarted();
 
             var absolutePath = Path.Join(Server.GameDirectory + "/csgo/cfg", knifeCfgPath);
             if (File.Exists(Path.Join(Server.GameDirectory + "/csgo/cfg", knifeCfgPath)))
             {
-                ExecModeCfg(knifeCfgPath);
-                Server.ExecuteCommand("mp_restartgame 1;mp_warmup_end;");
+                ExecModeCfgAndRestart(knifeCfgPath, "mp_restartgame 1;mp_warmup_end;");
             }
             else
             {
@@ -1611,6 +1751,7 @@ namespace MatchZy
             var goingLiveEvent = new GoingLiveEvent { MatchId = liveMatchId, MapNumber = matchConfig.CurrentMapNumber };
 
             PublishEvent(goingLiveEvent);
+            ScheduleStalePauseCheck();
         }
 
         private void StartScrim()
@@ -1687,6 +1828,54 @@ namespace MatchZy
         // Bumps m_nRoundEndCount netvar so client re-evaluates scoreboard UI
         // (trophy/clinch icons, per-round dots). Used after HandlePlayoutConfig at
         // match-start so cosmetic UI matches the actual playout convars before round 1.
+        // .match / .scrim / .hill in warmup: the clinch trophy on the scoreboard's round timeline kept
+        // showing the previous mode until a restart. Deferred so the mode cfg and HandlePlayoutConfig
+        // (mp_match_can_clinch) have landed.
+        private void RefreshScoreboardAfterModeSwitch()
+        {
+            AddTimer(0.5f, () =>
+            {
+                if (matchStarted || isMatchLive || isPractice)
+                    return;
+                try
+                {
+                    ForceScoreboardRefresh();
+                    NudgeScoreboardTimeline();
+                }
+                catch (Exception e)
+                {
+                    Log($"[RefreshScoreboardAfterModeSwitch] {e.Message}");
+                }
+            }, TimerFlags.STOP_ON_MAPCHANGE);
+        }
+
+        // The clinch trophy (round 13 of MR24) is drawn by the client's scoreboard script
+        // (panorama/scripts/scoreboard.js, _UpdateScore_Classic): it redraws every round's clinch mark
+        // only when the timeline resets (maxrounds_this_period, side swap or overtime changed) or a new
+        // round starts. A .scrim -> .match switch only flips mp_match_can_clinch, so the trophy stayed
+        // hidden until the next restart. Changing mp_maxrounds for a moment makes every client reset
+        // its timeline (once on the change, once on the way back), and the redraw picks up the new
+        // clinch setting. Warmup only; a match that goes live in between is left alone.
+        private void NudgeScoreboardTimeline()
+        {
+            if (matchStarted || isMatchLive)
+                return;
+            var cvar = ConVar.Find("mp_maxrounds");
+            if (cvar == null)
+                return;
+            int rounds = cvar.GetPrimitiveValue<int>();
+            if (rounds <= 0 || rounds > 28)
+                return; // the client draws no timeline above 30 rounds
+            int nudged = rounds + 2;
+            Server.ExecuteCommand($"mp_maxrounds {nudged}");
+            AddTimer(1.5f, () =>
+            {
+                var c = ConVar.Find("mp_maxrounds");
+                if (c != null && c.GetPrimitiveValue<int>() == nudged)
+                    Server.ExecuteCommand($"mp_maxrounds {rounds}");
+            }, TimerFlags.STOP_ON_MAPCHANGE);
+        }
+
         private void ForceScoreboardRefresh()
         {
             try
@@ -1756,13 +1945,33 @@ namespace MatchZy
             try
             {
                 seriesEnded = false;
+                owedSeriesStart = null;
+                owedSeriesStartTarget = null;
+                // Set when the veto's first map needs a changelevel and cleared on map start. If that
+                // changelevel never happened (a map name that cannot be loaded), CheckLiveRequired
+                // stayed blocked for every later ready-up, also after .stopmatch.
+                mapChangePending = false;
                 currentMapFinished = false;
                 matchLoadGeneration++;
+                // A load waiting for its changelevel: OnMapEndHandler runs ResetMatch during that very
+                // changelevel and OnMapStart resumes the load, so keep it while the map is ending.
+                // Any other reset (.endmatch, a failed load, a mode switch) drops it; otherwise a
+                // changelevel that never happened kept rejecting every later load as "already setup".
+                if (!mapEnding && pendingMatchLoadJson != null)
+                {
+                    Log("[ResetMatch] Dropping the match load that was waiting for its map change.");
+                    DropPendingMatchLoad();
+                }
                 pauseCarriedToLive = null;
                 // Send match_cancelled whenever a loaded or started match is stopped with a reason:
                 // also in warmup, veto, knife and between the maps of a series, where the panel
                 // otherwise never learnt that the match it created was gone.
+                // The match's admin tickets end with it (admin_thread_closed to the match's URL).
+                try { CloseMatchAdminThreads(); }
+                catch (Exception e) { Log($"[CloseMatchAdminThreads] {e.Message}"); }
                 bool cancellingMatch = cancelReason != null && (matchStarted || isMatchSetup);
+                if (cancellingMatch)
+                    ClearActiveMatch($"match cancelled: {cancelReason}");
                 if (cancellingMatch && liveMatchId > 0)
                 {
                     (int t1score, int t2score) = GetTeamsScore();
@@ -1866,6 +2075,7 @@ namespace MatchZy
                 isKnifeRequired = knifeEnabledDefault;
                 friendlyFireOverride = null;
                 friendlyFireGrenadesOnly = false;
+                ResetAllChatVote();
                 CancelVetoStepTimer();
                 readyPhaseStartedAt = null;
 
@@ -1897,6 +2107,8 @@ namespace MatchZy
                 matchzyTeam2.teamPlayers = null;
                 matchzyTeam1.openRoster = matchzyTeam2.openRoster = false;
                 matchzyTeam1.botTeam = matchzyTeam2.botTeam = false;
+                // Spectator coaches (mode 3) go back to their team's side before the sets are cleared.
+                ReturnSpectatorCoachesToTeams(cancelReason ?? "match reset");
                 HashSet<CCSPlayerController> coaches = GetAllCoaches();
 
                 foreach (var coach in coaches)
@@ -2274,8 +2486,9 @@ namespace MatchZy
             if (mapChangePending)
                 return;
 
-            // Todo: Implement a same ready system for both pug and match
-            int countOfReadyPlayers = playerReadyStatus.Count(kv => kv.Value == true);
+            // Only players on T/CT who are not coaching count; a spectator or coach who readied
+            // earlier (then moved) does not.
+            (int gatePlayers, int countOfReadyPlayers) = CountReadyGatePlayers();
             bool liveRequired = false;
             if (isMatchSetup)
             {
@@ -2291,7 +2504,7 @@ namespace MatchZy
             }
             else if (EffectiveMinimumReadyRequired() == 0)
             {
-                if (countOfReadyPlayers >= connectedPlayers && connectedPlayers > 0)
+                if (countOfReadyPlayers >= gatePlayers && gatePlayers > 0)
                 {
                     liveRequired = true;
                 }
@@ -2303,6 +2516,10 @@ namespace MatchZy
 
             if (liveRequired)
             {
+                // team_ready / all_players_ready before going_live, also when the last .ready
+                // starts the match before the next 1 s ready tick.
+                try { TrackReadyEvents(); }
+                catch (Exception e) { Log($"[TrackReadyEvents] {e.Message}"); }
                 HandleMatchStart();
             }
         }
@@ -2509,6 +2726,7 @@ namespace MatchZy
                         {
                             Log($"[HandleMatchStart] Match initialized successfully with matchId: {liveMatchId}");
                         }
+                        SendOwedSeriesStart();
 
                         SetupRoundBackupFile();
                         GetSpawns();
@@ -3225,6 +3443,11 @@ namespace MatchZy
                     {
                         SwapSidesInTeamData(false);
                     }
+                    if (!isRoundRestoring)
+                    {
+                        try { PublishPostRoundPhaseEvents(swapRequired, t1score, t2score); }
+                        catch (Exception e) { Log($"[PhaseEvents] {e.Message}"); }
+                    }
 
                     isRoundRestoring = false;
                 }
@@ -3292,24 +3515,17 @@ namespace MatchZy
 
             bool halftimeEnabled = ConVar.Find("mp_halftime")!.GetPrimitiveValue<bool>();
 
-            if (halftimeEnabled)
-            {
-                if (roundsPlayed == roundsPerHalf)
-                {
-                    return true;
-                }
-                // Now in OT.
-                if (roundsPlayed >= 2 * roundsPerHalf)
-                {
-                    int otround = roundsPlayed - 2 * roundsPerHalf; // round 33 -> round 3, etc.
-                    // Do side swaps at OT halves (rounds 3, 9, ...)
-                    if ((otround + roundsPerOTHalf) % (2 * roundsPerOTHalf) == 0)
-                    {
-                        return true;
-                    }
-                }
-            }
-            return false;
+            return SideSwapLogic.IsSwapAfterRound(roundsPlayed, roundsPerHalf, roundsPerOTHalf, halftimeEnabled);
+        }
+
+        // Whether the team that started the map as CT is playing T after roundsPlayed rounds, i.e.
+        // whether the engine currently shows mp_teamname_1 on the T side.
+        public bool AreSidesSwitchedAfter(int roundsPlayed)
+        {
+            int roundsPerHalf = ConVar.Find("mp_maxrounds")!.GetPrimitiveValue<int>() / 2;
+            int roundsPerOTHalf = ConVar.Find("mp_overtime_maxrounds")!.GetPrimitiveValue<int>() / 2;
+            bool halftimeEnabled = ConVar.Find("mp_halftime")!.GetPrimitiveValue<bool>();
+            return SideSwapLogic.AreSidesSwitched(roundsPlayed, roundsPerHalf, roundsPerOTHalf, halftimeEnabled);
         }
 
         private void PauseMatch(CCSPlayerController? player, CommandInfo? command)
@@ -3377,6 +3593,8 @@ namespace MatchZy
 
                 PrintLocalizedToAll("matchzy.pause.pausedthematch", pauseTeamName);
                 SetMatchPausedFlags("pause");
+                // After SetMatchPausedFlags: it stops any tech pause box (CancelTechPauseTimer).
+                StartTechPauseHud(pausingTeam, player.PlayerName, isTech: false);
             }
         }
 
@@ -3611,7 +3829,10 @@ namespace MatchZy
             ExecUnpracCommands();
             ResetMatch();
             RemoveSpawnBeams();
-            isPlayOutEnabled = true;
+            // Hill is isPlayOutEnabled2; isPlayOutEnabled is scrim, and HandleMatchStartCore took the
+            // scrim branch (StartScrim) for a hill started from practice or sleep.
+            isPlayOutEnabled = false;
+            isPlayOutEnabled2 = true;
             isKnifeRound = false;
             isKnifeRequired = false;
             ScheduleRoundHistoryWipe();
@@ -3665,8 +3886,7 @@ namespace MatchZy
             {
                 // ExecModeCfg applies the match config cvars after the mode cfg and before the
                 // restart, so round 1 already uses them (start money, freeze time, ...).
-                ExecModeCfg(cfgPath);
-                Server.ExecuteCommand("mp_restartgame 1;mp_warmup_end;");
+                ExecModeCfgAndRestart(cfgPath, "mp_restartgame 1;mp_warmup_end;");
             }
             else
             {
@@ -3704,8 +3924,7 @@ namespace MatchZy
             {
                 // ExecModeCfg applies the match config cvars after the mode cfg and before the
                 // restart, so round 1 already uses them (start money, freeze time, ...).
-                ExecModeCfg(cfgPath);
-                Server.ExecuteCommand("mp_restartgame 1;mp_warmup_end;");
+                ExecModeCfgAndRestart(cfgPath, "mp_restartgame 1;mp_warmup_end;");
             }
             else
             {
@@ -3739,8 +3958,7 @@ namespace MatchZy
             {
                 // ExecModeCfg applies the match config cvars after the mode cfg and before the
                 // restart, so round 1 already uses them (start money, freeze time, ...).
-                ExecModeCfg(cfgPath);
-                Server.ExecuteCommand("mp_restartgame 1;mp_warmup_end;");
+                ExecModeCfgAndRestart(cfgPath, "mp_restartgame 1;mp_warmup_end;");
             }
             else
             {
@@ -3797,6 +4015,14 @@ namespace MatchZy
             return message;
         }
 
+        // One help chat line ("Label: commands"), split over several lines with the same label when
+        // the list is too long for one chat message (HelpLineLogic).
+        private void PrintHelpLine(CCSPlayerController player, string lineKey, string label, string commands)
+        {
+            foreach (var chunk in HelpLineLogic.Split(commands, HelpLineLogic.MaxLineChars - label.Length - 2))
+                player.PrintToChat(Localizer.ForPlayer(player, lineKey, label, chunk));
+        }
+
         private void SendAvailableCommandsMessage(CCSPlayerController? player)
         {
             if (!IsPlayerValid(player))
@@ -3810,15 +4036,16 @@ namespace MatchZy
                 // Chat summary in the player's language; the command names themselves are not translated.
                 string L(string key, params object[] a) => Localizer.ForPlayer(player!, key, a);
                 player!.PrintToChat($"{chatPrefix} {L("matchzy.help.practice.title")}");
-                player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.spawns"), ".spawn .ctspawn .tspawn .bestspawn .worstspawn"));
-                player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.bots"), ".bot .cbot .boost .runboost .nobot .dismiss .dismissall .kevlar .armor .botgun .botshoot .botrespawn .startround .rec .stoprecord .replay .saverec .loadrec .stratrec .strat .strats .createstrat .stratslot"));
-                player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.positions"), ".sbp .lbp .botspawn .placebot .showbotspawn .botjiggle"));
-                player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.nades"), ".savenade .loadnade .listnades .rethrow .throwindex"));
-                player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.utility"), ".clear .ff .god .xray .expire .coloredsmokes .traj .impacts .break .cam .timer"));
-                player.PrintToChat(L("matchzy.help.line", L("matchzy.help.label.teams"), ".ct .t .spec"));
+                PrintHelpLine(player!, "matchzy.help.line", L("matchzy.help.label.spawns"), ".spawn .ctspawn .tspawn .bestspawn .worstspawn .spawns");
+                PrintHelpLine(player!, "matchzy.help.line", L("matchzy.help.label.bots"), ".bot .cbot .boost .runboost .nobot .dismiss .dismissall .kevlar .armor .botgun .botshoot .botrespawn .startround");
+                PrintHelpLine(player!, "matchzy.help.line", L("matchzy.help.label.replay"), ".rec .stoprecord .replay .saverec .loadrec .stratrec .strat .strats .createstrat .stratslot");
+                PrintHelpLine(player!, "matchzy.help.line", L("matchzy.help.label.positions"), ".sbp .lbp .botspawn .placebot .showbotspawn .botjiggle");
+                PrintHelpLine(player!, "matchzy.help.line", L("matchzy.help.label.nades"), ".savenade .loadnade .listnades .rethrow .throwindex");
+                PrintHelpLine(player!, "matchzy.help.line", L("matchzy.help.label.utility"), ".clear .ff .god .xray .expire .coloredsmokes .traj .impacts .break .cam .timer");
+                PrintHelpLine(player!, "matchzy.help.line", L("matchzy.help.label.teams"), ".ct .t .spec");
                 if (isAdmin)
                 {
-                    player.PrintToChat(L("matchzy.help.adminline", L("matchzy.help.label.admin"), ".exitprac .match .scrim .dryrun .fas .grt .rs"));
+                    PrintHelpLine(player!, "matchzy.help.adminline", L("matchzy.help.label.admin"), ".exitprac .match .scrim .dryrun .fas .grt .rs");
                 }
                 player.PrintToChat($" {L(isAdmin ? "matchzy.help.fulllist.admin" : "matchzy.help.fulllist")}");
 
@@ -3840,10 +4067,10 @@ namespace MatchZy
             if (isDryRun)
             {
                 player!.PrintToChat($"{chatPrefix} {H("matchzy.help.dryrun.title")}");
-                player.PrintToChat(H("matchzy.help.line", H("matchzy.help.label.exit"), ".exitdry .stopdry .enddry"));
+                PrintHelpLine(player!, "matchzy.help.line", H("matchzy.help.label.exit"), ".exitdry .stopdry .enddry");
                 if (isAdmin)
                 {
-                    player.PrintToChat(H("matchzy.help.adminline", H("matchzy.help.label.admin"), ".match .prac"));
+                    PrintHelpLine(player!, "matchzy.help.adminline", H("matchzy.help.label.admin"), ".match .prac");
                 }
                 return;
             }
@@ -3852,7 +4079,7 @@ namespace MatchZy
             if (isVeto)
             {
                 player!.PrintToChat($"{chatPrefix} {H("matchzy.help.veto.title")}");
-                player.PrintToChat(H("matchzy.help.line", H("matchzy.help.label.banpick"), ".ban <map> .pick <map>"));
+                PrintHelpLine(player!, "matchzy.help.line", H("matchzy.help.label.banpick"), ".ban <map> .pick <map>");
                 player.PrintToChat($" {H("matchzy.help.veto.captains")}");
                 return;
             }
@@ -3866,7 +4093,7 @@ namespace MatchZy
                 player.PrintToChat(H("matchzy.help.mode", ".prac", H("matchzy.help.mode.prac")));
                 player.PrintToChat(H("matchzy.help.mode", ".dry", H("matchzy.help.mode.dry")));
                 if (isAdmin)
-                    player.PrintToChat(H("matchzy.help.adminline", H("matchzy.help.label.admin"), ".start .knife .endmatch"));
+                    PrintHelpLine(player!, "matchzy.help.adminline", H("matchzy.help.label.admin"), ".start .knife .endmatch");
                 return;
             }
 
@@ -3886,10 +4113,10 @@ namespace MatchZy
 
                 player!.PrintToChat($"{chatPrefix} {H(isScrim ? "matchzy.help.title.scrim" : "matchzy.help.title.match")}");
                 player.PrintToChat(H("matchzy.help.status", knife, demorec, playout));
-                player.PrintToChat(H("matchzy.help.line", H("matchzy.help.label.ready"), ".ready .unready .coach <side>"));
+                PrintHelpLine(player!, "matchzy.help.line", H("matchzy.help.label.ready"), ".ready .unready .coach <side>");
                 // No timeout numbers here: the live cfg has not run yet, so mp_team_timeout_* still
                 // holds the warmup values. The real numbers are printed when the match goes live.
-                player.PrintToChat(H("matchzy.help.line", H("matchzy.help.label.pauselive"), ".tac .tech"));
+                PrintHelpLine(player!, "matchzy.help.line", H("matchzy.help.label.pauselive"), ".tac .tech");
                 if (isAdmin)
                 {
                     // .scrim and .playout are the same command (switch to scrim mode); name both so
@@ -3897,7 +4124,7 @@ namespace MatchZy
                     string adminCmds = isScrim
                         ? ".start .match .endmatch"
                         : ".start .knife .scrim / .playout .endmatch";
-                    player.PrintToChat(H("matchzy.help.adminline", H("matchzy.help.label.admin"), adminCmds));
+                    PrintHelpLine(player!, "matchzy.help.adminline", H("matchzy.help.label.admin"), adminCmds);
                 }
                 return;
             }
@@ -3919,7 +4146,7 @@ namespace MatchZy
                 player.PrintToChat(H("matchzy.help.paused.unpause"));
                 if (isAdmin)
                 {
-                    player.PrintToChat(H("matchzy.help.adminline", H("matchzy.help.label.admin"), H("matchzy.help.paused.admin")));
+                    PrintHelpLine(player!, "matchzy.help.adminline", H("matchzy.help.label.admin"), H("matchzy.help.paused.admin"));
                 }
                 return;
             }
@@ -3937,14 +4164,14 @@ namespace MatchZy
                     int tacLeft = player.Team == CsTeam.Terrorist ? helpRules.TerroristTimeOuts : helpRules.CTTimeOuts;
                     tac = H("matchzy.help.tacleft", tacLeft);
                 }
-                player!.PrintToChat(H("matchzy.help.line", H("matchzy.help.label.pause"), $".pause {tac} .tech"));
+                PrintHelpLine(player!, "matchzy.help.line", H("matchzy.help.label.pause"), $".pause {tac} .tech");
                 if (isStopCommandAvailable)
                 {
-                    player.PrintToChat(H("matchzy.help.line", H("matchzy.help.label.round"), H("matchzy.help.live.round")));
+                    PrintHelpLine(player!, "matchzy.help.line", H("matchzy.help.label.round"), H("matchzy.help.live.round"));
                 }
                 if (isAdmin)
                 {
-                    player.PrintToChat(H("matchzy.help.adminline", H("matchzy.help.label.admin"), H("matchzy.help.live.admin")));
+                    PrintHelpLine(player!, "matchzy.help.adminline", H("matchzy.help.label.admin"), H("matchzy.help.live.admin"));
                 }
                 return;
             }
@@ -4663,7 +4890,8 @@ namespace MatchZy
 
                     // Fields the engine's MatchStats does not track come from the advanced stats
                     // (humans only; bots report 0 for these).
-                    advancedStats.TryGetValue(player.SteamID, out var adv);
+                    // Advanced stats are keyed by steamid64 (BotStatsId for a bot, whose SteamID is 0).
+                    advancedStats.TryGetValue(steamid64, out var adv);
                     PlayerStats playerStatsInstance = new()
                     {
                         Kills = playerStats.Kills,
@@ -5264,7 +5492,7 @@ namespace MatchZy
                 return _selectItemOffset;
             try
             {
-                _selectItemOffset = GameData.GetOffset("CCSPlayer_WeaponServices_SelectItem");
+                _selectItemOffset = MzGameData.GetOffset("CCSPlayer_WeaponServices_SelectItem");
             }
             catch (Exception e)
             {
@@ -5445,7 +5673,7 @@ namespace MatchZy
                         return true;
                     }
 
-                    Log($"[UploadFileAsync ERROR] Failed to upload file. Status code: {s3Response.StatusCode} Response: {await s3Response.Content.ReadAsStringAsync()}");
+                    Log($"[UploadFileAsync ERROR] Failed to upload file. Status code: {s3Response.StatusCode} Response: {RedactUploadResponseBody(await s3Response.Content.ReadAsStringAsync())}");
                     return false;
                 }
 
@@ -5480,7 +5708,7 @@ namespace MatchZy
                     return true;
                 }
 
-                Log($"[UploadFileAsync ERROR] Failed to upload file. Status code: {response.StatusCode} Response: {await response.Content.ReadAsStringAsync()}");
+                Log($"[UploadFileAsync ERROR] Failed to upload file. Status code: {response.StatusCode} Response: {RedactUploadResponseBody(await response.Content.ReadAsStringAsync())}");
                 return false;
             }
             catch (Exception e)
@@ -5574,7 +5802,9 @@ namespace MatchZy
                     continue;
                 Log($"[KickPlayersWithNoMatch] Kicking {player.PlayerName} ({player.SteamID}): the series is over and no match is loaded.");
                 PrintLocalizedToAll("matchzy.cmd.kicknotinmatch", player.PlayerName);
-                Server.NextFrame(() => Server.ExecuteCommand($"kickid {userId}"));
+                PublishPlayerKicked(player, "series_over");
+                string kickText = SanitizeKickMessage(Localizer.ForPlayer(player, "matchzy.kick.seriesover"));
+                Server.NextFrame(() => Server.ExecuteCommand($"kickid {userId} \"{kickText}\""));
             }
         }
 
@@ -5582,16 +5812,64 @@ namespace MatchZy
         // player_connect, so their disconnect is not sent either. Removed on disconnect.
         private readonly HashSet<int> gateKickedUserIds = new();
 
-        public void KickPlayerDeferred(CCSPlayerController player)
+        public void KickPlayerDeferred(CCSPlayerController player, string reasonCode = "", string message = "")
         {
             if (player.UserId.HasValue)
                 gateKickedUserIds.Add(player.UserId.Value);
+            if (reasonCode != "")
+                PublishPlayerKicked(player, reasonCode);
+            string kickText = SanitizeKickMessage(message);
             Server.NextFrame(() =>
             {
                 if (!IsPlayerValid(player) || !player.UserId.HasValue)
                     return;
-                Server.ExecuteCommand($"kickid {player.UserId.Value}");
+                // The text after the userid is what the player sees in the disconnect dialog.
+                Server.ExecuteCommand(kickText == ""
+                    ? $"kickid {player.UserId.Value}"
+                    : $"kickid {player.UserId.Value} \"{kickText}\"");
             });
+        }
+
+        // Kick text goes into a console command line: no quotes, no command separators.
+        private static string SanitizeKickMessage(string message)
+        {
+            var sb = new System.Text.StringBuilder(message.Length);
+            foreach (char c in message)
+            {
+                if (c == '"' || c == ';' || c == '\n' || c == '\r' || char.IsControl(c))
+                    continue;
+                sb.Append(c);
+            }
+            string text = sb.ToString().Trim();
+            return text.Length > 200 ? text[..200] : text;
+        }
+
+        // Log line + player_kicked event, so a kick at the connect gate can be explained afterwards
+        // (from the server log or the panel) instead of the player just being gone.
+        private void PublishPlayerKicked(CCSPlayerController player, string reasonCode)
+        {
+            try
+            {
+                int t1 = matchzyTeam1.teamPlayers is JToken r1 ? r1.Count() : 0;
+                int t2 = matchzyTeam2.teamPlayers is JToken r2 ? r2.Count() : 0;
+                Log($"[ConnectGate] Kicked {player.PlayerName} ({player.SteamID}): {reasonCode}. "
+                    + $"matchLoaded={isMatchSetup}, matchid={liveMatchId}, kick_when_no_match_loaded={matchModeOnly}, whitelist={isWhitelistRequired}, "
+                    + $"team1 '{matchzyTeam1.teamName}' roster={t1}, team2 '{matchzyTeam2.teamName}' roster={t2}, map={Server.MapName}.");
+                PublishLifecycleEvent(new PlayerKickedEvent
+                {
+                    MatchId = LifecycleMatchId(),
+                    MapName = Server.MapName,
+                    PluginVersion = ModuleVersion,
+                    PlayerSteamId = player.SteamID.ToString(),
+                    PlayerName = player.PlayerName,
+                    Reason = reasonCode,
+                    MatchLoaded = isMatchSetup,
+                });
+            }
+            catch (Exception e)
+            {
+                Log($"[ConnectGate] {e.Message}");
+            }
         }
 
         /// <summary>
@@ -5666,6 +5944,10 @@ namespace MatchZy
 
         public void SwitchPlayerTeam(CCSPlayerController player, CsTeam team)
         {
+            // A spectator coach (matchzy_coaching_mode 3) is on Spectator on purpose; the roster
+            // correction would otherwise drag them straight back to their roster side.
+            if (IsSpectatorCoach(player))
+                return;
             // None is what GetPlayerTeam returns for a player who is not part of the match.
             // SwitchTeam(None) followed by the warmup Respawn below on an unassigned player is
             // the respawn-a-non-T/CT crash class - never move anyone to None.

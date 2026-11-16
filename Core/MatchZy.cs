@@ -16,7 +16,7 @@ namespace MatchZy
     public partial class MatchZy : BasePlugin
     {
         public override string ModuleName => "MatchZy";
-        public override string ModuleVersion => "1.0.24";
+        public override string ModuleVersion => "1.0.26";
 
         // Shown next to the version in the load line and the version command, so a log or a
         // support question tells this fork (1.0.x) apart from the original MatchZy (0.x).
@@ -303,13 +303,16 @@ namespace MatchZy
 
         public override void Load(bool hotReload)
         {
+            // Before anything resolves a signature: lets a new gamedata key work after a plugin
+            // reload, without a server restart (see MzGameData).
+            MzGameData.Init(ModuleDirectory);
             // Run DB init on a background thread instead of blocking Load with
             // .GetAwaiter().GetResult(). Blocking here races with other plugins'
             // SQLite native init on worker threads (observed crash: concurrent
             // open from CS2_SimpleAdmin + MatchZy main-thread open during Load
-            // segfaulted in EnsureConnectionOpen). The Database type now serializes
-            // its own connection access, so DB-dependent calls elsewhere are safe
-            // to fire before this completes - they will block on the lock.
+            // segfaulted in EnsureConnectionOpen). Every Database method opens its own
+            // connection and first awaits this init (capped at 60 s), so DB calls made
+            // before it completes wait for it instead of failing.
             string moduleDir = ModuleDirectory;
             string gameDir = Server.GameDirectory;
             _ = Task.Run(async () =>
@@ -415,6 +418,8 @@ namespace MatchZy
                 autoStartModeCvar.ValueChanged += OnAutoStartModeCvarChanged;
                 // Ready panel, hints and clan tags follow matchzy_ready_enabled at once, not on the next ready toggle.
                 readyEnabled.ValueChanged += (_, _) => _readyStatusDirty = true;
+                // Turned on mid-map (config.cfg exec at load, or rcon): stop an idle recording now.
+                demoLiveOnly.ValueChanged += (_, _) => Server.NextFrame(() => EnforceDemoLiveOnly("enabled"));
 
                 _loadedMidMap = !hotReload && AreServerGlobalsReady();
                 if (!hotReload)
@@ -470,6 +475,10 @@ namespace MatchZy
             // Warm the optional CS2MenuManager assembly on a background thread so the first .ma/.nades
             // open doesn't JIT the whole menu dependency graph on the game thread (1.7s frame stall).
             WarmupMenuAssembly();
+            // matchzy_backup_keep_days: once config.cfg has been applied.
+            AddTimer(30.0f, () => { try { CleanupOldRoundBackups(); } catch (Exception e) { Log($"[BackupCleanup] {e.Message}"); } });
+            // matchzy_demo_keep_days: same moment.
+            AddTimer(30.0f, () => { try { CleanupOldDemos(); } catch (Exception e) { Log($"[DemoCleanup] {e.Message}"); } });
 
             SetupRestartConfirmationCleanup();
 
@@ -480,6 +489,8 @@ namespace MatchZy
                 { ".gaben", OnPlayerReady },
                 { ".rdy", OnPlayerReady },
                 { ".forceready", OnForceReadyCommandCommand },
+                { ".admin", (p, _) => HandleAdminCall(p, "", report: false) },
+                { ".calladmin", (p, _) => HandleAdminCall(p, "", report: false) },
                 { ".unready", OnPlayerUnReady },
                 { ".notready", OnPlayerUnReady },
                 { ".ur", OnPlayerUnReady },
@@ -506,6 +517,8 @@ namespace MatchZy
                 { ".forcestart", OnStartCommand },
                 { ".friendlyfire", OnFriendlyFireCommand },
                 { ".ffire", OnFriendlyFireCommand },
+                { ".allchat", OnAllChatCommand },
+                { ".nochat", OnNoChatCommand },
                 { ".breakrestore", OnBreakRestoreCommand },
                 { ".nobreak", OnBreakRestoreCommand },
                 { ".repair", OnBreakRestoreCommand },
@@ -533,6 +546,7 @@ namespace MatchZy
                 { ".prac", OnPracCommand },
                 { ".showspawns", OnShowSpawnsCommand },
                 { ".hidespawns", OnHideSpawnsCommand },
+                { ".spawns", OnToggleSpawnsCommand },
                 { ".tactics", OnPracCommand },
                 { ".training", OnPracCommand },
                 { ".dryrun", OnDryRunCommand },
@@ -555,6 +569,7 @@ namespace MatchZy
                 { ".previewnade", OnTrajCommand },
                 { ".nadepreview", OnTrajCommand },
                 { ".nadecam", OnTrajCommand },
+                { ".follownade", OnFollowNadeCommand },
                 { ".cam", OnTrajCommand },
                 { ".warmup", OnWarmupCommand },
                 { ".crouchbot", OnCrouchBotCommand },
@@ -597,6 +612,7 @@ namespace MatchZy
                 // (CSS only auto-routes ! and /), so .backup/.backups looked broken in game.
                 { ".backup", OnBackupMenuCommand },
                 { ".backups", OnBackupMenuCommand },
+                { ".recover", OnRecoverCommand },
                 { ".backupmenu", OnBackupMenuCommand },
                 { ".restorelast", OnRestoreLastCommand },
                 { ".rl", OnRestoreLastCommand },
@@ -690,6 +706,7 @@ namespace MatchZy
             RegisterEventHandler<EventCsWinPanelMatch>(EventCsWinPanelMatchHandler);
             RegisterEventHandler<EventRoundStart>(EventRoundStartHandler);
             RegisterEventHandler<EventRoundFreezeEnd>(EventRoundFreezeEndHandler);
+            InitRoundWatchdog();
             RegisterEventHandler<EventPlayerSpawn>(OnCoachPlayerSpawn, HookMode.Post);
             RegisterEventHandler<EventPlayerDeath>(OnCoachDeathPost, HookMode.Post);
             RegisterEventHandler<EventRoundMvp>((@event, info) => OnCoachRoundStatsPost(), HookMode.Post);
@@ -700,6 +717,7 @@ namespace MatchZy
                 return HookResult.Continue;
             }, HookMode.Post);
             RegisterEventHandler<EventPlayerGivenC4>(EventPlayerGivenC4);
+            RegisterEventHandler<EventBotTakeover>(OnCoachBotTakeover);
             RegisterEventHandler<EventBombPickup>(OnCoachBombPickup);
             RegisterEventHandler<EventBombDropped>(OnCoachBombDropped);
             RegisterEventHandler<EventPlayerDeath>(OnCoachDeathBombCheck, HookMode.Post);
@@ -712,6 +730,7 @@ namespace MatchZy
             // Before the lifecycle hooks: a redirected workshop changelevel is announced once,
             // by the workshop command it turns into.
             RegisterWorkshopHooks(hotReload);
+            RegisterCstvKickGuard();
             RegisterServerLifecycleHooks();
             RegisterListener<Listeners.OnClientDisconnectPost>(playerSlot =>
             {
@@ -731,6 +750,15 @@ namespace MatchZy
             // string has no server xref), so no print hook can suppress it. The hook only spammed
             // the DynoHook "could not allocate trampoline" error for zero benefit.
             RegisterListener<Listeners.OnTick>(RenderReadyPanel);
+            RegisterListener<Listeners.OnTick>(TechPauseHudAntiFlashTick);
+            RegisterSpectatorCoachListeners();
+            RegisterCoachCommPatch();
+            RegisterListener<Listeners.OnTick>(ForbidCoachBotControlTick);
+            // Again after the entities thought: the engine sets the flag during the observer's think,
+            // after OnTick, so a write there alone was overwritten before the snapshot and the
+            // coach could still take over a bot.
+            RegisterListener<Listeners.OnServerPostEntityThink>(ForbidCoachBotControlTick);
+            RegisterPauseNoticeFilter();
 
             // Hot load/reload while a ready phase is already up: run the panel render immediately on
             // the next frame instead of waiting for the natural OnTick, so the native "Warmup" HUD is
@@ -819,6 +847,30 @@ namespace MatchZy
                     return HookResult.Continue;
                 },
                 HookMode.Pre
+            );
+
+            // A team can type .ready while a player is still missing; the side only counts as ready
+            // once that player is on it. The start check used to run on .ready / ping / .forceready
+            // only, so the match sat in warmup after the last player joined until someone typed
+            // .ready again. Re-check after a player joins T or CT (same delay as after .ready).
+            RegisterEventHandler<EventPlayerTeam>(
+                (@event, info) =>
+                {
+                    try
+                    {
+                        if (!readyAvailable || matchStarted || IsJoinReadyMode())
+                            return HookResult.Continue;
+                        if (@event.Team != (int)CsTeam.CounterTerrorist && @event.Team != (int)CsTeam.Terrorist)
+                            return HookResult.Continue;
+                        AddTimer(Math.Max(1, afterReadyDelay), () => CheckLiveRequired(), TimerFlags.STOP_ON_MAPCHANGE);
+                    }
+                    catch (Exception e)
+                    {
+                        Log($"[EventPlayerTeam ReadyCheck FATAL] {e}");
+                    }
+                    return HookResult.Continue;
+                },
+                HookMode.Post
             );
 
             // A veto captain who changes team can no longer ban or pick for their team (the
@@ -1011,6 +1063,8 @@ namespace MatchZy
             );
 
             AddCommandListener("noclip", OnConsoleNoClip); // Override noclip
+            // Valve's raw round restore goes through MatchZy's restore (matchzy_raw_backup_restore).
+            AddCommandListener("mp_backup_restore_load_file", OnRawBackupRestoreCommand, HookMode.Pre);
 
             RegisterEventHandler<EventRoundEnd>(
                 (@event, info) =>
@@ -1035,6 +1089,8 @@ namespace MatchZy
                     CarryPendingPauseToLive();
                     isSideSelectionPhase = true;
                     isKnifeRound = false;
+                    try { PublishKnifeRoundEnded(knifeWinner); }
+                    catch (Exception e) { Log($"[PhaseEvents] knife_round_ended: {e.Message}"); }
                     StartAfterKnifeWarmup();
 
                     return HookResult.Changed;
@@ -1084,6 +1140,13 @@ namespace MatchZy
                 ForgetPracticeEntitiesOnMapStart();
                 // Set by FinishVeto when it queued a changelevel; the new map is here.
                 mapChangePending = false;
+                mapEnding = false;
+                // .mute (all chat off) lasts one map.
+                ResetAllChatVote();
+                // Server.CurrentTime restarts near 0 on a new map: a settle window from the old map
+                // would hold back the coach weapon strip for minutes.
+                coachStripSettleUntil = 0;
+                RestoreBotControllable();
 
                 // Re-arm AutoStart latch: allow exactly one AutoStart for this new map.
                 autoStartLatched = false;
@@ -1098,6 +1161,7 @@ namespace MatchZy
                 // without this isDemoRecording stayed true and every later match silently refused to
                 // start a demo on the "already recording" guard.
                 ResetDemoStateOnMapStart();
+                ScheduleDemoLiveOnlyCheck();
 
                 // Coach-spawn markers: the beams/labels are destroyed by the map change but the toggle
                 // stayed "on" (stale entity handles). Refresh so .showcoachspawns keeps working across
@@ -1766,6 +1830,19 @@ namespace MatchZy
                     if ((cmdWord == ".ffire" || cmdWord == ".friendlyfire") && messageCommandArg != "")
                     {
                         HandleFriendlyFireCommand(player, messageCommandArg);
+                        return HookResult.Continue;
+                    }
+
+                    if (cmdWord == ".allchat" && messageCommandArg != "")
+                    {
+                        HandleAllChatCommand(player, messageCommandArg);
+                        return HookResult.Continue;
+                    }
+
+                    // .report is handled (and hidden) by the say listener, before the line reaches chat.
+                    if ((cmdWord == ".admin" || cmdWord == ".calladmin") && messageCommandArg != "")
+                    {
+                        HandleAdminCall(player, messageCommandArg, report: false);
                         return HookResult.Continue;
                     }
 

@@ -100,6 +100,10 @@ namespace MatchZy
             if (activeSlotRecording != null)
                 UnfreezeStratPlayer(Utilities.GetPlayerFromSteamId(activeSlotRecording.SteamId));
             activeSlotRecording = null;
+            // A ".strat <name> me <n>" owner frozen by StartStratCountdown: the bumped generation
+            // stops the countdown timer that would unfreeze them, so undo the freeze here.
+            if (stratPlaybackPending)
+                UnfreezeStratPlayer(Utilities.GetPlayerFromSteamId(stratPlaybackOwner));
             lastStrats.Clear();
             stratPlaybackBots.Clear();
             stratPlaybackPending = false;
@@ -145,6 +149,7 @@ namespace MatchZy
                 .Where(p => IsHumanPlayerValid(p) && p.PawnIsAlive && p.Team == player.Team && !activePathRecordings.ContainsKey(p.SteamID))
                 .OrderBy(p => p.PlayerName, StringComparer.OrdinalIgnoreCase))
             {
+                StopNadeFollowForRecording(p);
                 strat.Roles.Add(new StratRole
                 {
                     Name = p.PlayerName,
@@ -480,6 +485,8 @@ namespace MatchZy
             }
 
             var botRoles = strat.Roles.Where(r => r.Slot != meRole).ToList();
+            if (meRole != -1)
+                StopNadeFollowForRecording(player);
             StopStratPlayback();
             stratPlaybackOwner = player.SteamID;
             stratPlaybackPending = true;
@@ -495,8 +502,13 @@ namespace MatchZy
         // two at once). When all are there, the countdown starts.
         private void SpawnStratBots(CCSPlayerController owner, StratRecording strat, List<StratRole> botRoles, int index, List<(int Uid, StratRole Role)> claimed, int generation, Action<List<(int Uid, StratRole Role)>> allSpawned)
         {
-            if (generation != stratGeneration || !isPractice || !IsHumanPlayerValid(owner))
+            if (generation != stratGeneration)
                 return;
+            if (!isPractice || !IsHumanPlayerValid(owner))
+            {
+                AbortStratSpawn();
+                return;
+            }
             if (index >= botRoles.Count)
             {
                 allSpawned(claimed);
@@ -535,8 +547,13 @@ namespace MatchZy
         {
             AddTimer(0.15f, () =>
             {
-                if (generation != stratGeneration || !isPractice || !IsHumanPlayerValid(owner))
+                if (generation != stratGeneration)
                     return;
+                if (!isPractice || !IsHumanPlayerValid(owner))
+                {
+                    AbortStratSpawn();
+                    return;
+                }
                 int? found = null;
                 lock (_botsDictLock)
                 {
@@ -607,6 +624,16 @@ namespace MatchZy
                 if (IsHumanPlayerValid(owner))
                     PrintToPlayerChat(owner, Localizer.ForPlayer(owner, onGo != null ? "matchzy.st.recording" : "matchzy.st.go"));
             }, TimerFlags.STOP_ON_MAPCHANGE);
+        }
+
+        // The owner left (or practice ended) while the strat bots were still being spawned, with
+        // this playback still current. Returning silently left stratPlaybackPending (and a .stratslot
+        // take that never started recording) set, which blocked every later .strat/.stratslot.
+        private void AbortStratSpawn()
+        {
+            if (activeSlotRecording != null && !activeSlotRecording.Recording)
+                activeSlotRecording = null;
+            StopStratPlayback();
         }
 
         private void StopStratPlayback()
@@ -747,6 +774,7 @@ namespace MatchZy
             var strat = new StratRecording { MapName = Server.MapName, Team = team };
             strat.Roles.AddRange(others);
 
+            StopNadeFollowForRecording(player);
             StopStratPlayback();
             stratPlaybackOwner = steamId;
             stratPlaybackPending = true;
@@ -850,7 +878,6 @@ namespace MatchZy
         private Dictionary<string, SavedStrat>? _savedStrats;
         private string _savedStratsMap = "";
         private bool _savedStratsLoadFailed;
-        private readonly object _savedStratsWriteLock = new();
 
         private string SavedStratsFile(string map)
         {
@@ -871,7 +898,19 @@ namespace MatchZy
                 var loaded = File.Exists(file)
                     ? JsonSerializer.Deserialize<Dictionary<string, SavedStrat>>(File.ReadAllText(file), SavedPathJsonOpts)
                     : null;
-                _savedStrats = new Dictionary<string, SavedStrat>(loaded ?? new(), StringComparer.OrdinalIgnoreCase);
+                _savedStrats = new Dictionary<string, SavedStrat>(StringComparer.OrdinalIgnoreCase);
+                foreach (var (name, strat) in loaded ?? new())
+                {
+                    // Valid JSON can still hold nulls (a null strat, "Roles": null, a null role or
+                    // "Path": null); the commands dereference them all, so drop or empty them here.
+                    if (strat == null)
+                        continue;
+                    strat.Roles ??= new();
+                    strat.Roles.RemoveAll(r => r == null || !SanitizeSavedPath(r.Path));
+                    foreach (var role in strat.Roles)
+                        role.Name ??= "";
+                    _savedStrats[name] = strat;
+                }
             }
             catch (Exception e)
             {
@@ -883,30 +922,23 @@ namespace MatchZy
             return _savedStrats;
         }
 
-        // Serialized and written off the game thread; the path is resolved here, never in the task.
+        // The Roles lists are mutated on the game thread (e.g. .stratslot), so the game thread takes a
+        // deep copy and the serializing plus the disk write run off it on that copy, ordered per file
+        // (WritePracticeJsonOrdered). The path is resolved here, never in the task.
         private bool WriteSavedStrats(Dictionary<string, SavedStrat> strats)
         {
             if (_savedStratsLoadFailed)
                 return false;
             string file = SavedStratsFile(_savedStratsMap);
-            var snapshot = new Dictionary<string, SavedStrat>(strats);
-            Task.Run(() =>
+            var snapshot = new Dictionary<string, SavedStrat>(strats.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var (name, strat) in strats)
             {
-                try
-                {
-                    lock (_savedStratsWriteLock)
-                    {
-                        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-                        string tmp = file + ".tmp";
-                        File.WriteAllText(tmp, JsonSerializer.Serialize(snapshot, SavedPathJsonOpts));
-                        File.Move(tmp, file, overwrite: true);
-                    }
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine($"[MatchZy] [StratRec] save {file}: {e.Message}");
-                }
-            });
+                var copy = new SavedStrat { Team = strat.Team, Roles = new List<SavedStratRole>(strat.Roles.Count) };
+                foreach (var role in strat.Roles)
+                    copy.Roles.Add(new SavedStratRole { Slot = role.Slot, Name = role.Name, Path = CloneSavedPath(role.Path) });
+                snapshot[name] = copy;
+            }
+            WritePracticeJsonOrdered(file, () => JsonSerializer.Serialize(snapshot, SavedPathJsonOpts), "StratRec");
             return true;
         }
 
